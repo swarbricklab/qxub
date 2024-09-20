@@ -1,0 +1,11 @@
+#! /bin/bash
+#PBS -N qconda
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -j oe
+
+eval "$(conda shell.bash hook)"
+conda activate $env
+cd $cwd
+eval $cmd 
