@@ -1,6 +1,12 @@
+"""
+Provides tools for running qsub jobs on PBS Pro in particular environments. 
+This reduces boilerplate code for activating environments and switching directories.
+In simple cases, the need to create a jobscript can be eliminated entirely.
+"""
+
+import os
 import click
 import pkg_resources
-import os
 
 @click.command()
 @click.argument("cmd", nargs=-1)
@@ -19,7 +25,7 @@ def conda_submit(cmd, env, resources, queue, name, project, verbose):
         click.echo(f"Name: {name}")
         click.echo(f"Project: {project}")
         click.echo(f'Command: {cmd}')
-    
+
     # Get jobscript path
     jobscript = pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs')
     # Get current work directory
@@ -28,16 +34,12 @@ def conda_submit(cmd, env, resources, queue, name, project, verbose):
     # Construct the submission command
     full_options=f"-N {name} " + f"-q {queue} " + f"-P {project} "
     for resource in resources:
-        full_options+=f"-l {resource}" 
+        full_options+=f"-l {resource}"
     if verbose:
         click.echo(f"Options: {full_options}")
     full_cmd=" ".join(cmd)
-    submission_command = f'qsub -v env={env},cmd="{full_cmd}",cwd={cwd} {jobscript} {full_options}'
-    
+    submission_command = f'qsub -v env={env},cmd="{full_cmd}",cwd={cwd} {full_options} {jobscript}'
+
     # Execute the command
     click.echo(f'Submitting: {submission_command}')
-    #os.system(submission_command)
-
-if __name__ == '__main__':
-    conda_submit()
-
+    os.system(submission_command)
