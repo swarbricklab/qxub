@@ -12,11 +12,7 @@ jobs:
         uses: conda-incubator/setup-miniconda@v2
         with:
           python-version: 3.9
-          environment-file: environment.yaml  
+          environment-file: environment.dev,yaml  
           activate-environment: qt
-
-      - name: Install pylint
-        run: conda install pylint
-
       - name: Run pylint
         run: pylint $(git ls-files '*.py')

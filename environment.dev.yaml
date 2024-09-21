@@ -1,0 +1,9 @@
+name: qt
+
+channels:
+    - conda-forge
+
+dependencies:
+    - python=3.10
+    - click
+    - pylint
