@@ -1,4 +1,4 @@
-name: qt
+name: test
 
 channels:
     - conda-forge
