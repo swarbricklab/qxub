@@ -53,24 +53,20 @@ def qt(ctx, verbose, **params):
 
 @qt.command()
 @click.argument("cmd", nargs=-1)
-@click.option("--env", required=True, help="Conda environment to use")
-@click.option("--execdir", default=os.getcwd(), help="Execution directory")
+@click.option("--env",
+              required=True, 
+              help="Conda environment to use")
+@click.option("--execdir", 
+              default=os.getcwd(), 
+              help="Execution directory (default: current directory)")
 @click.option("--template",
               default=pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs'),
-              help="Jobscript template")
+              help="Jobscript template (optional - for further customization)")
 @click.pass_context
 def conda(ctx, cmd, env, execdir,template):
     """
-    Runs a specified command inside a given conda environment using a PBS job submission template.
-
-    Args:
-        cmd (tuple): The command to be executed, passed as arguments.
-        env (str): The name of the conda environment to activate.
-        execdir (str): The directory in which to execute the command 
-        template (str): Path to the job script template
-
     Constructs and submits a qsub job that will execute the given command
-    in the specified conda environment (and work directory)
+    in the specified conda environment and work directory
     """
     options = ctx.obj['options']
     # Log parameters and context
