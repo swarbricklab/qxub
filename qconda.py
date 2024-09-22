@@ -32,6 +32,9 @@ def setup_logging(verbosity):
         logging.basicConfig(level=logging.ERROR)
 
 @click.group()
+@click.option("--execdir",
+              default=os.getcwd(),
+              help="Execution directory (default: current directory)")
 @click.option("-l", "--resources", multiple=True, help="Job resource")
 @click.option("-q", "--queue", default="normal", help="Job queue (default: normal)")
 @click.option("-N", "--name", default="qt", help="Job name (default: qt)")
@@ -41,7 +44,7 @@ def setup_logging(verbosity):
 @click.option("-v", "--verbose", count=True,
               help="Increase verbosity (use -v, -vv, -vvv for more detail)")
 @click.pass_context
-def qt(ctx, verbose, **params):
+def qt(ctx, execdir, verbose, **params):
     """
     Parent command 'qt' with options common to all subcommands.
     PBS Pro options (-l,-q,-N,-q) are passed on as parameters to 'qsub'
@@ -52,6 +55,7 @@ def qt(ctx, verbose, **params):
     For example: qt conda --help
     """
     setup_logging(verbose)
+    logging.debug("Execution directory: %s", execdir)
     logging.debug("qsub options: %s", params)
     ctx.ensure_object(dict)
     # Construct the qsub options
@@ -59,6 +63,7 @@ def qt(ctx, verbose, **params):
     options += " ".join([f"-l {resource}" for resource in params['resources']])
     logging.info("Options: %s:, options")
     # Load qsub options into context
+    ctx.obj['execdir'] = execdir
     ctx.obj['options'] = options
 
 @qt.command()
@@ -66,14 +71,11 @@ def qt(ctx, verbose, **params):
 @click.option("--env",
               default=os.getenv('CONDA_DEFAULT_ENV'),
               help="Conda environment to use (default: active environment)")
-@click.option("--execdir",
-              default=os.getcwd(),
-              help="Execution directory (default: current directory)")
 @click.option("--template",
               default=pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs'),
               help="Jobscript template (optional - for further customization)")
 @click.pass_context
-def conda(ctx, cmd, env, execdir,template):
+def conda(ctx, cmd, env, template):
     """
     Constructs and submits a qsub job that will execute the given command
     in the specified conda environment and work directory
@@ -87,11 +89,12 @@ def conda(ctx, cmd, env, execdir,template):
     Note the "--" before the command. This is required if command itself also
     contains double-dashes, as in this case ("--version").
     """
+    # Get values from context
+    execdir = ctx.obj['execdir']
     options = ctx.obj['options']
     # Log parameters and context
     logging.debug("Context: %s", ctx)
     logging.debug("Conda environment: %s", env)
-    logging.debug("Execution directory: %s", execdir)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Command: %s", cmd)
     # Construct qsub command
