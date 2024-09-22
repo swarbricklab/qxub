@@ -5,9 +5,18 @@
 #PBS -S /bin/bash
 #PBS -j oe
 
-set -e
+# Logging
+echo "Execution directory: $cwd"
+echo "Conda environment: $env"
+echo "Command: $cmd"
 
+# Strict mode (exit on fail)
+set -ex
+
+# Activate conda environment
 eval "$(conda shell.bash hook)"
 conda activate $env
+# Switch work directory
 cd $cwd
+# Run command
 eval $cmd 
