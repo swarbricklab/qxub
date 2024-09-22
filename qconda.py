@@ -35,6 +35,8 @@ def setup_logging(verbosity):
 @click.option("--execdir",
               default=os.getcwd(),
               help="Execution directory (default: current directory)")
+@click.option("--out",default="qt.out", help="File to capture and stream STDOUT")
+@click.option("--err",default="qt.err", help="File to capture and stream STDERR")
 @click.option("-l", "--resources", multiple=True, help="Job resource")
 @click.option("-q", "--queue", default="normal", help="Job queue (default: normal)")
 @click.option("-N", "--name", default="qt", help="Job name (default: qt)")

@@ -3,6 +3,7 @@
 #PBS -P a56
 #PBS -l storage=gdata/a56
 #PBS -S /bin/bash
+#PBS -W umask=0027
 #PBS -j oe
 
 # Logging
