@@ -10,9 +10,11 @@
 echo "Execution directory: $cwd"
 echo "Conda environment: $env"
 echo "Command: $cmd"
+echo "STDOUT: $out"
+echo "STDERR: $err"
 
-# Strict mode (exit on fail)
-set -ex
+# Strict mode
+set -e
 
 # Activate conda environment
 eval "$(conda shell.bash hook)"
@@ -20,4 +22,4 @@ conda activate $env
 # Switch work directory
 cd $cwd
 # Run command
-eval $cmd 
+eval $cmd > $out 2> $err

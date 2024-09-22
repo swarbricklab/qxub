@@ -35,8 +35,9 @@ def setup_logging(verbosity):
 @click.option("--execdir",
               default=os.getcwd(),
               help="Execution directory (default: current directory)")
-@click.option("--out",default="qt.out", help="File to capture and stream STDOUT")
-@click.option("--err",default="qt.err", help="File to capture and stream STDERR")
+@click.option("--out",default="qt.out", help="STDOUT log file")
+@click.option("--err",default="qt.err", help="STDERR log file")
+@click.option("--joblog", help="PBS Pro job log")
 @click.option("-l", "--resources", multiple=True, help="Job resource")
 @click.option("-q", "--queue", default="normal", help="Job queue (default: normal)")
 @click.option("-N", "--name", default="qt", help="Job name (default: qt)")
@@ -58,15 +59,21 @@ def qt(ctx, execdir, verbose, **params):
     """
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
-    logging.debug("qsub options: %s", params)
+    for key, value in params.items():
+        logging.debug("qsub option: %s = %s", key, value)
     ctx.ensure_object(dict)
     # Construct the qsub options
+    joblog = params['joblog'] or f"{params['name']}.log"
     options = "-N {name} -q {queue} -P {project} ".format_map(params)
     options += " ".join([f"-l {resource}" for resource in params['resources']])
-    logging.info("Options: %s:, options")
+    options += f" -o {joblog}"
+    logging.info("Options: %s", options)
     # Load qsub options into context
     ctx.obj['execdir'] = execdir
     ctx.obj['options'] = options
+    ctx.obj['name'] = params['name']
+    ctx.obj['out'] = params['out']
+    ctx.obj['err'] = params['err']
 
 @qt.command()
 @click.argument("cmd", nargs=-1)
@@ -94,14 +101,18 @@ def conda(ctx, cmd, env, template):
     # Get values from context
     execdir = ctx.obj['execdir']
     options = ctx.obj['options']
+    out = ctx.obj['out']
+    err = ctx.obj['err']
     # Log parameters and context
-    logging.debug("Context: %s", ctx)
+    for key, value in ctx.obj.items():
+        logging.debug("Context: %s = %s", key, value)
     logging.debug("Conda environment: %s", env)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Command: %s", cmd)
     # Construct qsub command
     full_cmd = " ".join(cmd)
-    submission_command = f'qsub -v env={env},cmd="{full_cmd}",cwd={execdir} {options} {template}'
+    submission_command = f'qsub -v env={env},cmd="{full_cmd}",cwd={execdir},'
+    submission_command+= f'out={out},err={err} {options} {template}'
     # Execute the command
     logging.info("Submitting: %s", submission_command)
     os.system(submission_command)
