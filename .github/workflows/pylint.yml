@@ -16,6 +16,9 @@ jobs:
           environment-file: environment.dev.yaml  
           activate-environment: test
       - name: Conda info
-        run: conda info
+        run: |
+          conda info
+          conda list
+          pylint --version
 #      - name: Run pylint
 #        run: pylint $(git ls-files '*.py')
