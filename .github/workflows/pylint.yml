@@ -15,7 +15,10 @@ jobs:
           auto-update-conda: true
           environment-file: environment.dev.yaml  
           activate-environment: test
+      - name: Conda info
+        shell: bash -el {0}
         run: |
+          conda activate test
           conda info
           conda list
           pylint --version
