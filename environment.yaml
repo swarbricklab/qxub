@@ -6,3 +6,4 @@ channels:
 dependencies:
     - python=3.10
     - click
+    - tailer=0.4.1

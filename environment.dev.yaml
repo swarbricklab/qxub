@@ -7,3 +7,4 @@ dependencies:
     - python=3.9
     - click
     - pylint
+    - tailer=0.4.1
