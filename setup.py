@@ -1,25 +1,36 @@
 """
-This script configures the installation of the 'qconda' Python package using setuptools.
+This script configures the installation of the 'qxub' Python package using setuptools.
 Defines the package metadata, dependencies, and entry points for the command-line interface (CLI).
-The CLI command 'qt' is linked to the 'conda_submit' function, enabling submission of jobs with 
+The CLI command 'qxub' is linked to the 'cli.qxub' function, enabling submission of jobs with 
 various options such as resource requests, project names, and conda environments.
 
 Run 'pip install -e .' to install the package in editable mode for development purposes.
 """
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(
-    name="qconda",
-    version="0.1",
-    py_modules=["qconda"],
-    install_requires=["click"],
-    package_data={
-        '': ['jobscripts/qconda.pbs'],
-    },
+    name="qxub",
+    version="0.1.0",
+    author="John Reeves",
+    author_email="j.reeves@garvan.org.au",
+    description="Simplified job submission to HPC",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/swarbricklab/qsub_tools",
+    packages=find_packages(),
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    python_requires='>=3.6',
+    install_requires=[
+        'omegaconf',
+        'click',
+        'tailer'
+    ],
     entry_points={
-        'console_scripts': [
-            'qt = qconda:qt',  # Register 'qt' as the main command
-        ],
+        'console_scripts': ['qxub=qxub.cli:qxub'],
     },
 )
