@@ -9,13 +9,16 @@ Run 'pip install -e .' to install the package in editable mode for development p
 
 from setuptools import setup, find_packages
 
+with open("README.md", "r", encoding="utf-8") as f:
+    long_description = f.read()
+
 setup(
     name="qxub",
     version="0.1.0",
     author="John Reeves",
     author_email="j.reeves@garvan.org.au",
     description="Simplified job submission to HPC",
-    long_description=open("README.md").read(),
+    long_description = long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/swarbricklab/qsub_tools",
     packages=find_packages(),
