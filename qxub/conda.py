@@ -27,10 +27,10 @@ def conda(ctx, cmd, env, template):
     in the specified conda environment and work directory
 
     Example:
-        qt --resources mem=50MB conda --env myenv -- python --version
+        qxub --resources mem=50MB conda --env myenv -- python --version
 
     Here the command "python --version" will run in the "myenv" conda environment
-    with 50MB of RAM. See "qt --help" for other resource options.
+    with 50MB of RAM. See "qxub --help" for other resource options.
 
     Note the "--" before the command. This is required if command itself also
     contains double-dashes, as in this case ("--version").

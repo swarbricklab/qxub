@@ -42,9 +42,9 @@ def qxub(ctx, execdir, verbose, **params):
     PBS Pro options (-l,-q,-N,-q) are passed on as parameters to 'qsub'
     but can be specified in either short form (-l) or long form (--resources)
 
-    Run 'qt {subcommand} --help' for details on each subcommand.
+    Run 'qxub {subcommand} --help' for details on each subcommand.
 
-    For example: qt conda --help
+    For example: qxub conda --help
     """
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
