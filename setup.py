@@ -22,6 +22,7 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/swarbricklab/qsub_tools",
     packages=find_packages(),
+    include_package_data=True,
     package_data={
         'qxub': ['jobscripts/*.pbs'],
     },
