@@ -65,3 +65,7 @@ def qxub(ctx, execdir, verbose, **params):
     ctx.obj['err'] = params['err']
     ctx.obj['dry'] = params['dry']
     ctx.obj['quiet'] = params['quiet']
+
+
+# Import subcommands to register them with the CLI group
+from . import conda

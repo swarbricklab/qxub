@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 import pkg_resources
 from .cli import qxub
-from .scheduler import qsub,monitor_and_tail
+from .scheduler import qsub, monitor_and_tail, print_status
 
 def _get_default_template():
     """Get the default PBS template file path."""
@@ -80,7 +80,12 @@ def conda(ctx, cmd, env, template):
         logging.info("Dry run. Exiting")
         sys.exit(0)
     logging.info("Submitting job")
-    job_id=qsub(submission_command)
+    job_id=qsub(submission_command, quiet=quiet)
+    
+    # Show success message with job ID
+    if not quiet:
+        print_status(f"🚀 Job submitted successfully! Job ID: {job_id}", final=True)
+    
     logging.info("Your job has been successfully submitted")
     # Exit if in quiet mode
     if quiet:
@@ -93,4 +98,4 @@ def conda(ctx, cmd, env, template):
     Path(err).parent.mkdir(parents=True, exist_ok=True)
     out.touch()
     err.touch()
-    monitor_and_tail(job_id, out, err)
+    monitor_and_tail(job_id, out, err, quiet=quiet)

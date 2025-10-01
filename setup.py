@@ -35,7 +35,8 @@ setup(
     install_requires=[
         'omegaconf',
         'click',
-        'tailer'
+        'tailer',
+        'rich'
     ],
     entry_points={
         'console_scripts': ['qxub=qxub.cli:qxub'],
