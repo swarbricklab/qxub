@@ -19,15 +19,15 @@ def _get_default_template():
         template_path = pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs')
         if os.path.exists(template_path):
             return template_path
-    except:
+    except (ImportError, AttributeError, FileNotFoundError):
         pass
-    
+
     # Fallback to relative path from this module
     current_dir = Path(__file__).parent
     template_path = current_dir / 'jobscripts' / 'qconda.pbs'
     if template_path.exists():
         return str(template_path)
-    
+
     # Last resort - raise an informative error
     raise FileNotFoundError(
         f"Could not locate qconda.pbs template file. "
