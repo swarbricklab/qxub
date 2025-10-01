@@ -12,13 +12,35 @@ import pkg_resources
 from .cli import qxub
 from .scheduler import qsub,monitor_and_tail
 
+def _get_default_template():
+    """Get the default PBS template file path."""
+    # Try pkg_resources first
+    try:
+        template_path = pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs')
+        if os.path.exists(template_path):
+            return template_path
+    except:
+        pass
+    
+    # Fallback to relative path from this module
+    current_dir = Path(__file__).parent
+    template_path = current_dir / 'jobscripts' / 'qconda.pbs'
+    if template_path.exists():
+        return str(template_path)
+    
+    # Last resort - raise an informative error
+    raise FileNotFoundError(
+        f"Could not locate qconda.pbs template file. "
+        f"Looked in: {current_dir / 'jobscripts' / 'qconda.pbs'}"
+    )
+
 @qxub.command()
 @click.argument("cmd", nargs=-1)
 @click.option("--env",
               default=os.getenv('CONDA_DEFAULT_ENV'),
               help="Conda environment to use (default: active environment)")
 @click.option("--template",
-              default=pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs'),
+              default=_get_default_template(),
               help="Jobscript template (optional - for further customization)")
 @click.pass_context
 def conda(ctx, cmd, env, template):
