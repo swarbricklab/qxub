@@ -22,6 +22,9 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/swarbricklab/qsub_tools",
     packages=find_packages(),
+    package_data={
+        'qxub': ['jobscripts/*.pbs'],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
