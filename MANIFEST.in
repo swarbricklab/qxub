@@ -1,2 +1,2 @@
 include README.md
-recursive-include qxub/*
+recursive-include qxub/jobscripts *.pbs
