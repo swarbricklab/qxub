@@ -1,6 +1,6 @@
 """
-This package provides tools for running qsub jobs on PBS Pro in particular environments.
-This avoids boilerplate code for activating environments and switching directories, etc.
+This package provides tools for running qsub jobs on PBS Pro with environment modules.
+This avoids boilerplate code for loading modules and switching directories, etc.
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 # pylint: disable=duplicate-code
@@ -36,7 +36,7 @@ def _get_default_template():
     """Get the default PBS template file path."""
     # Try pkg_resources first
     try:
-        template_path = pkg_resources.resource_filename(__name__, 'jobscripts/qconda.pbs')
+        template_path = pkg_resources.resource_filename(__name__, 'jobscripts/qmod.pbs')
         if os.path.exists(template_path):
             return template_path
     except (ImportError, AttributeError, FileNotFoundError):
@@ -44,21 +44,21 @@ def _get_default_template():
 
     # Fallback to relative path from this module
     current_dir = Path(__file__).parent
-    template_path = current_dir / 'jobscripts' / 'qconda.pbs'
+    template_path = current_dir / 'jobscripts' / 'qmod.pbs'
     if template_path.exists():
         return str(template_path)
 
     # Last resort - raise an informative error
     raise FileNotFoundError(
-        f"Could not locate qconda.pbs template file. "
-        f"Looked in: {current_dir / 'jobscripts' / 'qconda.pbs'}"
+        f"Could not locate qmod.pbs template file. "
+        f"Looked in: {current_dir / 'jobscripts' / 'qmod.pbs'}"
     )
 
 @qxub.command()
 @click.argument("cmd", nargs=-1)
-@click.option("--env",
-              default=os.getenv('CONDA_DEFAULT_ENV'),
-              help="Conda environment to use (default: active environment)")
+@click.option("--mod",
+              multiple=True,
+              help="Environment module to load (can be used multiple times)")
 @click.option("--template",
               default=_get_default_template(),
               help="Jobscript template (optional - for further customization)")
@@ -67,20 +67,24 @@ def _get_default_template():
 @click.option("--post",
               help="Command to run after the main command (only if main command succeeds)")
 @click.pass_context
-def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """
     Constructs and submits a qsub job that will execute the given command
-    in the specified conda environment and work directory
+    with the specified environment modules loaded
 
     Example:
-        qxub --resources mem=50MB conda --env myenv -- python --version
+        qxub --resources mem=50MB module --mod bcftools --mod samtools -- bcftools --version
 
-    Here the command "python --version" will run in the "myenv" conda environment
-    with 50MB of RAM. See "qxub --help" for other resource options.
+    Here the command "bcftools --version" will run with the bcftools and samtools 
+    modules loaded with 50MB of RAM. See "qxub --help" for other resource options.
 
     Note the "--" before the command. This is required if command itself also
     contains double-dashes, as in this case ("--version").
     """
+    # Validate that at least one module is specified
+    if not mod:
+        raise click.ClickException("At least one module must be specified with --mod")
+
     # Get values from context
     ctx_obj = ctx.obj
     out = Path(ctx_obj['out'])
@@ -89,7 +93,7 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
     # Log parameters and context
     for key, value in ctx_obj.items():
         logging.debug("Context: %s = %s", key, value)
-    logging.debug("Conda environment: %s", env)
+    logging.debug("Modules: %s", mod)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Command: %s", cmd)
     logging.debug("Pre-command: %s", pre)
@@ -97,7 +101,9 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
 
     # Construct qsub command
     cmd_str = " ".join(cmd)
-    submission_vars = f'env={env},cmd="{cmd_str}",cwd={ctx_obj["execdir"]},out={out},err={err}'
+    modules_str = " ".join(mod)  # Space-separated for the template
+    submission_vars = (f'modules="{modules_str}",cmd="{cmd_str}",'
+                       f'cwd={ctx_obj["execdir"]},out={out},err={err}')
     if pre:
         submission_vars += f',pre_cmd="{pre}"'
     if post:

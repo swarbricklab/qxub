@@ -1,0 +1,68 @@
+#! /bin/bash
+#PBS -N qmod
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -W umask=0027
+#PBS -j oe
+
+# Logging
+echo "Execution directory: $cwd"
+echo "Modules to load: $modules"
+echo "Command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "Post-command: $post_cmd"
+fi
+echo "STDOUT: $out"
+echo "STDERR: $err"
+
+# Strict mode
+set -e
+
+# Load modules
+if [ -n "$modules" ]; then
+    echo "Loading modules..."
+    # Split modules string by spaces and load each one
+    for module in $modules; do
+        echo "Loading module: $module"
+        module load "$module"
+    done
+    echo "All modules loaded successfully"
+fi
+
+# Switch work directory
+cd $cwd
+
+# Run pre-command if specified
+if [ -n "$pre_cmd" ]; then
+    echo "Running pre-command..."
+    eval $pre_cmd
+    echo "Pre-command completed successfully"
+fi
+
+# Run main command
+echo "Running main command..."
+eval $cmd > $out 2> $err
+echo "Main command completed successfully"
+
+# Run post-command if specified and main command succeeded
+if [ -n "$post_cmd" ]; then
+    echo "Running post-command..."
+    eval $post_cmd
+    echo "Post-command completed successfully"
+fi
+
+# Unload modules
+if [ -n "$modules" ]; then
+    echo "Unloading modules..."
+    # Split modules string by spaces and unload each one (in reverse order)
+    reversed_modules=$(echo $modules | awk '{for(i=NF;i>=1;i--) printf "%s ", $i}')
+    for module in $reversed_modules; do
+        echo "Unloading module: $module"
+        module unload "$module"
+    done
+    echo "All modules unloaded successfully"
+fi
