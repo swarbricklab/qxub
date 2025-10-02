@@ -134,6 +134,40 @@ def qsub(cmd, quiet=False):
             logging.debug("Job submitted successfully")
             return result.stdout.rstrip('\n')
 
+def qdel(job_id, quiet=False):
+    """
+    Deletes a PBS job using qdel command
+
+    Args:
+        job_id (str): The PBS job id to delete
+        quiet (bool): whether to suppress output
+
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    logging.debug("Deleting job %s", job_id)
+
+    try:
+        # pylint: disable=W1510
+        result = subprocess.run(['qdel', job_id],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+        if result.returncode == 0:
+            if not quiet:
+                click.echo(f"🗑️  Job {job_id} deleted successfully")
+            logging.info("Job %s deleted successfully", job_id)
+            return True
+
+        if not quiet:
+            click.echo(f"Failed to delete job {job_id}: {result.stderr.strip()}")
+        logging.warning("Failed to delete job %s: %s", job_id, result.stderr.strip())
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        if not quiet:
+            click.echo(f"Error deleting job {job_id}: {e}")
+        logging.error("Error deleting job %s: %s", job_id, e)
+        return False
+
 def job_status(job_id):
     """
     Parses 'qstat' to determine the status of the job with the given id

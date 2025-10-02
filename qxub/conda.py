@@ -5,12 +5,29 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 import os
 import sys
+import signal
 import logging
 from pathlib import Path
 import click
 import pkg_resources
 from .cli import qxub
-from .scheduler import qsub, monitor_and_tail, print_status
+from .scheduler import qsub, monitor_and_tail, print_status, qdel
+
+# Global variable to track current job for signal handling
+_CURRENT_JOB_ID = None  # pylint: disable=invalid-name
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) by cleaning up submitted job"""
+    # pylint: disable=unused-argument
+    if _CURRENT_JOB_ID:
+        print("\n🛑 Interrupted! Cleaning up job...")
+        success = qdel(_CURRENT_JOB_ID, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+        else:
+            print("⚠️  Job cleanup failed - you may need to manually run: qdel", _CURRENT_JOB_ID)
+    print("👋 Goodbye!")
+    sys.exit(130)  # Standard exit code for SIGINT
 
 def _get_default_template():
     """Get the default PBS template file path."""
@@ -91,8 +108,15 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
         logging.info("Dry run. Exiting")
         sys.exit(0)
 
+    # Register signal handler for Ctrl+C cleanup
+    signal.signal(signal.SIGINT, _signal_handler)
+
     logging.info("Submitting job")
     job_id = qsub(submission_command, quiet=ctx_obj['quiet'])
+
+    # Track job ID globally for signal handler
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+    _CURRENT_JOB_ID = job_id
 
     # Show success message with job ID
     if not ctx_obj['quiet']:
@@ -117,4 +141,9 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
         success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
     else:
         success_message = None
-    monitor_and_tail(job_id, out, err, quiet=ctx_obj['quiet'], success_msg=success_message)
+
+    try:
+        monitor_and_tail(job_id, out, err, quiet=ctx_obj['quiet'], success_msg=success_message)
+    finally:
+        # Clear job ID when monitoring completes (successfully or via interrupt)
+        _CURRENT_JOB_ID = None
