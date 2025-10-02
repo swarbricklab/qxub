@@ -47,7 +47,7 @@ def _get_default_template():
 @click.option("--post",
               help="Command to run after the main command (only if main command succeeds)")
 @click.pass_context
-def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments
+def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """
     Constructs and submits a qsub job that will execute the given command
     in the specified conda environment and work directory
@@ -96,7 +96,8 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
 
     # Show success message with job ID
     if not ctx_obj['quiet']:
-        print_status(f"🚀 Job submitted successfully! Job ID: {job_id}", final=True)
+        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=False)
 
     logging.info("Your job has been successfully submitted")
     # Exit if in quiet mode
@@ -110,4 +111,10 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
     err.parent.mkdir(parents=True, exist_ok=True)
     out.touch()
     err.touch()
-    monitor_and_tail(job_id, out, err, quiet=ctx_obj['quiet'])
+
+    # Pass success message to monitor_and_tail for spinner display
+    if not ctx_obj['quiet']:
+        success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+    else:
+        success_message = None
+    monitor_and_tail(job_id, out, err, quiet=ctx_obj['quiet'], success_msg=success_message)

@@ -14,6 +14,30 @@ import click
 import tailer
 
 
+class OutputCoordinator:
+    """Coordinates between spinner and output threads to prevent display conflicts."""
+
+    def __init__(self):
+        self.output_started = threading.Event()
+        self.spinner_cleared = threading.Event()
+
+    def signal_output_started(self):
+        """Called by tail threads when they start producing output."""
+        self.output_started.set()
+
+    def wait_for_output_started(self, timeout=None):
+        """Called by spinner to wait for output to start."""
+        return self.output_started.wait(timeout)
+
+    def signal_spinner_cleared(self):
+        """Called by spinner when it has cleared itself."""
+        self.spinner_cleared.set()
+
+    def wait_for_spinner_cleared(self, timeout=None):
+        """Called by tail threads to wait for spinner to clear."""
+        return self.spinner_cleared.wait(timeout)
+
+
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
     if final:
@@ -24,13 +48,14 @@ def print_status(message, final=False):
         print(f"\r{message}", end="", flush=True)
 
 
-class JobSpinner:
+class JobSpinner:  # pylint: disable=too-many-instance-attributes
     """Context manager for displaying a spinner during job operations."""
 
-    def __init__(self, message="", quiet=False, show_message=True):
+    def __init__(self, message="", quiet=False, show_message=True, coordinator=None):
         self.message = message
         self.quiet = quiet
         self.show_message = show_message
+        self.coordinator = coordinator
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinning = False
         self.thread = None
@@ -40,6 +65,12 @@ class JobSpinner:
         """Run the spinner animation"""
         i = 0
         while self.spinning:
+            # Check if output has started and we need to clear
+            if self.coordinator and self.coordinator.wait_for_output_started(timeout=0):
+                self._clear_spinner()
+                self.coordinator.signal_spinner_cleared()
+                break
+
             char = self.spinner_chars[i % len(self.spinner_chars)]
             if self.show_message:
                 line = f"{self.message} {char}"
@@ -49,6 +80,11 @@ class JobSpinner:
                 print(f" {char}", end="", flush=True)
             time.sleep(0.1)
             i += 1
+
+    def _clear_spinner(self):
+        """Clear the spinner line"""
+        clear_line = " " * (self.original_line_len + 5)
+        print(f"\r{clear_line}\r", end="", flush=True)
 
     def __enter__(self):
         if not self.quiet:
@@ -63,9 +99,10 @@ class JobSpinner:
             self.spinning = False
             if self.thread:
                 self.thread.join(timeout=0.2)
-            # Clear the spinner line completely
-            clear_line = " " * (self.original_line_len + 5)
-            print(f"\r{clear_line}\r", end="", flush=True)
+            # Clear the spinner line completely if not already cleared
+            if self.coordinator and not self.coordinator.spinner_cleared.is_set():
+                self._clear_spinner()
+                self.coordinator.signal_spinner_cleared()
 
 
 def qsub(cmd, quiet=False):
@@ -125,13 +162,19 @@ def job_status(job_id):
     logging.debug("Job status %s", status)
     return status
 
-def monitor_qstat(job_id, quiet=False):
+def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """
     Monitors for job completion by checking job status periodically
     """
     logging.debug("Waiting 60 seconds before checking job status")
 
-    with JobSpinner("Waiting for job to start...", show_message=True, quiet=quiet):
+    # Use the provided success message or create a default one
+    if success_msg:
+        spinner_msg = f"{success_msg} - Waiting for job to start..."
+    else:
+        spinner_msg = f"Job ID: {job_id} - Waiting for job to start..."
+
+    with JobSpinner(spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator):
         time.sleep(60)
 
     logging.debug("Starting job monitoring")
@@ -146,7 +189,7 @@ def monitor_qstat(job_id, quiet=False):
         # Sleep without showing any status messages
         time.sleep(30)  # Poll every 30 seconds
 
-def tail(log_file, destination):
+def tail(log_file, destination, coordinator=None):
     """
     Tails the given log_file until either EOF or job completion.
     Output is directed to the specified destination (STDOUT or STDERR)
@@ -155,11 +198,21 @@ def tail(log_file, destination):
         click.echo("Unknown destination for redirection")
         sys.exit(2)
     is_err = destination == 'STDERR'
+    output_started = False
+
     with open(log_file, 'r', encoding='utf-8') as f:
         for line in tailer.follow(f):
+            # Signal that output has started on first line
+            if not output_started and coordinator:
+                coordinator.signal_output_started()
+                # Clear the waiting line completely - use longer clear for safety
+                print("\r" + " " * 120 + "\r", end="", flush=True)
+                coordinator.signal_spinner_cleared()
+                output_started = True
+
             print(line.rstrip(), file=sys.stderr if is_err else sys.stdout)
 
-def monitor_and_tail(job_id, out_file, err_file, quiet=False):
+def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
     """
     Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
     until the job is finished. Stops both tailing and monitoring upon job completion.
@@ -169,11 +222,20 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False):
         out_file: Path to the STDOUT log file to tail.
         err_file: Path to the STDERR log file to tail.
         quiet: Whether to suppress spinner output.
+        success_msg: The success message to display with spinner.
     """
+    # Create coordinator for thread synchronization
+    coordinator = OutputCoordinator()
+
     # Create threads for job monitoring and log tailing
-    qstat_thread = threading.Thread(target=monitor_qstat, args=(job_id, quiet))
-    out_thread   = threading.Thread(target=tail, args=(out_file, "STDOUT"), daemon=True)
-    err_thread   = threading.Thread(target=tail, args=(err_file, "STDERR"), daemon=True)
+    qstat_thread = threading.Thread(target=monitor_qstat,
+                                     args=(job_id, quiet, coordinator, success_msg))
+    out_thread = threading.Thread(target=tail,
+                                  args=(out_file, "STDOUT", coordinator),
+                                  daemon=True)
+    err_thread = threading.Thread(target=tail,
+                                  args=(err_file, "STDERR", coordinator),
+                                  daemon=True)
 
     # Start all threads
     qstat_thread.start()
