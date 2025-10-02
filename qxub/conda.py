@@ -42,8 +42,12 @@ def _get_default_template():
 @click.option("--template",
               default=_get_default_template(),
               help="Jobscript template (optional - for further customization)")
+@click.option("--pre",
+              help="Command to run before the main command")
+@click.option("--post",
+              help="Command to run after the main command (only if main command succeeds)")
 @click.pass_context
-def conda(ctx, cmd, env, template):
+def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments
     """
     Constructs and submits a qsub job that will execute the given command
     in the specified conda environment and work directory
@@ -58,44 +62,52 @@ def conda(ctx, cmd, env, template):
     contains double-dashes, as in this case ("--version").
     """
     # Get values from context
-    execdir = ctx.obj['execdir']
-    options = ctx.obj['options']
-    out = Path(ctx.obj['out'])
-    err = Path(ctx.obj['err'])
-    dry = ctx.obj['dry']
-    quiet = ctx.obj['quiet']
+    ctx_obj = ctx.obj
+    out = Path(ctx_obj['out'])
+    err = Path(ctx_obj['err'])
+
     # Log parameters and context
-    for key, value in ctx.obj.items():
+    for key, value in ctx_obj.items():
         logging.debug("Context: %s = %s", key, value)
     logging.debug("Conda environment: %s", env)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Command: %s", cmd)
+    logging.debug("Pre-command: %s", pre)
+    logging.debug("Post-command: %s", post)
+
     # Construct qsub command
-    full_cmd = " ".join(cmd)
-    submission_command = f'qsub -v env={env},cmd="{full_cmd}",cwd={execdir},'
-    submission_command+= f'out={out},err={err} {options} {template}'
+    cmd_str = " ".join(cmd)
+    submission_vars = f'env={env},cmd="{cmd_str}",cwd={ctx_obj["execdir"]},out={out},err={err}'
+    if pre:
+        submission_vars += f',pre_cmd="{pre}"'
+    if post:
+        submission_vars += f',post_cmd="{post}"'
+
+    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
+
     # Execute the command
     logging.info("Submission command: %s", submission_command)
-    if dry:
+    if ctx_obj['dry']:
         logging.info("Dry run. Exiting")
         sys.exit(0)
+
     logging.info("Submitting job")
-    job_id=qsub(submission_command, quiet=quiet)
+    job_id = qsub(submission_command, quiet=ctx_obj['quiet'])
 
     # Show success message with job ID
-    if not quiet:
+    if not ctx_obj['quiet']:
         print_status(f"🚀 Job submitted successfully! Job ID: {job_id}", final=True)
 
     logging.info("Your job has been successfully submitted")
     # Exit if in quiet mode
-    if quiet:
+    if ctx_obj['quiet']:
         logging.info("Exiting in quiet mode")
         sys.exit(0)
 
     # Start concurrent monitoring of job and log files
     # Stream log files to STDOUT/STDERR as appropriate
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    Path(err).parent.mkdir(parents=True, exist_ok=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
     out.touch()
     err.touch()
-    monitor_and_tail(job_id, out, err, quiet=quiet)
+    monitor_and_tail(job_id, out, err, quiet=ctx_obj['quiet'])

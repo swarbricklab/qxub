@@ -10,6 +10,12 @@
 echo "Execution directory: $cwd"
 echo "Conda environment: $env"
 echo "Command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "Post-command: $post_cmd"
+fi
 echo "STDOUT: $out"
 echo "STDERR: $err"
 
@@ -21,5 +27,22 @@ eval "$(conda shell.bash hook)"
 conda activate $env
 # Switch work directory
 cd $cwd
-# Run command
+
+# Run pre-command if specified
+if [ -n "$pre_cmd" ]; then
+    echo "Running pre-command..."
+    eval $pre_cmd
+    echo "Pre-command completed successfully"
+fi
+
+# Run main command
+echo "Running main command..."
 eval $cmd > $out 2> $err
+echo "Main command completed successfully"
+
+# Run post-command if specified and main command succeeded
+if [ -n "$post_cmd" ]; then
+    echo "Running post-command..."
+    eval $post_cmd
+    echo "Post-command completed successfully"
+fi
