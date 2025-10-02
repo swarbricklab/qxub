@@ -2,6 +2,7 @@ __pycache__/
 *.egg-info/
 .vscode/
 env/
+venv/
 test/
 build/
 dist/
@@ -11,3 +12,9 @@ dist/
 .Python
 *.so
 *.dylib
+
+# Test files and logs
+test_*.py
+qt.log
+*.log
+*.tmp
