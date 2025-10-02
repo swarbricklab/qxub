@@ -1,0 +1,55 @@
+#! /bin/bash
+#PBS -N qsing
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -W umask=0027
+#PBS -j oe
+
+# Logging
+echo "Execution directory: $cwd"
+echo "Singularity container: $sif_file"
+echo "Singularity options: $sing_options"
+echo "Container command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "Post-command: $post_cmd"
+fi
+echo "STDOUT: $out"
+echo "STDERR: $err"
+
+# Strict mode
+set -e
+
+# Load singularity module
+echo "Loading singularity module..."
+module load singularity
+echo "Singularity module loaded successfully"
+
+# Switch work directory
+cd $cwd
+
+# Run pre-command if specified
+if [ -n "$pre_cmd" ]; then
+    echo "Running pre-command..."
+    eval $pre_cmd
+    echo "Pre-command completed successfully"
+fi
+
+# Run singularity command
+echo "Running singularity container..."
+if [ -n "$sing_options" ]; then
+    eval singularity exec $sing_options $sif_file $cmd > $out 2> $err
+else
+    eval singularity exec $sif_file $cmd > $out 2> $err
+fi
+echo "Singularity command completed successfully"
+
+# Run post-command if specified and main command succeeded
+if [ -n "$post_cmd" ]; then
+    echo "Running post-command..."
+    eval $post_cmd
+    echo "Post-command completed successfully"
+fi

@@ -8,5 +8,6 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 from .cli import qxub
 from . import conda
 from . import module
+from . import sing
 from . import scheduler
 from . import config
