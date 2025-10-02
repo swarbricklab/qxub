@@ -1,0 +1,18 @@
+Execution directory: /g/data/a56/software/qsub_tools
+Conda environment: dvc3
+Command: dvc --version
+STDOUT: /scratch/a56/jr9959/tmp/qt/20251001_214528/out
+STDERR: /scratch/a56/jr9959/tmp/qt/20251001_214528/err
+
+======================================================================================
+                  Resource Usage on 2025-10-01 21:47:32:
+   Job Id:             151387600.gadi-pbs
+   Project:            a56
+   Exit Status:        0
+   Service Units:      0.01
+   NCPUs Requested:    1                      NCPUs Used: 1               
+                                           CPU Time Used: 00:00:02        
+   Memory Requested:   500.0MB               Memory Used: 114.32MB        
+   Walltime requested: 00:01:00            Walltime Used: 00:00:17        
+   JobFS requested:    100.0MB                JobFS used: 0B              
+======================================================================================

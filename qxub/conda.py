@@ -81,11 +81,11 @@ def conda(ctx, cmd, env, template):
         sys.exit(0)
     logging.info("Submitting job")
     job_id=qsub(submission_command, quiet=quiet)
-    
+
     # Show success message with job ID
     if not quiet:
         print_status(f"🚀 Job submitted successfully! Job ID: {job_id}", final=True)
-    
+
     logging.info("Your job has been successfully submitted")
     # Exit if in quiet mode
     if quiet:

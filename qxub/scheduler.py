@@ -26,7 +26,7 @@ def print_status(message, final=False):
 
 class JobSpinner:
     """Context manager for displaying a spinner during job operations."""
-    
+
     def __init__(self, message="", quiet=False, show_message=True):
         self.message = message
         self.quiet = quiet
@@ -35,7 +35,7 @@ class JobSpinner:
         self.spinning = False
         self.thread = None
         self.original_line_len = 0
-    
+
     def _spin(self):
         """Run the spinner animation"""
         i = 0
@@ -49,7 +49,7 @@ class JobSpinner:
                 print(f" {char}", end="", flush=True)
             time.sleep(0.1)
             i += 1
-    
+
     def __enter__(self):
         if not self.quiet:
             self.spinning = True
@@ -57,7 +57,7 @@ class JobSpinner:
             self.thread.daemon = True
             self.thread.start()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.quiet and self.spinning:
             self.spinning = False
@@ -83,7 +83,7 @@ def qsub(cmd, quiet=False):
     if not cmd[:4] == "qsub":
         click.echo("Expected qsub comment. Exiting")
         sys.exit(1)
-    
+
     with JobSpinner(show_message=False, quiet=quiet):
         # pylint: disable=W1510
         result = subprocess.run(shlex.split(cmd),
@@ -130,12 +130,12 @@ def monitor_qstat(job_id, quiet=False):
     Monitors for job completion by checking job status periodically
     """
     logging.debug("Waiting 60 seconds before checking job status")
-    
+
     with JobSpinner("Waiting for job to start...", show_message=True, quiet=quiet):
         time.sleep(60)
-    
+
     logging.debug("Starting job monitoring")
-    
+
     while True:
         status = job_status(job_id)
         if status in ['F', 'H']:  # Check for job completion
@@ -163,7 +163,7 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False):
     """
     Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
     until the job is finished. Stops both tailing and monitoring upon job completion.
-    
+
     Args:
         job_id: The PBS job id to monitor.
         out_file: Path to the STDOUT log file to tail.
