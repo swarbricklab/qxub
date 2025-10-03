@@ -7,7 +7,6 @@ import sys
 import shlex
 import time
 import logging
-import json
 import threading
 import subprocess
 import click
@@ -170,31 +169,63 @@ def qdel(job_id, quiet=False):
 
 def job_status(job_id):
     """
-    Parses 'qstat' to determine the status of the job with the given id
+    Check the current status of a job.
 
     Returns:
-        Q: queued
-        R: running
-        E: ending
-        F: finished
         H: held (not enough quota)
     """
     logging.debug("Job id: %s", job_id)
-    # pylint: disable=W1510
-    qstat_result = subprocess.run(['qstat', '-x', '-f', '-F', 'json', job_id],
-                                  stdout=subprocess.PIPE, text=True)
+
+    # Use DSV format with ASCII Unit Separator for robust parsing
+    delimiter = '\x1F'  # ASCII Unit Separator - designed for field separation
+    qstat_result = subprocess.run(['qstat', '-fx', '-F', 'dsv', '-D', delimiter, job_id],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, check=False)
+
     # Check if qstat failed
     if qstat_result.returncode != 0:
         logging.debug("qstat failed for job %s", job_id)
         click.echo(qstat_result.stderr)
         click.echo(qstat_result.args)
         sys.exit(qstat_result.returncode)
-    # Otherwise, extract and return job status from qstat results
-    qstat_info = json.loads(qstat_result.stdout)
-    logging.debug("Job status: %s", qstat_info)
-    status=qstat_info['Jobs'][job_id]['job_state']
-    logging.debug("Job status %s", status)
-    return status
+
+    # Parse DSV output to find job_state
+    output = qstat_result.stdout.strip()
+    if not output:
+        logging.error("Empty qstat output for job %s", job_id)
+        return 'C'  # Assume completed if no output
+
+    # Split on delimiter and look for job_state field
+    fields = output.split(delimiter)
+    for field in fields:
+        if field.startswith('job_state='):
+            status = field.split('=', 1)[1]
+            logging.debug("Job status: %s", status)
+            return status
+
+    # Fallback: if job_state not found, try simple qstat
+    logging.warning("job_state field not found in DSV output, trying simple qstat")
+    try:
+        fallback_result = subprocess.run(['qstat', job_id],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       text=True, check=False)
+        if fallback_result.returncode == 0 and fallback_result.stdout:
+            # Parse simple qstat output
+            lines = fallback_result.stdout.strip().split('\n')
+            if len(lines) >= 2:  # Header + job line
+                job_line = lines[-1].split()
+                if len(job_line) >= 8:
+                    status = job_line[-1]  # Last column is status
+                    logging.debug("Job status from simple qstat: %s", status)
+                    return status
+
+        # Final fallback - assume completed
+        logging.warning("All qstat methods failed, assuming job completed")
+        return 'C'
+
+    except (subprocess.SubprocessError, OSError) as fallback_error:
+        logging.error("Fallback qstat also failed: %s", fallback_error)
+        return 'C'
 
 def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """

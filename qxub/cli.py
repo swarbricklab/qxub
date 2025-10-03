@@ -10,18 +10,32 @@ from pathlib import Path
 import click
 from .config import setup_logging
 
+def _get_default_output_dir():
+    """Get appropriate output directory that works across login and compute nodes."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Prefer shared scratch space over TMPDIR to avoid cross-node access issues
+    project = os.getenv("PROJECT", "a56")
+    user = os.getenv("USER", "unknown")
+
+    # Try shared scratch first
+    scratch_path = Path("/scratch", project, user, "qt", timestamp)
+    if scratch_path.parent.parent.exists():  # /scratch/PROJECT/USER exists
+        return scratch_path
+
+    # Fallback to current directory
+    return Path(os.getcwd(), "qt", timestamp)
+
 @click.group()
 @click.option("--execdir",
               default=os.getcwd(),
               help="Execution directory (default: current directory)")
 @click.option("--out",
-              default=Path(
-                  os.getenv("TMPDIR"), "qt", datetime.now().strftime("%Y%m%d_%H%M%S"),"out"),
-              help="STDOUT log file (default: $TMPDIR/qt/timestamp/out)")
+              default=lambda: _get_default_output_dir() / "out",
+              help="STDOUT log file (default: /scratch/$PROJECT/$USER/qt/timestamp/out)")
 @click.option("--err",
-              default=Path(
-                  os.getenv("TMPDIR"), "qt", datetime.now().strftime("%Y%m%d_%H%M%S"),"err"),
-              help="STDERR log file (default: $TMPDIR/qt/timestamp/err)")
+              default=lambda: _get_default_output_dir() / "err",
+              help="STDERR log file (default: /scratch/$PROJECT/$USER/qt/timestamp/err)")
 @click.option("--joblog", help="PBS Pro job log")
 @click.option("--dry", "--dry-run", is_flag=True, default=False,
               help="Generate job submission command but don't submit")

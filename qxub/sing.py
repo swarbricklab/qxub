@@ -1,6 +1,6 @@
 """
 This package provides tools for running qsub jobs on PBS Pro with Singularity containers.
-This avoids boilerplate code for loading containers and switching directories, etc.
+This avoids boilerplate code for setting up container environments and switching directories, etc.
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 # pylint: disable=duplicate-code
@@ -8,6 +8,7 @@ import os
 import sys
 import signal
 import logging
+import base64
 from pathlib import Path
 import click
 import pkg_resources
@@ -67,25 +68,27 @@ def _get_default_template():
               default=_get_default_template(),
               help="Jobscript template (optional - for further customization)")
 @click.option("--pre",
-              help="Command to run before the singularity command")
+              help="Command to run before the singularity command "
+                   "(use quotes for commands with options)")
 @click.option("--post",
-              help="Command to run after the singularity command (only if main command succeeds)")
+              help="Command to run after the singularity command "
+                   "(only if main command succeeds, use quotes for commands with options)")
 @click.pass_context
 def sing(ctx, cmd, sif, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-statements
     """
     Constructs and submits a qsub job that will execute the given command
-    in the specified Singularity container
+    in the specified Singularity container.
 
     Example:
         qxub --resources mem=50MB sing --sif container.sif -- python script.py
 
-    Here the command "python script.py" will run inside the Singularity container
-    with 50MB of RAM. See "qxub --help" for other resource options.
+    Here the command 'python script.py' will run inside the Singularity container
+    with 50MB of RAM. See 'qxub --help' for other resource options.
 
-    Additional Singularity options can be passed before the "--":
+    Additional Singularity options can be passed before the '--':
         qxub sing --sif container.sif --bind /data:/data --env VAR=value -- command
 
-    Note the "--" before the command. This is required to separate Singularity
+    Note the '--' before the command. This is required to separate Singularity
     options from the command to run inside the container.
     """
     # Validate that the .sif file exists
@@ -121,18 +124,22 @@ def sing(ctx, cmd, sif, template, pre, post):  # pylint: disable=too-many-argume
     logging.debug("Singularity options: %s", sing_options)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Container command: %s", container_cmd)
-    logging.debug("Pre-command: %s", pre)
-    logging.debug("Post-command: %s", post)
+    logging.debug("Pre-commands: %s", pre)
+    logging.debug("Post-commands: %s", post)
 
     # Construct qsub command
     cmd_str = " ".join(container_cmd)
     sing_options_str = " ".join(sing_options) if sing_options else ""
+    # Base64 encode the command to avoid escaping issues
+    cmd_b64 = base64.b64encode(cmd_str.encode('utf-8')).decode('ascii')
     submission_vars = (f'sif_file="{sif}",sing_options="{sing_options_str}",'
-                      f'cmd="{cmd_str}",cwd={ctx_obj["execdir"]},out={out},err={err}')
+                      f'cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},out={out},err={err}')
     if pre:
-        submission_vars += f',pre_cmd="{pre}"'
+        pre_b64 = base64.b64encode(pre.encode('utf-8')).decode('ascii')
+        submission_vars += f',pre_cmd_b64="{pre_b64}"'
     if post:
-        submission_vars += f',post_cmd="{post}"'
+        post_b64 = base64.b64encode(post.encode('utf-8')).decode('ascii')
+        submission_vars += f',post_cmd_b64="{post_b64}"'
 
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
 

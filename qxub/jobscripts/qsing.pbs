@@ -10,6 +10,18 @@
 echo "Execution directory: $cwd"
 echo "Singularity container: $sif_file"
 echo "Singularity options: $sing_options"
+
+# Decode base64 encoded commands
+if [ -n "$cmd_b64" ]; then
+    cmd=$(echo "$cmd_b64" | base64 -d)
+fi
+if [ -n "$pre_cmd_b64" ]; then
+    pre_cmd=$(echo "$pre_cmd_b64" | base64 -d)
+fi
+if [ -n "$post_cmd_b64" ]; then
+    post_cmd=$(echo "$post_cmd_b64" | base64 -d)
+fi
+
 echo "Container command: $cmd"
 if [ -n "$pre_cmd" ]; then
     echo "Pre-command: $pre_cmd"
@@ -20,36 +32,58 @@ fi
 echo "STDOUT: $out"
 echo "STDERR: $err"
 
-# Strict mode
+# Strict mode with error handling
 set -e
 
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    echo "ERROR: Command failed with exit code $exit_code"
+    echo "Failed command: $BASH_COMMAND"
+    exit $exit_code
+}
+
+# Set up error trap
+trap 'error_handler' ERR
+
 # Load singularity module
-echo "Loading singularity module..."
+echo "Loading singularity module"
 module load singularity
-echo "Singularity module loaded successfully"
 
 # Switch work directory
+echo "Changing to working directory: $cwd"
 cd $cwd
+
+# Ensure output directories exist and files are accessible
+echo "Creating output directories for: $out and $err"
+mkdir -p "$(dirname "$out")"
+mkdir -p "$(dirname "$err")"
+
+# Test that we can write to the output locations
+touch "$out" || { echo "ERROR: Cannot write to $out"; exit 1; }
+touch "$err" || { echo "ERROR: Cannot write to $err"; exit 1; }
+echo "Output files verified: $out and $err"
 
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
-    echo "Running pre-command..."
-    eval $pre_cmd
-    echo "Pre-command completed successfully"
+    echo "Running pre-command: $pre_cmd"
+    bash -c "$pre_cmd"
+    echo "Pre-command completed"
 fi
 
 # Run singularity command
-echo "Running singularity container..."
+echo "Running Singularity container: $sif_file"
 if [ -n "$sing_options" ]; then
-    eval singularity exec $sing_options $sif_file $cmd > $out 2> $err
+    echo "With options: $sing_options"
+    bash -c "singularity exec $sing_options $sif_file $cmd" > "$out" 2> "$err"
 else
-    eval singularity exec $sif_file $cmd > $out 2> $err
+    bash -c "singularity exec $sif_file $cmd" > "$out" 2> "$err"
 fi
-echo "Singularity command completed successfully"
+echo "Singularity command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
-    echo "Running post-command..."
-    eval $post_cmd
-    echo "Post-command completed successfully"
+    echo "Running post-command: $post_cmd"
+    bash -c "$post_cmd"
+    echo "Post-command completed"
 fi

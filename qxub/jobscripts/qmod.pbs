@@ -9,6 +9,18 @@
 # Logging
 echo "Execution directory: $cwd"
 echo "Modules to load: $modules"
+
+# Decode base64 encoded commands
+if [ -n "$cmd_b64" ]; then
+    cmd=$(echo "$cmd_b64" | base64 -d)
+fi
+if [ -n "$pre_cmd_b64" ]; then
+    pre_cmd=$(echo "$pre_cmd_b64" | base64 -d)
+fi
+if [ -n "$post_cmd_b64" ]; then
+    post_cmd=$(echo "$post_cmd_b64" | base64 -d)
+fi
+
 echo "Command: $cmd"
 if [ -n "$pre_cmd" ]; then
     echo "Pre-command: $pre_cmd"
@@ -19,50 +31,72 @@ fi
 echo "STDOUT: $out"
 echo "STDERR: $err"
 
-# Strict mode
+# Strict mode with error handling
 set -e
+
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    echo "ERROR: Command failed with exit code $exit_code"
+    echo "Failed command: $BASH_COMMAND"
+    exit $exit_code
+}
+
+# Set up error trap
+trap 'error_handler' ERR
 
 # Load modules
 if [ -n "$modules" ]; then
-    echo "Loading modules..."
+    echo "Loading modules: $modules"
     # Split modules string by spaces and load each one
     for module in $modules; do
         echo "Loading module: $module"
         module load "$module"
     done
-    echo "All modules loaded successfully"
+    echo "All modules loaded"
 fi
 
 # Switch work directory
+echo "Changing to working directory: $cwd"
 cd $cwd
+
+# Ensure output directories exist and files are accessible
+echo "Creating output directories for: $out and $err"
+mkdir -p "$(dirname "$out")"
+mkdir -p "$(dirname "$err")"
+
+# Test that we can write to the output locations
+touch "$out" || { echo "ERROR: Cannot write to $out"; exit 1; }
+touch "$err" || { echo "ERROR: Cannot write to $err"; exit 1; }
+echo "Output files verified: $out and $err"
 
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
-    echo "Running pre-command..."
-    eval $pre_cmd
-    echo "Pre-command completed successfully"
+    echo "Running pre-command: $pre_cmd"
+    bash -c "$pre_cmd"
+    echo "Pre-command completed"
 fi
 
 # Run main command
-echo "Running main command..."
-eval $cmd > $out 2> $err
-echo "Main command completed successfully"
+echo "Running main command: $cmd"
+bash -c "$cmd" > "$out" 2> "$err"
+echo "Main command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
-    echo "Running post-command..."
-    eval $post_cmd
-    echo "Post-command completed successfully"
+    echo "Running post-command: $post_cmd"
+    bash -c "$post_cmd"
+    echo "Post-command completed"
 fi
 
 # Unload modules
 if [ -n "$modules" ]; then
-    echo "Unloading modules..."
+    echo "Unloading modules"
     # Split modules string by spaces and unload each one (in reverse order)
     reversed_modules=$(echo $modules | awk '{for(i=NF;i>=1;i--) printf "%s ", $i}')
     for module in $reversed_modules; do
         echo "Unloading module: $module"
         module unload "$module"
     done
-    echo "All modules unloaded successfully"
+    echo "All modules unloaded"
 fi

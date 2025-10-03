@@ -8,6 +8,7 @@ import os
 import sys
 import signal
 import logging
+import base64
 from pathlib import Path
 import click
 import pkg_resources
@@ -63,9 +64,10 @@ def _get_default_template():
               default=_get_default_template(),
               help="Jobscript template (optional - for further customization)")
 @click.option("--pre",
-              help="Command to run before the main command")
+              help="Command to run before the main command (use quotes for commands with options)")
 @click.option("--post",
-              help="Command to run after the main command (only if main command succeeds)")
+              help="Command to run after the main command (only if main command "
+                   "succeeds, use quotes for commands with options)")
 @click.pass_context
 def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     """
@@ -96,18 +98,22 @@ def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-argu
     logging.debug("Modules: %s", mod)
     logging.debug("Jobscript template: %s", template)
     logging.debug("Command: %s", cmd)
-    logging.debug("Pre-command: %s", pre)
-    logging.debug("Post-command: %s", post)
+    logging.debug("Pre-commands: %s", pre)
+    logging.debug("Post-commands: %s", post)
 
     # Construct qsub command
     cmd_str = " ".join(cmd)
     modules_str = " ".join(mod)  # Space-separated for the template
-    submission_vars = (f'modules="{modules_str}",cmd="{cmd_str}",'
+    # Base64 encode the command to avoid escaping issues
+    cmd_b64 = base64.b64encode(cmd_str.encode('utf-8')).decode('ascii')
+    submission_vars = (f'modules="{modules_str}",cmd_b64="{cmd_b64}",'
                        f'cwd={ctx_obj["execdir"]},out={out},err={err}')
     if pre:
-        submission_vars += f',pre_cmd="{pre}"'
+        pre_b64 = base64.b64encode(pre.encode('utf-8')).decode('ascii')
+        submission_vars += f',pre_cmd_b64="{pre_b64}"'
     if post:
-        submission_vars += f',post_cmd="{post}"'
+        post_b64 = base64.b64encode(post.encode('utf-8')).decode('ascii')
+        submission_vars += f',post_cmd_b64="{post_b64}"'
 
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
 
