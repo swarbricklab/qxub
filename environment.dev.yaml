@@ -8,3 +8,5 @@ dependencies:
     - click
     - pylint
     - tailer=0.4.1
+    - rich
+    - omegaconf
