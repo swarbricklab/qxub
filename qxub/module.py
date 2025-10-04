@@ -69,7 +69,7 @@ def _get_default_template():
               help="Command to run after the main command (only if main command "
                    "succeeds, use quotes for commands with options)")
 @click.pass_context
-def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-statements
     """
     Constructs and submits a qsub job that will execute the given command
     with the specified environment modules loaded
