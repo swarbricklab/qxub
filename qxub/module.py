@@ -77,7 +77,7 @@ def module(ctx, cmd, mod, template, pre, post):  # pylint: disable=too-many-argu
     Example:
         qxub --resources mem=50MB module --mod bcftools --mod samtools -- bcftools --version
 
-    Here the command "bcftools --version" will run with the bcftools and samtools 
+    Here the command "bcftools --version" will run with the bcftools and samtools
     modules loaded with 50MB of RAM. See "qxub --help" for other resource options.
 
     Note the "--" before the command. This is required if command itself also

@@ -11,7 +11,7 @@ def setup_logging(verbosity):
     Configures the logging level based on the verbosity provided by the user.
 
     Args:
-        verbosity (int): The number of '-v' flags used. 
+        verbosity (int): The number of '-v' flags used.
                        - 0: ERROR level (default)
                        - 1: WARNING level
                        - 2: INFO level
