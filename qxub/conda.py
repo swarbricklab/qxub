@@ -101,7 +101,8 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
     cmd_str = " ".join(cmd)
     # Base64 encode the command to avoid escaping issues
     cmd_b64 = base64.b64encode(cmd_str.encode('utf-8')).decode('ascii')
-    submission_vars = f'env={env},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},out={out},err={err}'
+    submission_vars = (f'env={env},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
+                       f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}')
     if pre:
         pre_b64 = base64.b64encode(pre.encode('utf-8')).decode('ascii')
         submission_vars += f',pre_cmd_b64="{pre_b64}"'
@@ -114,6 +115,7 @@ def conda(ctx, cmd, env, template, pre, post):  # pylint: disable=too-many-argum
     # Execute the command
     logging.info("Submission command: %s", submission_command)
     if ctx_obj['dry']:
+        print(f"Dry run - would execute: {submission_command}")
         logging.info("Dry run. Exiting")
         sys.exit(0)
 

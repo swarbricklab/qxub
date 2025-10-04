@@ -7,9 +7,9 @@
 #PBS -j oe
 
 # Logging
-echo "Execution directory: $cwd"
-echo "Singularity container: $sif_file"
-echo "Singularity options: $sing_options"
+echo "📁 Execution directory: $cwd"
+echo "📦 Singularity container: $sif_file"
+echo "⚙️  Singularity options: $sing_options"
 
 # Decode base64 encoded commands
 if [ -n "$cmd_b64" ]; then
@@ -22,15 +22,19 @@ if [ -n "$post_cmd_b64" ]; then
     post_cmd=$(echo "$post_cmd_b64" | base64 -d)
 fi
 
-echo "Container command: $cmd"
+echo "💻 Container command: $cmd"
 if [ -n "$pre_cmd" ]; then
-    echo "Pre-command: $pre_cmd"
+    echo "⚡ Pre-command: $pre_cmd"
 fi
 if [ -n "$post_cmd" ]; then
-    echo "Post-command: $post_cmd"
+    echo "🏁 Post-command: $post_cmd"
 fi
-echo "STDOUT: $out"
-echo "STDERR: $err"
+echo "📄 STDOUT: $out"
+echo "📄 STDERR: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
 
 # Strict mode with error handling
 set -e
@@ -38,8 +42,8 @@ set -e
 # Error handler function
 error_handler() {
     local exit_code=$?
-    echo "ERROR: Command failed with exit code $exit_code"
-    echo "Failed command: $BASH_COMMAND"
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "💥 Failed command: $BASH_COMMAND"
     exit $exit_code
 }
 
@@ -47,43 +51,60 @@ error_handler() {
 trap 'error_handler' ERR
 
 # Load singularity module
-echo "Loading singularity module"
+echo "📦 Loading singularity module"
 module load singularity
 
 # Switch work directory
-echo "Changing to working directory: $cwd"
+echo "📂 Changing to working directory: $cwd"
 cd $cwd
 
-# Ensure output directories exist and files are accessible
-echo "Creating output directories for: $out and $err"
-mkdir -p "$(dirname "$out")"
-mkdir -p "$(dirname "$err")"
+# Ensure output directories exist and files are accessible (only if not in quiet mode)
+if [ "$quiet" != "true" ]; then
+    echo "📁 Creating output directories for: $out and $err"
+    mkdir -p "$(dirname "$out")"
+    mkdir -p "$(dirname "$err")"
 
-# Test that we can write to the output locations
-touch "$out" || { echo "ERROR: Cannot write to $out"; exit 1; }
-touch "$err" || { echo "ERROR: Cannot write to $err"; exit 1; }
-echo "Output files verified: $out and $err"
+    # Test that we can write to the output locations
+    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
+    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    echo "✅ Output files verified: $out and $err"
+else
+    echo "🔇 Quiet mode: skipping output file creation"
+fi
 
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
-    echo "Running pre-command: $pre_cmd"
+    echo "⚡ Running pre-command: $pre_cmd"
     bash -c "$pre_cmd"
-    echo "Pre-command completed"
+    echo "✅ Pre-command completed"
 fi
 
 # Run singularity command
-echo "Running Singularity container: $sif_file"
-if [ -n "$sing_options" ]; then
-    echo "With options: $sing_options"
-    bash -c "singularity exec $sing_options $sif_file $cmd" > "$out" 2> "$err"
+echo "🚀 Running Singularity container: $sif_file"
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, let output go to default joblog (no redirection)
+    echo "================== COMMAND OUTPUT START =================="
+    if [ -n "$sing_options" ]; then
+        echo "⚙️  With options: $sing_options"
+        bash -c "singularity exec $sing_options $sif_file $cmd"
+    else
+        bash -c "singularity exec $sif_file $cmd"
+    fi
+    echo "=================== COMMAND OUTPUT END ==================="
 else
-    bash -c "singularity exec $sif_file $cmd" > "$out" 2> "$err"
+    # Normal mode: redirect to separate out/err files
+    if [ -n "$sing_options" ]; then
+        echo "⚙️  With options: $sing_options"
+        bash -c "singularity exec $sing_options $sif_file $cmd" > "$out" 2> "$err"
+    else
+        bash -c "singularity exec $sif_file $cmd" > "$out" 2> "$err"
+    fi
 fi
-echo "Singularity command completed"
+echo "✅ Singularity command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
-    echo "Running post-command: $post_cmd"
+    echo "🏁 Running post-command: $post_cmd"
     bash -c "$post_cmd"
-    echo "Post-command completed"
+    echo "✅ Post-command completed"
 fi

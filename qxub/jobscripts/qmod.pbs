@@ -7,8 +7,8 @@
 #PBS -j oe
 
 # Logging
-echo "Execution directory: $cwd"
-echo "Modules to load: $modules"
+echo "📁 Execution directory: $cwd"
+echo "📦 Modules to load: $modules"
 
 # Decode base64 encoded commands
 if [ -n "$cmd_b64" ]; then
@@ -21,15 +21,19 @@ if [ -n "$post_cmd_b64" ]; then
     post_cmd=$(echo "$post_cmd_b64" | base64 -d)
 fi
 
-echo "Command: $cmd"
+echo "💻 Command: $cmd"
 if [ -n "$pre_cmd" ]; then
-    echo "Pre-command: $pre_cmd"
+    echo "⚡ Pre-command: $pre_cmd"
 fi
 if [ -n "$post_cmd" ]; then
-    echo "Post-command: $post_cmd"
+    echo "🏁 Post-command: $post_cmd"
 fi
-echo "STDOUT: $out"
-echo "STDERR: $err"
+echo "📄 STDOUT: $out"
+echo "📄 STDERR: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
 
 # Strict mode with error handling
 set -e
@@ -37,8 +41,8 @@ set -e
 # Error handler function
 error_handler() {
     local exit_code=$?
-    echo "ERROR: Command failed with exit code $exit_code"
-    echo "Failed command: $BASH_COMMAND"
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "💥 Failed command: $BASH_COMMAND"
     exit $exit_code
 }
 
@@ -47,56 +51,68 @@ trap 'error_handler' ERR
 
 # Load modules
 if [ -n "$modules" ]; then
-    echo "Loading modules: $modules"
+    echo "📦 Loading modules: $modules"
     # Split modules string by spaces and load each one
     for module in $modules; do
-        echo "Loading module: $module"
+        echo "🔄 Loading module: $module"
         module load "$module"
     done
-    echo "All modules loaded"
+    echo "✅ All modules loaded"
 fi
 
 # Switch work directory
-echo "Changing to working directory: $cwd"
+echo "📂 Changing to working directory: $cwd"
 cd $cwd
 
-# Ensure output directories exist and files are accessible
-echo "Creating output directories for: $out and $err"
-mkdir -p "$(dirname "$out")"
-mkdir -p "$(dirname "$err")"
+# Ensure output directories exist and files are accessible (only if not in quiet mode)
+if [ "$quiet" != "true" ]; then
+    echo "📁 Creating output directories for: $out and $err"
+    mkdir -p "$(dirname "$out")"
+    mkdir -p "$(dirname "$err")"
 
-# Test that we can write to the output locations
-touch "$out" || { echo "ERROR: Cannot write to $out"; exit 1; }
-touch "$err" || { echo "ERROR: Cannot write to $err"; exit 1; }
-echo "Output files verified: $out and $err"
+    # Test that we can write to the output locations
+    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
+    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    echo "✅ Output files verified: $out and $err"
+else
+    echo "🔇 Quiet mode: skipping output file creation"
+fi
 
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
-    echo "Running pre-command: $pre_cmd"
+    echo "⚡ Running pre-command: $pre_cmd"
     bash -c "$pre_cmd"
-    echo "Pre-command completed"
+    echo "✅ Pre-command completed"
 fi
 
 # Run main command
-echo "Running main command: $cmd"
-bash -c "$cmd" > "$out" 2> "$err"
-echo "Main command completed"
+echo "🚀 Running main command: $cmd"
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, let output go to default joblog (no redirection)
+    echo "================== COMMAND OUTPUT START =================="
+    bash -c "$cmd"
+    echo "=================== COMMAND OUTPUT END ==================="
+else
+    # Normal mode: redirect to separate out/err files
+    bash -c "$cmd" > "$out" 2> "$err"
+fi
+echo "✅ Main command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
-    echo "Running post-command: $post_cmd"
+    echo "🏁 Running post-command: $post_cmd"
     bash -c "$post_cmd"
-    echo "Post-command completed"
+    echo "✅ Post-command completed"
 fi
 
 # Unload modules
 if [ -n "$modules" ]; then
-    echo "Unloading modules"
+    echo "🔄 Unloading modules"
     # Split modules string by spaces and unload each one (in reverse order)
     reversed_modules=$(echo $modules | awk '{for(i=NF;i>=1;i--) printf "%s ", $i}')
     for module in $reversed_modules; do
-        echo "Unloading module: $module"
+        echo "📤 Unloading module: $module"
         module unload "$module"
     done
-    echo "All modules unloaded"
+    echo "✅ All modules unloaded"
 fi

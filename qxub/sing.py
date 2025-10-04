@@ -133,7 +133,8 @@ def sing(ctx, cmd, sif, template, pre, post):  # pylint: disable=too-many-argume
     # Base64 encode the command to avoid escaping issues
     cmd_b64 = base64.b64encode(cmd_str.encode('utf-8')).decode('ascii')
     submission_vars = (f'sif_file="{sif}",sing_options="{sing_options_str}",'
-                      f'cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},out={out},err={err}')
+                      f'cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},out={out},err={err},'
+                      f'quiet={str(ctx_obj["quiet"]).lower()}')
     if pre:
         pre_b64 = base64.b64encode(pre.encode('utf-8')).decode('ascii')
         submission_vars += f',pre_cmd_b64="{pre_b64}"'

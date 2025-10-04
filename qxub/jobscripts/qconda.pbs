@@ -7,8 +7,8 @@
 #PBS -j oe
 
 # Logging
-echo "Execution directory: $cwd"
-echo "Conda environment: $env"
+echo "📁 Execution directory: $cwd"
+echo "🐍 Conda environment: $env"
 
 # Decode base64 encoded commands
 if [ -n "$cmd_b64" ]; then
@@ -21,17 +21,21 @@ if [ -n "$post_cmd_b64" ]; then
     post_cmd=$(echo "$post_cmd_b64" | base64 -d)
 fi
 
-echo "Command: $cmd"
+echo "💻 Command: $cmd"
 if [ -n "$pre_cmd" ]; then
-    echo "Pre-command: $pre_cmd"
+    echo "⚡ Pre-command: $pre_cmd"
 fi
 if [ -n "$post_cmd" ]; then
-    echo "Post-command: $post_cmd"
+    echo "🏁 Post-command: $post_cmd"
 fi
-echo "STDOUT file: $out"
-echo "STDERR file: $err"
-echo "Current user: $(whoami)"
-echo "Current directory: $(pwd)"
+echo "📄 STDOUT file: $out"
+echo "📄 STDERR file: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
+echo "👤 Current user: $(whoami)"
+echo "📍 Current directory: $(pwd)"
 
 # Strict mode with error handling
 set -e
@@ -39,8 +43,8 @@ set -e
 # Error handler function
 error_handler() {
     local exit_code=$?
-    echo "ERROR: Command failed with exit code $exit_code"
-    echo "Failed command: $BASH_COMMAND"
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "💥 Failed command: $BASH_COMMAND"
     exit $exit_code
 }
 
@@ -48,40 +52,51 @@ error_handler() {
 trap 'error_handler' ERR
 
 # Activate conda environment
-echo "Activating conda environment: $env"
+echo "🔄 Activating conda environment: $env"
 eval "$(conda shell.bash hook)"
 conda activate $env
 
 # Switch work directory
-echo "Changing to working directory: $cwd"
+echo "📂 Changing to working directory: $cwd"
 cd $cwd
 
-# Ensure output directories exist and files are accessible
-echo "Creating output directories for: $out and $err"
-mkdir -p "$(dirname "$out")"
-mkdir -p "$(dirname "$err")"
+# Ensure output directories exist and files are accessible (only if not in quiet mode)
+if [ "$quiet" != "true" ]; then
+    echo "📁 Creating output directories for: $out and $err"
+    mkdir -p "$(dirname "$out")"
+    mkdir -p "$(dirname "$err")"
 
-# Test that we can write to the output locations
-touch "$out" || { echo "ERROR: Cannot write to $out"; exit 1; }
-touch "$err" || { echo "ERROR: Cannot write to $err"; exit 1; }
-echo "Output files verified: $out and $err"
+    # Test that we can write to the output locations
+    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
+    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    echo "✅ Output files verified: $out and $err"
+else
+    echo "🔇 Quiet mode: skipping output file creation"
+fi
 
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
-    echo "Running pre-command: $pre_cmd"
+    echo "⚡ Running pre-command: $pre_cmd"
     bash -c "$pre_cmd"
-    echo "Pre-command completed"
+    echo "✅ Pre-command completed"
 fi
 
 # Run main command
-echo "Running main command: $cmd"
-# Use bash -c to properly handle complex commands with escaping
-bash -c "$cmd" > "$out" 2> "$err"
-echo "Main command completed"
+echo "🚀 Running main command: $cmd"
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, let output go to default joblog (no redirection)
+    echo "================== COMMAND OUTPUT START =================="
+    bash -c "$cmd"
+    echo "=================== COMMAND OUTPUT END ==================="
+else
+    # Normal mode: redirect to separate out/err files
+    bash -c "$cmd" > "$out" 2> "$err"
+fi
+echo "✅ Main command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
-    echo "Running post-command: $post_cmd"
+    echo "🏁 Running post-command: $post_cmd"
     bash -c "$post_cmd"
-    echo "Post-command completed"
+    echo "✅ Post-command completed"
 fi
