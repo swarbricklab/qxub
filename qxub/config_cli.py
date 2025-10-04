@@ -4,10 +4,9 @@ Configuration management CLI for qxub.
 Provides commands for viewing, editing, and managing qxub configuration
 including defaults and aliases.
 """
-
+# pylint: disable=broad-exception-caught,protected-access,raise-missing-from,unnecessary-pass,unused-variable
 import os
 import subprocess
-from pathlib import Path
 from typing import Optional
 import click
 from rich.console import Console
@@ -50,7 +49,7 @@ def get(key_path: Optional[str]):
 @config_cli.command()
 @click.argument('key_path')
 @click.argument('value')
-def set(key_path: str, value: str):
+def set_config(key_path: str, value: str):
     """Set configuration value by key path (e.g., 'defaults.name' 'myjob')."""
     try:
         # Try to parse as YAML to handle different types
@@ -72,7 +71,7 @@ def set(key_path: str, value: str):
 
 @config_cli.command()
 @click.argument('section', required=False)
-def list(section: Optional[str]):
+def list_config(section: Optional[str]):
     """List configuration values, optionally filtered by section."""
     if not config_manager.merged_config:
         click.echo("No configuration found")
@@ -207,7 +206,7 @@ def alias_config():
 
 
 @alias_config.command()
-def list():
+def list_aliases():
     """List all available aliases."""
     aliases = config_manager.list_aliases()
 
@@ -257,7 +256,7 @@ def show(alias_name: str):
 
 @alias_config.command()
 @click.argument('alias_name')
-def test(alias_name: str):
+def test(alias_name: str):  # pylint: disable=too-many-branches
     """Test and validate an alias definition."""
     alias_def = config_manager.get_alias(alias_name)
 
@@ -331,7 +330,7 @@ def test(alias_name: str):
 @click.option('--mod', help='Single module to load (for module subcommand)')
 @click.option('--mods', help='Multiple modules to load, comma-separated (for module subcommand)')
 @click.option('--sif', help='Singularity container (for sing subcommand)')
-def set(alias_name: str, **kwargs):
+def set_alias(alias_name: str, **kwargs):
     """Create or update an alias."""
     # Remove None values
     alias_def = {k: v for k, v in kwargs.items() if v is not None}

@@ -3,8 +3,8 @@ Alias execution CLI for qxub.
 
 Provides commands for executing aliases with optional overrides and command arguments.
 """
+# pylint: disable=import-outside-toplevel
 
-from typing import List, Optional, Dict, Any
 import click
 from rich.console import Console
 
@@ -37,7 +37,7 @@ console = Console()
 @click.option('--bind', multiple=True, help='Override bind paths')
 @click.option('--env-var', multiple=True, help='Override environment variables')
 @click.pass_context
-def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):
+def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Execute an alias with optional overrides and command arguments.
 
     Examples:

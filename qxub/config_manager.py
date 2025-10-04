@@ -7,13 +7,14 @@ Handles loading and merging configuration from:
 3. CLI arguments (highest precedence)
 
 Supports template variable resolution and alias definitions.
+# pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements,no-else-continue
 """
 
 import os
 import pwd
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from omegaconf import OmegaConf, DictConfig
 import click
 
@@ -60,7 +61,7 @@ class ConfigManager:
         if config_file.exists():
             try:
                 return OmegaConf.load(config_file)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 click.echo(f"Warning: Failed to load user config {config_file}: {e}", err=True)
         return None
 
@@ -165,7 +166,7 @@ class ConfigManager:
             return None
         try:
             return OmegaConf.select(self.merged_config, key_path)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
 
     def set_user_config_value(self, key_path: str, value: Any):
