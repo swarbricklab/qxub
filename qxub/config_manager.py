@@ -1,14 +1,11 @@
 """
-Configuration management for qxub.
+Configuration manager for qxub with XDG-compliant paths and template resolution.
 
-Handles loading and merging configuration from:
-1. System config: ${XDG_CONFIG_DIRS}/qxub/config.yaml
-2. User config: ~/.config/qxub/config.yaml
-3. CLI arguments (highest precedence)
-
-Supports template variable resolution and alias definitions.
-# pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements,no-else-continue
+Handles loading and merging configuration from system, user, and environment sources
+with hierarchical precedence and template variable substitution.
 """
+# pylint: disable=no-else-return,no-else-continue,broad-exception-caught,too-many-return-statements
+
 
 import os
 import pwd
@@ -17,6 +14,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from omegaconf import OmegaConf, DictConfig
 import click
+
+# pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements,no-else-continue,duplicate-code
 
 
 class ConfigManager:
@@ -41,16 +40,16 @@ class ConfigManager:
             return Path(xdg_config_home) / 'qxub'
         return Path.home() / '.config' / 'qxub'
 
-    def _load_system_config(self) -> Optional[DictConfig]:
+    def _load_system_config(self) -> Optional[DictConfig]:  # pylint: disable=broad-exception-caught
         """Load system-wide configuration."""
         for config_dir in self._get_xdg_config_dirs():
             config_file = config_dir / 'config.yaml'
             if config_file.exists():
                 try:
                     return OmegaConf.load(config_file)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     click.echo(
-                        f"Failed to load system config {config_file}: {e}",
+                        f"Warning: Failed to load system config {config_file}: {e}",
                         err=True
                     )
         return None
@@ -116,7 +115,7 @@ class ConfigManager:
             'time': now.strftime('%H%M%S'),
         }
 
-    def resolve_templates(self, value: Any, template_vars: Dict[str, str]) -> Any:
+    def resolve_templates(self, value: Any, template_vars: Dict[str, str]) -> Any:  # pylint: disable=too-many-return-statements,no-else-return
         """Recursively resolve template variables in configuration values."""
         if isinstance(value, str):
             # Only resolve if there are template placeholders
@@ -127,18 +126,17 @@ class ConfigManager:
                     click.echo(f"Warning: Unknown template variable {e} in '{value}'", err=True)
                     return value
             return value
-        elif isinstance(value, (list, tuple)):
+        if isinstance(value, (list, tuple)):
             return [self.resolve_templates(item, template_vars) for item in value]
-        elif isinstance(value, dict):
+        if isinstance(value, dict):
             return {k: self.resolve_templates(v, template_vars) for k, v in value.items()}
-        elif OmegaConf.is_config(value):
+        if OmegaConf.is_config(value):
             # Handle OmegaConf DictConfig
             resolved = {}
             for k, v in value.items():
                 resolved[k] = self.resolve_templates(v, template_vars)
             return OmegaConf.create(resolved)
-        else:
-            return value
+        return value
 
     def get_defaults(self) -> Dict[str, Any]:
         """Get default configuration values."""

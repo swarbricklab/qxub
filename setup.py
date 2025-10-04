@@ -1,4 +1,4 @@
-# pylint: disable=cyclic-import,duplicate-code
+# pylint: disable=cyclic-import,duplicate-code,import-outside-toplevel
 """
 This script configures the installation of the 'qxub' Python package using setuptools.
 Defines the package metadata, dependencies, and entry points for the command-line interface (CLI).

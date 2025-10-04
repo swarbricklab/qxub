@@ -4,7 +4,7 @@ Alias execution CLI for qxub.
 Provides commands for executing aliases with optional overrides and command arguments.
 """
 # pylint: disable=import-outside-toplevel
-
+# pylint: disable=import-outside-toplevel,cyclic-import
 import click
 from rich.console import Console
 
@@ -239,6 +239,7 @@ def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):  # pylint
 @click.argument('alias_name')
 def alias_test_cli(alias_name: str):
     """Test an alias without executing it (dry run)."""
+# pylint: disable=duplicate-code
     # Get the alias definition
     alias_def = config_manager.get_alias(alias_name)
     if not alias_def:
