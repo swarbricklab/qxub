@@ -4,6 +4,7 @@ Configuration management CLI for qxub.
 Provides commands for viewing, editing, and managing qxub configuration
 including defaults and aliases.
 """
+
 # pylint: disable=broad-exception-caught,protected-access,raise-missing-from,unnecessary-pass,unused-variable
 import os
 import subprocess
@@ -20,14 +21,14 @@ from .config_manager import config_manager
 console = Console()
 
 
-@click.group(name='config')
+@click.group(name="config")
 def config_cli():
     """Manage qxub configuration and aliases."""
     pass
 
 
 @config_cli.command()
-@click.argument('key_path', required=False)
+@click.argument("key_path", required=False)
 def get(key_path: Optional[str]):
     """Get configuration value by key path (e.g., 'defaults.name')."""
     if key_path:
@@ -47,8 +48,8 @@ def get(key_path: Optional[str]):
 
 
 @config_cli.command()
-@click.argument('key_path')
-@click.argument('value')
+@click.argument("key_path")
+@click.argument("value")
 def set_config(key_path: str, value: str):
     """Set configuration value by key path (e.g., 'defaults.name' 'myjob')."""
     try:
@@ -70,7 +71,7 @@ def set_config(key_path: str, value: str):
 
 
 @config_cli.command()
-@click.argument('section', required=False)
+@click.argument("section", required=False)
 def list_config(section: Optional[str]):
     """List configuration values, optionally filtered by section."""
     if not config_manager.merged_config:
@@ -98,7 +99,7 @@ def list_config(section: Optional[str]):
 @config_cli.command()
 def edit():
     """Open user configuration file in $EDITOR."""
-    user_config_file = config_manager._get_user_config_dir() / 'config.yaml'
+    user_config_file = config_manager._get_user_config_dir() / "config.yaml"
 
     # Create file if it doesn't exist
     if not user_config_file.exists():
@@ -106,7 +107,7 @@ def edit():
         config_manager.create_user_config_template()
         click.echo(f"📄 Created config template: {user_config_file}")
 
-    editor = os.environ.get('EDITOR', 'nano')
+    editor = os.environ.get("EDITOR", "nano")
     try:
         subprocess.run([editor, str(user_config_file)], check=True)
         config_manager.reload_configs()
@@ -147,7 +148,7 @@ def validate():
 @config_cli.command()
 def reset():
     """Reset user configuration to defaults."""
-    user_config_file = config_manager._get_user_config_dir() / 'config.yaml'
+    user_config_file = config_manager._get_user_config_dir() / "config.yaml"
 
     if user_config_file.exists():
         if click.confirm(f"Delete user config file {user_config_file}?"):
@@ -160,7 +161,7 @@ def reset():
         click.echo("No user configuration file to reset")
 
 
-@config_cli.command(name='show-files')
+@config_cli.command(name="show-files")
 def show_files():
     """Show configuration file locations and status."""
     files = config_manager.get_config_files()
@@ -181,7 +182,7 @@ def show_files():
         else:
             status = "➖ Not found"
 
-        table.add_row(name.replace('_', ' ').title(), str(config_file), status)
+        table.add_row(name.replace("_", " ").title(), str(config_file), status)
 
     console.print(table)
 
@@ -195,11 +196,13 @@ def init():
         click.echo("Edit the file to customize your defaults and aliases")
     except click.ClickException:
         click.echo("❌ User configuration file already exists")
-        click.echo("Use 'qxub config edit' to modify or 'qxub config reset' to recreate")
+        click.echo(
+            "Use 'qxub config edit' to modify or 'qxub config reset' to recreate"
+        )
 
 
 # Alias management subcommands
-@config_cli.group(name='alias')
+@config_cli.group(name="alias")
 def alias_config():
     """Manage configuration aliases."""
     pass
@@ -222,16 +225,30 @@ def list_aliases():
 
     for alias_name in sorted(aliases):
         alias_def = config_manager.get_alias(alias_name)
-        subcommand = alias_def.get('subcommand', '—')
-        cmd = alias_def.get('cmd', '—')
+
+        # Handle both new hierarchical and legacy flat formats
+        if "subcommand" in alias_def and isinstance(alias_def["subcommand"], dict):
+            # New hierarchical format
+            subcommand_def = alias_def.get("subcommand", {})
+            subcommand = subcommand_def.get("type", "—")
+            target_def = alias_def.get("target", {})
+            cmd = target_def.get("cmd", "—")
+            main_def = alias_def.get("main", {})
+            job_name = main_def.get("name", alias_def.get("name", ""))
+        else:
+            # Legacy flat format
+            subcommand = alias_def.get("subcommand", "—")
+            cmd = alias_def.get("cmd", "—")
+            job_name = alias_def.get("name", "")
+
         # Truncate long commands
         if len(cmd) > 50:
             cmd = cmd[:47] + "..."
 
         # Look for description or create one
-        description = alias_def.get('description', '')
-        if not description and 'name' in alias_def:
-            description = f"Job: {alias_def['name']}"
+        description = alias_def.get("description", "")
+        if not description and job_name:
+            description = f"Job: {job_name}"
 
         table.add_row(alias_name, subcommand, cmd, description)
 
@@ -239,7 +256,7 @@ def list_aliases():
 
 
 @alias_config.command()
-@click.argument('alias_name')
+@click.argument("alias_name")
 def show(alias_name: str):
     """Show detailed information about a specific alias."""
     alias_def = config_manager.get_alias(alias_name)
@@ -255,7 +272,7 @@ def show(alias_name: str):
 
 
 @alias_config.command()
-@click.argument('alias_name')
+@click.argument("alias_name")
 def test(alias_name: str):  # pylint: disable=too-many-branches
     """Test and validate an alias definition."""
     alias_def = config_manager.get_alias(alias_name)
@@ -270,29 +287,41 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
     errors = []
     warnings = []
 
-    subcommand = alias_def.get('subcommand')
-    if not subcommand:
-        errors.append("Missing required field: subcommand")
-    elif subcommand not in ['conda', 'module', 'sing']:
-        errors.append(f"Invalid subcommand: {subcommand}")
+    # Handle both new hierarchical and legacy flat formats
+    if "subcommand" in alias_def and isinstance(alias_def["subcommand"], dict):
+        # New hierarchical format
+        subcommand_def = alias_def.get("subcommand", {})
+        subcommand_type = subcommand_def.get("type")
+        target_def = alias_def.get("target", {})
+        cmd = target_def.get("cmd")
+    else:
+        # Legacy flat format
+        subcommand_type = alias_def.get("subcommand")
+        cmd = alias_def.get("cmd")
 
-    cmd = alias_def.get('cmd')
+    if not subcommand_type:
+        errors.append("Missing required field: subcommand.type")
+    elif subcommand_type not in ["conda", "module", "sing"]:
+        errors.append(f"Invalid subcommand type: {subcommand_type}")
+
     if not cmd:
-        warnings.append("No 'cmd' specified - alias can only be used with command override")
+        warnings.append(
+            "No 'cmd' specified - alias can only be used with command override"
+        )
 
     # Check subcommand-specific requirements
-    if subcommand == 'sing':
-        if subcommand in alias_def:
+    if subcommand_type == "sing":
+        if "sif" not in subcommand_def and "sif" not in alias_def:
             sing_config = alias_def[subcommand]
-            if not sing_config.get('sif'):
+            if not sing_config.get("sif"):
                 warnings.append("Singularity container (sif) not specified")
 
     # Test template resolution
     try:
         template_vars = config_manager.get_template_variables(
-            name=alias_def.get('name', 'test'),
-            project=alias_def.get('project', 'test'),
-            queue=alias_def.get('queue', 'test')
+            name=alias_def.get("name", "test"),
+            project=alias_def.get("project", "test"),
+            queue=alias_def.get("queue", "test"),
         )
         resolved = config_manager.resolve_templates(alias_def, template_vars)
         click.echo("✅ Template resolution successful")
@@ -319,17 +348,24 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
 
 
 @alias_config.command()
-@click.argument('alias_name')
-@click.option('--subcommand', type=click.Choice(['conda', 'module', 'sing']),
-              help='Which qxub subcommand to use')
-@click.option('--cmd', help='Command to execute')
-@click.option('--name', help='Job name')
-@click.option('--queue', help='Queue name')
-@click.option('--resources', multiple=True, help='Resource requests (can specify multiple)')
-@click.option('--env', help='Conda environment (for conda subcommand)')
-@click.option('--mod', help='Single module to load (for module subcommand)')
-@click.option('--mods', help='Multiple modules to load, comma-separated (for module subcommand)')
-@click.option('--sif', help='Singularity container (for sing subcommand)')
+@click.argument("alias_name")
+@click.option(
+    "--subcommand",
+    type=click.Choice(["conda", "module", "sing"]),
+    help="Which qxub subcommand to use",
+)
+@click.option("--cmd", help="Command to execute")
+@click.option("--name", help="Job name")
+@click.option("--queue", help="Queue name")
+@click.option(
+    "--resources", multiple=True, help="Resource requests (can specify multiple)"
+)
+@click.option("--env", help="Conda environment (for conda subcommand)")
+@click.option("--mod", help="Single module to load (for module subcommand)")
+@click.option(
+    "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"
+)
+@click.option("--sif", help="Singularity container (for sing subcommand)")
 def set_alias(alias_name: str, **kwargs):
     """Create or update an alias."""
     # Remove None values
@@ -340,41 +376,41 @@ def set_alias(alias_name: str, **kwargs):
         raise click.Abort()
 
     # Validate mutually exclusive options
-    if 'mod' in alias_def and 'mods' in alias_def:
+    if "mod" in alias_def and "mods" in alias_def:
         click.echo("❌ Cannot specify both --mod and --mods")
         raise click.Abort()
 
     # Convert multiple values to lists
-    if 'resources' in alias_def and alias_def['resources']:
-        alias_def['resources'] = list(alias_def['resources'])
+    if "resources" in alias_def and alias_def["resources"]:
+        alias_def["resources"] = list(alias_def["resources"])
 
     # Handle module options
-    if 'mod' in alias_def:
+    if "mod" in alias_def:
         # Single module - convert to list
-        alias_def['mod'] = [alias_def['mod']]
-    elif 'mods' in alias_def:
+        alias_def["mod"] = [alias_def["mod"]]
+    elif "mods" in alias_def:
         # Multiple modules - split by comma and clean up
-        modules = [m.strip() for m in alias_def['mods'].split(',') if m.strip()]
-        alias_def['mod'] = modules
-        del alias_def['mods']  # Remove the mods key, use mod for storage
+        modules = [m.strip() for m in alias_def["mods"].split(",") if m.strip()]
+        alias_def["mod"] = modules
+        del alias_def["mods"]  # Remove the mods key, use mod for storage
 
     # Organize subcommand-specific options
-    subcommand = alias_def.get('subcommand')
+    subcommand = alias_def.get("subcommand")
     if subcommand:
         subcommand_opts = {}
-        if subcommand == 'conda' and 'env' in alias_def:
-            subcommand_opts['env'] = alias_def.pop('env')
-        elif subcommand == 'module' and 'mod' in alias_def:
-            subcommand_opts['mod'] = alias_def.pop('mod')
-        elif subcommand == 'sing' and 'sif' in alias_def:
-            subcommand_opts['sif'] = alias_def.pop('sif')
+        if subcommand == "conda" and "env" in alias_def:
+            subcommand_opts["env"] = alias_def.pop("env")
+        elif subcommand == "module" and "mod" in alias_def:
+            subcommand_opts["mod"] = alias_def.pop("mod")
+        elif subcommand == "sing" and "sif" in alias_def:
+            subcommand_opts["sif"] = alias_def.pop("sif")
 
         if subcommand_opts:
             alias_def[subcommand] = subcommand_opts
 
     try:
         # Set the alias in user config
-        config_manager.set_user_config_value(f'aliases.{alias_name}', alias_def)
+        config_manager.set_user_config_value(f"aliases.{alias_name}", alias_def)
         click.echo(f"✅ Set alias '{alias_name}'")
 
         # Show the created alias
@@ -389,7 +425,7 @@ def set_alias(alias_name: str, **kwargs):
 
 
 @alias_config.command()
-@click.argument('alias_name')
+@click.argument("alias_name")
 def delete(alias_name: str):
     """Delete an alias."""
     if not config_manager.get_alias(alias_name):
@@ -399,10 +435,10 @@ def delete(alias_name: str):
     if click.confirm(f"Delete alias '{alias_name}'?"):
         try:
             # Load user config
-            user_config_file = config_manager._get_user_config_dir() / 'config.yaml'
+            user_config_file = config_manager._get_user_config_dir() / "config.yaml"
             if user_config_file.exists():
                 user_config = OmegaConf.load(user_config_file)
-                if 'aliases' in user_config and alias_name in user_config.aliases:
+                if "aliases" in user_config and alias_name in user_config.aliases:
                     del user_config.aliases[alias_name]
                     OmegaConf.save(user_config, user_config_file)
                     config_manager.reload_configs()

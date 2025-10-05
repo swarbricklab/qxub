@@ -3,6 +3,7 @@ This package provides tools for running qsub jobs on PBS Pro in particular envir
 This avoids boilerplate code for activating environments and switching directories, etc.
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
+
 import sys
 import shlex
 import time
@@ -122,16 +123,22 @@ def qsub(cmd, quiet=False):
 
     with JobSpinner(show_message=False, quiet=quiet):
         # pylint: disable=W1510
-        result = subprocess.run(shlex.split(cmd),
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
+        result = subprocess.run(
+            shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
         if result.returncode != 0:
             logging.debug("Job submission failed")
             click.echo(result.stderr)
-            sys.exit(result.returncode)
+
+            # Map PBS validation errors to exit code 2 for consistency
+            if result.returncode == 166:  # PBS validation error
+                sys.exit(2)
+            else:
+                sys.exit(result.returncode)
         else:
             logging.debug("Job submitted successfully")
-            return result.stdout.rstrip('\n')
+            return result.stdout.rstrip("\n")
+
 
 def qdel(job_id, quiet=False):
     """
@@ -148,9 +155,9 @@ def qdel(job_id, quiet=False):
 
     try:
         # pylint: disable=W1510
-        result = subprocess.run(['qdel', job_id],
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                text=True)
+        result = subprocess.run(
+            ["qdel", job_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
         if result.returncode == 0:
             if not quiet:
                 click.echo(f"🗑️  Job {job_id} deleted successfully")
@@ -167,6 +174,7 @@ def qdel(job_id, quiet=False):
         logging.error("Error deleting job %s: %s", job_id, e)
         return False
 
+
 def job_status(job_id):
     """
     Check the current status of a job.
@@ -177,10 +185,14 @@ def job_status(job_id):
     logging.debug("Job id: %s", job_id)
 
     # Use DSV format with ASCII Unit Separator for robust parsing
-    delimiter = '\x1F'  # ASCII Unit Separator - designed for field separation
-    qstat_result = subprocess.run(['qstat', '-fx', '-F', 'dsv', '-D', delimiter, job_id],
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, check=False)
+    delimiter = "\x1f"  # ASCII Unit Separator - designed for field separation
+    qstat_result = subprocess.run(
+        ["qstat", "-fx", "-F", "dsv", "-D", delimiter, job_id],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
 
     # Check if qstat failed
     if qstat_result.returncode != 0:
@@ -193,25 +205,29 @@ def job_status(job_id):
     output = qstat_result.stdout.strip()
     if not output:
         logging.error("Empty qstat output for job %s", job_id)
-        return 'C'  # Assume completed if no output
+        return "C"  # Assume completed if no output
 
     # Split on delimiter and look for job_state field
     fields = output.split(delimiter)
     for field in fields:
-        if field.startswith('job_state='):
-            status = field.split('=', 1)[1]
+        if field.startswith("job_state="):
+            status = field.split("=", 1)[1]
             logging.debug("Job status: %s", status)
             return status
 
     # Fallback: if job_state not found, try simple qstat
     logging.warning("job_state field not found in DSV output, trying simple qstat")
     try:
-        fallback_result = subprocess.run(['qstat', job_id],
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                       text=True, check=False)
+        fallback_result = subprocess.run(
+            ["qstat", job_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
         if fallback_result.returncode == 0 and fallback_result.stdout:
             # Parse simple qstat output
-            lines = fallback_result.stdout.strip().split('\n')
+            lines = fallback_result.stdout.strip().split("\n")
             if len(lines) >= 2:  # Header + job line
                 job_line = lines[-1].split()
                 if len(job_line) >= 8:
@@ -221,11 +237,12 @@ def job_status(job_id):
 
         # Final fallback - assume completed
         logging.warning("All qstat methods failed, assuming job completed")
-        return 'C'
+        return "C"
 
     except (subprocess.SubprocessError, OSError) as fallback_error:
         logging.error("Fallback qstat also failed: %s", fallback_error)
-        return 'C'
+        return "C"
+
 
 def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """
@@ -239,14 +256,16 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     else:
         spinner_msg = f"Job ID: {job_id} - Waiting for job to start..."
 
-    with JobSpinner(spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator):
+    with JobSpinner(
+        spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator
+    ):
         time.sleep(60)
 
     logging.debug("Starting job monitoring")
 
     while True:
         status = job_status(job_id)
-        if status in ['F', 'H']:  # Check for job completion
+        if status in ["F", "H"]:  # Check for job completion
             logging.info("Job %s completed", job_id)
             # Job completed - exit silently (user can check qstat if needed)
             sys.exit(0)
@@ -254,18 +273,19 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
         # Sleep without showing any status messages
         time.sleep(30)  # Poll every 30 seconds
 
+
 def tail(log_file, destination, coordinator=None):
     """
     Tails the given log_file until either EOF or job completion.
     Output is directed to the specified destination (STDOUT or STDERR)
     """
-    if not destination in ['STDOUT', 'STDERR']:
+    if not destination in ["STDOUT", "STDERR"]:
         click.echo("Unknown destination for redirection")
         sys.exit(2)
-    is_err = destination == 'STDERR'
+    is_err = destination == "STDERR"
     output_started = False
 
-    with open(log_file, 'r', encoding='utf-8') as f:
+    with open(log_file, "r", encoding="utf-8") as f:
         for line in tailer.follow(f):
             # Signal that output has started on first line
             if not output_started and coordinator:
@@ -276,6 +296,7 @@ def tail(log_file, destination, coordinator=None):
                 output_started = True
 
             print(line.rstrip(), file=sys.stderr if is_err else sys.stdout)
+
 
 def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
     """
@@ -293,14 +314,15 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
     coordinator = OutputCoordinator()
 
     # Create threads for job monitoring and log tailing
-    qstat_thread = threading.Thread(target=monitor_qstat,
-                                     args=(job_id, quiet, coordinator, success_msg))
-    out_thread = threading.Thread(target=tail,
-                                  args=(out_file, "STDOUT", coordinator),
-                                  daemon=True)
-    err_thread = threading.Thread(target=tail,
-                                  args=(err_file, "STDERR", coordinator),
-                                  daemon=True)
+    qstat_thread = threading.Thread(
+        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
+    )
+    out_thread = threading.Thread(
+        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
+    )
 
     # Start all threads
     qstat_thread.start()

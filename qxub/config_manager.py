@@ -4,6 +4,7 @@ Configuration manager for qxub with XDG-compliant paths and template resolution.
 Handles loading and merging configuration from system, user, and environment sources
 with hierarchical precedence and template variable substitution.
 """
+
 # pylint: disable=no-else-return,no-else-continue,broad-exception-caught,too-many-return-statements
 
 
@@ -29,39 +30,43 @@ class ConfigManager:
 
     def _get_xdg_config_dirs(self) -> List[Path]:
         """Get XDG config directories in precedence order."""
-        xdg_config_dirs = os.environ.get('XDG_CONFIG_DIRS', '/etc/xdg')
-        dirs = [Path(d) / 'qxub' for d in xdg_config_dirs.split(':')]
+        xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
+        dirs = [Path(d) / "qxub" for d in xdg_config_dirs.split(":")]
         return dirs
 
     def _get_user_config_dir(self) -> Path:
         """Get user config directory following XDG spec."""
-        xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
+        xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
         if xdg_config_home:
-            return Path(xdg_config_home) / 'qxub'
-        return Path.home() / '.config' / 'qxub'
+            return Path(xdg_config_home) / "qxub"
+        return Path.home() / ".config" / "qxub"
 
-    def _load_system_config(self) -> Optional[DictConfig]:  # pylint: disable=broad-exception-caught
+    def _load_system_config(
+        self,
+    ) -> Optional[DictConfig]:  # pylint: disable=broad-exception-caught
         """Load system-wide configuration."""
         for config_dir in self._get_xdg_config_dirs():
-            config_file = config_dir / 'config.yaml'
+            config_file = config_dir / "config.yaml"
             if config_file.exists():
                 try:
                     return OmegaConf.load(config_file)
                 except Exception as e:  # pylint: disable=broad-exception-caught
                     click.echo(
                         f"Warning: Failed to load system config {config_file}: {e}",
-                        err=True
+                        err=True,
                     )
         return None
 
     def _load_user_config(self) -> Optional[DictConfig]:
         """Load user configuration."""
-        config_file = self._get_user_config_dir() / 'config.yaml'
+        config_file = self._get_user_config_dir() / "config.yaml"
         if config_file.exists():
             try:
                 return OmegaConf.load(config_file)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                click.echo(f"Warning: Failed to load user config {config_file}: {e}", err=True)
+                click.echo(
+                    f"Warning: Failed to load user config {config_file}: {e}", err=True
+                )
         return None
 
     def _load_configs(self):
@@ -91,45 +96,54 @@ class ConfigManager:
 
         # System config files
         for i, config_dir in enumerate(self._get_xdg_config_dirs()):
-            files[f'system_{i}'] = config_dir / 'config.yaml'
+            files[f"system_{i}"] = config_dir / "config.yaml"
 
         # User config file
-        files['user'] = self._get_user_config_dir() / 'config.yaml'
+        files["user"] = self._get_user_config_dir() / "config.yaml"
 
         return files
 
-    def get_template_variables(self, name: Optional[str] = None,
-                             project: Optional[str] = None,
-                             queue: Optional[str] = None) -> Dict[str, str]:
+    def get_template_variables(
+        self,
+        name: Optional[str] = None,
+        project: Optional[str] = None,
+        queue: Optional[str] = None,
+    ) -> Dict[str, str]:
         """Get template variables for string substitution."""
         now = datetime.now()
         user = pwd.getpwuid(os.getuid()).pw_name
 
         return {
-            'user': user,
-            'project': project or '',
-            'name': name or '',
-            'queue': queue or '',
-            'timestamp': now.strftime('%Y%m%d_%H%M%S'),
-            'date': now.strftime('%Y%m%d'),
-            'time': now.strftime('%H%M%S'),
+            "user": user,
+            "project": project or "",
+            "name": name or "",
+            "queue": queue or "",
+            "timestamp": now.strftime("%Y%m%d_%H%M%S"),
+            "date": now.strftime("%Y%m%d"),
+            "time": now.strftime("%H%M%S"),
         }
 
-    def resolve_templates(self, value: Any, template_vars: Dict[str, str]) -> Any:  # pylint: disable=too-many-return-statements,no-else-return
+    def resolve_templates(
+        self, value: Any, template_vars: Dict[str, str]
+    ) -> Any:  # pylint: disable=too-many-return-statements,no-else-return
         """Recursively resolve template variables in configuration values."""
         if isinstance(value, str):
             # Only resolve if there are template placeholders
-            if '{' in value and '}' in value:
+            if "{" in value and "}" in value:
                 try:
                     return value.format(**template_vars)
                 except KeyError as e:
-                    click.echo(f"Warning: Unknown template variable {e} in '{value}'", err=True)
+                    click.echo(
+                        f"Warning: Unknown template variable {e} in '{value}'", err=True
+                    )
                     return value
             return value
         if isinstance(value, (list, tuple)):
             return [self.resolve_templates(item, template_vars) for item in value]
         if isinstance(value, dict):
-            return {k: self.resolve_templates(v, template_vars) for k, v in value.items()}
+            return {
+                k: self.resolve_templates(v, template_vars) for k, v in value.items()
+            }
         if OmegaConf.is_config(value):
             # Handle OmegaConf DictConfig
             resolved = {}
@@ -140,21 +154,25 @@ class ConfigManager:
 
     def get_defaults(self) -> Dict[str, Any]:
         """Get default configuration values."""
-        if not self.merged_config or 'defaults' not in self.merged_config:
+        if not self.merged_config or "defaults" not in self.merged_config:
             return {}
         return OmegaConf.to_container(self.merged_config.defaults, resolve=True)
 
     def get_alias(self, alias_name: str) -> Optional[Dict[str, Any]]:
         """Get alias definition."""
-        if (not self.merged_config or
-            'aliases' not in self.merged_config or
-            alias_name not in self.merged_config.aliases):
+        if (
+            not self.merged_config
+            or "aliases" not in self.merged_config
+            or alias_name not in self.merged_config.aliases
+        ):
             return None
-        return OmegaConf.to_container(self.merged_config.aliases[alias_name], resolve=True)
+        return OmegaConf.to_container(
+            self.merged_config.aliases[alias_name], resolve=True
+        )
 
     def list_aliases(self) -> List[str]:
         """List all available aliases."""
-        if not self.merged_config or 'aliases' not in self.merged_config:
+        if not self.merged_config or "aliases" not in self.merged_config:
             return []
         return list(self.merged_config.aliases.keys())
 
@@ -169,7 +187,7 @@ class ConfigManager:
 
     def set_user_config_value(self, key_path: str, value: Any):
         """Set a configuration value in user config file."""
-        user_config_file = self._get_user_config_dir() / 'config.yaml'
+        user_config_file = self._get_user_config_dir() / "config.yaml"
 
         # Create directory if it doesn't exist
         user_config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +199,7 @@ class ConfigManager:
             user_config = OmegaConf.create({})
 
         # Set the value using OmegaConf.update
-        keys = key_path.split('.')
+        keys = key_path.split(".")
         current = user_config
         for key in keys[:-1]:
             if key not in current:
@@ -197,60 +215,53 @@ class ConfigManager:
 
     def create_user_config_template(self):
         """Create a template user config file."""
-        user_config_file = self._get_user_config_dir() / 'config.yaml'
+        user_config_file = self._get_user_config_dir() / "config.yaml"
 
         if user_config_file.exists():
-            raise click.ClickException(f"User config file already exists: {user_config_file}")
+            raise click.ClickException(
+                f"User config file already exists: {user_config_file}"
+            )
 
         # Create directory
         user_config_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create template config
         template = {
-            'defaults': {
-                'name': 'qt',
-                'queue': 'normal',
-                'project': 'a56',
-                'joblog': '{name}.log',
-                'resources': ['mem=4GB', 'ncpus=1'],
-                'out': '/scratch/{project}/{user}/qt/{timestamp}/out',
-                'err': '/scratch/{project}/{user}/qt/{timestamp}/err',
-                'conda': {
-                    'env': 'base',
-                    'pre': None,
-                    'post': None
+            "defaults": {
+                "name": "qt",
+                "queue": "normal",
+                "project": "a56",
+                "joblog": "{name}.log",
+                "resources": ["mem=4GB", "ncpus=1"],
+                "out": "/scratch/{project}/{user}/qt/{timestamp}/out",
+                "err": "/scratch/{project}/{user}/qt/{timestamp}/err",
+                "conda": {"env": "base", "pre": None, "post": None},
+                "module": {"mod": ["python3"], "pre": None, "post": None},
+                "sing": {
+                    "sif": None,
+                    "bind": ["/scratch", "/g/data"],
+                    "env": [],
+                    "pre": None,
+                    "post": None,
                 },
-                'module': {
-                    'mod': ['python3'],
-                    'pre': None,
-                    'post': None
-                },
-                'sing': {
-                    'sif': None,
-                    'bind': ['/scratch', '/g/data'],
-                    'env': [],
-                    'pre': None,
-                    'post': None
+            },
+            "aliases": {
+                "example": {
+                    "subcommand": "conda",
+                    "cmd": 'echo "Hello from qxub alias!"',
+                    "name": "example",
+                    "conda": {"env": "base"},
                 }
             },
-            'aliases': {
-                'example': {
-                    'subcommand': 'conda',
-                    'cmd': 'echo "Hello from qxub alias!"',
-                    'name': 'example',
-                    'conda': {
-                        'env': 'base'
-                    }
-                }
-            }
         }
 
         config = OmegaConf.create(template)
         OmegaConf.save(config, user_config_file)
         return user_config_file
 
-    def resolve_options(self, cli_args: Dict[str, Any],
-                       alias_name: Optional[str] = None) -> Dict[str, Any]:
+    def resolve_options(
+        self, cli_args: Dict[str, Any], alias_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Resolve final options from config hierarchy + alias + CLI args.
 
@@ -267,10 +278,10 @@ class ConfigManager:
 
             # Merge alias into resolved options
             for key, value in alias_def.items():
-                if key == 'subcommand':
+                if key == "subcommand":
                     # Don't merge subcommand into general options
                     continue
-                elif key in ['conda', 'module', 'sing']:
+                elif key in ["conda", "module", "sing"]:
                     # Merge subcommand-specific options
                     if key not in resolved:
                         resolved[key] = {}
@@ -286,9 +297,9 @@ class ConfigManager:
 
         # Resolve templates
         template_vars = self.get_template_variables(
-            name=resolved.get('name'),
-            project=resolved.get('project'),
-            queue=resolved.get('queue')
+            name=resolved.get("name"),
+            project=resolved.get("project"),
+            queue=resolved.get("queue"),
         )
         resolved = self.resolve_templates(resolved, template_vars)
 

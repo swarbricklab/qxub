@@ -6,6 +6,7 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 
 import logging
 
+
 def setup_logging(verbosity):
     """
     Configures the logging level based on the verbosity provided by the user.

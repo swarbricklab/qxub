@@ -6,7 +6,7 @@ channels:
 dependencies:
     - python=3.9
     - click
-    - pylint
+    - black
     - tailer=0.4.1
     - rich
     - omegaconf

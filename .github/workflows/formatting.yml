@@ -1,9 +1,9 @@
-name: Linting
+name: Code Formatting
 
 on: [push, pull_request]
 
 jobs:
-  lint:
+  format-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -15,7 +15,8 @@ jobs:
           auto-update-conda: true
           environment-file: environment.dev.yaml  
           activate-environment: test
-      - name: Run pylint
+          
+      - name: Check code formatting with Black
         shell: bash -el {0}
         run: |
-          pylint $(git ls-files '*.py')
+          black --check --diff $(git ls-files '*.py')
