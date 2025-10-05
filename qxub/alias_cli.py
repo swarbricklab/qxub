@@ -119,6 +119,19 @@ def alias_cli(
         if v is not None and not (isinstance(v, tuple) and len(v) == 0)
     }
 
+    # Resolve template variables in alias definition before using it
+    # Get template variables for resolution
+    template_vars = config_manager.get_template_variables(
+        name=main_options.get("name"),
+        project=main_options.get("project"),
+        queue=main_options.get("queue"),
+    )
+
+    # Resolve templates in all parts of the alias definition
+    main_options = config_manager.resolve_templates(main_options, template_vars)
+    subcommand_def = config_manager.resolve_templates(subcommand_def, template_vars)
+    target_def = config_manager.resolve_templates(target_def, template_vars)
+
     # Merge alias options with CLI overrides
     # Main options (for qxub command level)
     main_opts = main_options.copy()
@@ -145,7 +158,18 @@ def alias_cli(
     # Build the qxub command with proper option ordering
     qxub_cmd = ["qxub"]
 
-    # Add main options first
+    # Add global options from parent context first
+    if ctx.parent:
+        parent_params = ctx.parent.params
+        # Add global options that affect execution
+        if parent_params.get("dry"):
+            qxub_cmd.append("--dry-run")
+        if parent_params.get("quiet"):
+            qxub_cmd.append("--quiet")
+        if parent_params.get("no_wait"):
+            qxub_cmd.append("--no-wait")
+
+    # Add main options after global options
     if main_opts.get("name"):
         qxub_cmd.extend(["--name", main_opts["name"]])
     if main_opts.get("queue"):

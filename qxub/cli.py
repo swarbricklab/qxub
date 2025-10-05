@@ -38,6 +38,35 @@ def _get_config_default(key: str, fallback=None):
     return defaults.get(key, fallback)
 
 
+def _sanitize_job_name(name: str) -> str:
+    """Sanitize job name for PBS compliance.
+
+    PBS job names cannot contain certain characters like /, :, @, etc.
+    Replace problematic characters with safe alternatives.
+    """
+    if not name:
+        return name
+
+    # Replace problematic characters with safe alternatives
+    sanitized = name.replace("/", "_")  # Paths to underscores
+    sanitized = sanitized.replace(":", "_")  # Colons to underscores
+    sanitized = sanitized.replace(" ", "_")  # Spaces to underscores
+    sanitized = sanitized.replace("@", "_")  # At symbols to underscores
+
+    # Remove any remaining non-alphanumeric characters except hyphens and underscores
+    sanitized = "".join(c for c in sanitized if c.isalnum() or c in "-_")
+
+    # Ensure it starts with a letter or number (not special character)
+    if sanitized and not sanitized[0].isalnum():
+        sanitized = "job_" + sanitized
+
+    # Limit length (PBS has limits on job name length)
+    if len(sanitized) > 50:
+        sanitized = sanitized[:47] + "..."
+
+    return sanitized or "job"  # Fallback if sanitization results in empty string
+
+
 def _get_config_default_callable(key: str, fallback_callable):
     """Get default value from config or call fallback function."""
 
@@ -146,6 +175,10 @@ def qxub(ctx, execdir, verbose, **params):
         else:
             resolved_params[key] = value
     params.update(resolved_params)
+
+    # Sanitize job name for PBS compliance
+    if params["name"]:
+        params["name"] = _sanitize_job_name(params["name"])
 
     # Handle joblog default
     joblog = params["joblog"] or f"{params['name']}.log"

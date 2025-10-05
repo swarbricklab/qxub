@@ -113,7 +113,8 @@ class ConfigManager:
         now = datetime.now()
         user = pwd.getpwuid(os.getuid()).pw_name
 
-        return {
+        # Start with built-in template variables
+        template_vars = {
             "user": user,
             "project": project or "",
             "name": name or "",
@@ -122,6 +123,16 @@ class ConfigManager:
             "date": now.strftime("%Y%m%d"),
             "time": now.strftime("%H%M%S"),
         }
+
+        # Add custom template variables from config
+        if self.merged_config and "templates" in self.merged_config:
+            config_templates = OmegaConf.to_container(
+                self.merged_config.templates, resolve=True
+            )
+            if isinstance(config_templates, dict):
+                template_vars.update(config_templates)
+
+        return template_vars
 
     def resolve_templates(
         self, value: Any, template_vars: Dict[str, str]

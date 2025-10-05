@@ -97,6 +97,27 @@ def list_config(section: Optional[str]):
 
 
 @config_cli.command()
+def files():
+    """List all configuration files and their locations."""
+    files = config_manager.get_config_files()
+
+    table = Table(title="Configuration Files")
+    table.add_column("Type", style="cyan", no_wrap=True)
+    table.add_column("File Path", style="green")
+    table.add_column("Status", style="yellow")
+
+    for name, config_file in files.items():
+        if config_file.exists():
+            status = "✅ Exists"
+        else:
+            status = "❌ Missing"
+
+        table.add_row(name, str(config_file), status)
+
+    console.print(table)
+
+
+@config_cli.command()
 def edit():
     """Open user configuration file in $EDITOR."""
     user_config_file = config_manager._get_user_config_dir() / "config.yaml"
