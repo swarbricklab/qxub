@@ -416,6 +416,11 @@ def _get_singularity_template():
     count=True,
     help="Increase verbosity (use -v, -vv, -vvv for more detail)",
 )
+@click.option(
+    "--version",
+    is_flag=True,
+    help="Show version and exit",
+)
 # Execution context options (mutually exclusive)
 @click.option("--env", "--conda", help="Conda environment for execution")
 @click.option("--mod", multiple=True, help="Environment module to load (repeatable)")
@@ -430,7 +435,7 @@ def _get_singularity_template():
 @click.option("--post", help="Command to run after the main command")
 @click.pass_context
 def qxub(
-    ctx, execdir, verbose, env, mod, mods, sif, bind, template, pre, post, **params
+    ctx, execdir, verbose, version, env, mod, mods, sif, bind, template, pre, post, **params
 ):
     """
     Submit PBS jobs with conda environments, environment modules, or Singularity containers.
@@ -447,6 +452,12 @@ def qxub(
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
     """
+    # Handle version flag first
+    if version:
+        from . import __version__
+        click.echo(f"qxub {__version__}")
+        ctx.exit()
+    
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
     logging.debug("Remaining args: %s", ctx.args)
