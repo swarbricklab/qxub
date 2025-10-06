@@ -10,6 +10,7 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import difflib
+import base64
 import click
 from .config_cli import config_cli
 from .alias_cli import alias_cli, alias_test_cli
@@ -18,10 +19,62 @@ from .resources_cli import resources
 from .config import setup_logging
 from .config_manager import config_manager
 from .history_manager import history_manager
+from .scheduler import qsub, monitor_and_tail, print_status, qdel, get_job_resource_data
+from .resource_tracker import resource_tracker
 
 
 class QxubGroup(click.Group):
     """Custom Click group with enhanced error handling for unknown options."""
+
+    def get_command(self, ctx, cmd_name):
+        """Override get_command to handle execution context."""
+        # Check if we have execution context
+        execution_options = ['env', 'mod', 'mods', 'sif']
+        has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
+        
+        if has_execution_context:
+            return None
+        
+        return super().get_command(ctx, cmd_name)
+
+    def invoke(self, ctx):
+        """Override invoke to handle execution contexts."""
+        # Check if we have execution context
+        execution_options = ['env', 'mod', 'mods', 'sif']
+        has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
+        
+        if has_execution_context and ctx.protected_args:
+            # We have execution context and protected args (the command)
+            # Combine args for the command and invoke the main function directly
+            combined_args = list(ctx.protected_args) + ctx.args
+            
+            # Temporarily set ctx.args for the main function
+            original_args = ctx.args
+            ctx.args = combined_args
+            try:
+                # Extract the parameters that the qxub function expects
+                qxub_func = ctx.command.callback.__wrapped__  # Get the unwrapped function
+                return qxub_func(
+                    ctx,
+                    ctx.params['execdir'],
+                    ctx.params['verbose'],
+                    ctx.params['env'],
+                    ctx.params['mod'],
+                    ctx.params['mods'],
+                    ctx.params['sif'],
+                    ctx.params['bind'],
+                    ctx.params['template'],
+                    ctx.params['pre'],
+                    ctx.params['post'],
+                    **{k: v for k, v in ctx.params.items() if k not in [
+                        'execdir', 'verbose', 'env', 'mod', 'mods', 'sif', 
+                        'bind', 'template', 'pre', 'post'
+                    ]}
+                )
+            finally:
+                ctx.args = original_args
+        
+        return super().invoke(ctx)
 
     def parse_args(self, ctx, args):
         """Override parse_args to provide better error messages for unknown options."""
@@ -213,7 +266,82 @@ def _get_config_default_callable(key: str, fallback_callable):
     return _default
 
 
-@click.group(cls=QxubGroup)
+def _get_conda_template():
+    """Get default conda template path."""
+    import pkg_resources
+    
+    # Try pkg_resources first
+    try:
+        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qconda.pbs")
+        if os.path.exists(template_path):
+            return template_path
+    except (ImportError, AttributeError, FileNotFoundError):
+        pass
+
+    # Fallback to relative path from this module
+    current_dir = Path(__file__).parent
+    template_path = current_dir / "jobscripts" / "qconda.pbs"
+    if template_path.exists():
+        return str(template_path)
+
+    # Last resort - raise an informative error
+    raise FileNotFoundError(
+        f"Could not locate qconda.pbs template file. "
+        f"Looked in: {current_dir / 'jobscripts' / 'qconda.pbs'}"
+    )
+
+
+def _get_module_template():
+    """Get default module template path."""
+    import pkg_resources
+    
+    # Try pkg_resources first  
+    try:
+        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qmod.pbs")
+        if os.path.exists(template_path):
+            return template_path
+    except (ImportError, AttributeError, FileNotFoundError):
+        pass
+
+    # Fallback to relative path from this module
+    current_dir = Path(__file__).parent
+    template_path = current_dir / "jobscripts" / "qmod.pbs"
+    if template_path.exists():
+        return str(template_path)
+
+    # Last resort - raise an informative error
+    raise FileNotFoundError(
+        f"Could not locate qmod.pbs template file. "
+        f"Looked in: {current_dir / 'jobscripts' / 'qmod.pbs'}"
+    )
+
+
+def _get_singularity_template():
+    """Get default singularity template path."""
+    import pkg_resources
+    
+    # Try pkg_resources first
+    try:
+        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qsing.pbs")
+        if os.path.exists(template_path):
+            return template_path
+    except (ImportError, AttributeError, FileNotFoundError):
+        pass
+
+    # Fallback to relative path from this module
+    current_dir = Path(__file__).parent
+    template_path = current_dir / "jobscripts" / "qsing.pbs"
+    if template_path.exists():
+        return str(template_path)
+
+    # Last resort - raise an informative error
+    raise FileNotFoundError(
+        f"Could not locate qsing.pbs template file. "
+        f"Looked in: {current_dir / 'jobscripts' / 'qsing.pbs'}"
+    )
+
+
+@click.group(cls=QxubGroup, invoke_without_command=True)
 @click.option(
     "--execdir",
     default=os.getcwd(),
@@ -246,19 +374,83 @@ def _get_config_default_callable(key: str, fallback_callable):
     count=True,
     help="Increase verbosity (use -v, -vv, -vvv for more detail)",
 )
+# Execution context options (mutually exclusive)
+@click.option("--env", "--conda", help="Conda environment for execution")
+@click.option("--mod", multiple=True, help="Environment module to load (repeatable)")
+@click.option("--mods", "--modules", help="Comma-separated list of environment modules")
+@click.option("--sif", "--sing", "--singularity", help="Singularity container image")
+# Additional options from subcommands
+@click.option("--bind", help="Singularity bind mounts")
+@click.option("--template", help="Jobscript template (optional - for further customization)")
+@click.option("--pre", help="Command to run before the main command")
+@click.option("--post", help="Command to run after the main command")
 @click.pass_context
-def qxub(ctx, execdir, verbose, **params):
+def qxub(ctx, execdir, verbose, env, mod, mods, sif, bind, template, pre, post, **params):
     """
-    Parent command 'qxub' with options common to all subcommands.
-    PBS Pro options (-l,-q,-N,-q) are passed on as parameters to 'qsub'
-    but can be specified in either short form (-l) or long form (--resources)
-
-    Run 'qxub {subcommand} --help' for details on each subcommand.
-
-    For example: qxub conda --help
+    Submit PBS jobs with conda environments, environment modules, or Singularity containers.
+    
+    Management commands:
+        qxub config --help
+        qxub alias --help  
+        qxub history --help
+        qxub resources --help
+        
+    For job execution, use the execution options directly:
+        qxub --env myenv -- python script.py
+        qxub --mod python3 --mod gcc -- make
+        qxub --mods python3,gcc -- python script.py  
+        qxub --sif container.sif -- python script.py
     """
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
+    logging.debug("Remaining args: %s", ctx.args)
+    logging.debug("Invoked subcommand: %s", ctx.invoked_subcommand)
+
+    # Get remaining arguments (these would be the command to execute)
+    command = tuple(ctx.args) if ctx.args else tuple()
+
+    # Consolidate alternative option names
+    conda_env = env  # --env and --conda both map to 'env' parameter
+    
+    # Handle module options: --mod (multiple) vs --mods/--modules (comma-separated)
+    module_list = None
+    if mod:
+        module_list = list(mod)  # --mod can be used multiple times
+    elif mods:  # --mods and --modules both map to 'mods' parameter
+        module_list = [m.strip() for m in mods.split(',')]
+    
+    container = sif  # --sif, --sing, and --singularity all map to 'sif' parameter
+    
+    # Check if any execution context is specified
+    execution_contexts = [conda_env, module_list, container]
+    has_execution_context = any(execution_contexts)
+
+    # If a subcommand is being invoked, just set up context and let Click handle it
+    if ctx.invoked_subcommand is not None:
+        logging.debug("Subcommand '%s' will be invoked", ctx.invoked_subcommand)
+        # Fall through to context setup and let Click handle the subcommand
+    elif has_execution_context:
+        # We have execution context - this is direct execution
+        # Validate mutual exclusivity
+        if sum(bool(x) for x in execution_contexts) > 1:
+            raise click.ClickException("Cannot specify multiple execution contexts")
+        
+        # Validate that a command is provided
+        if not command:
+            click.echo("Error: Command is required when execution context is specified.", err=True)
+            ctx.exit(2)
+        
+        # Clear ctx.args so Click doesn't try to parse them as subcommands
+        ctx.args = []
+    elif command:
+        # Command provided but no execution context
+        click.echo("Error: Must specify an execution context (conda environment, modules, or container)", err=True)
+        ctx.exit(2)
+    else:
+        # No command, no execution context, no subcommand - show help
+        if ctx.invoked_subcommand is None:
+            click.echo(ctx.get_help())
+            ctx.exit(0)
 
     # Apply config defaults for any unset parameters
     defaults = config_manager.get_defaults()
@@ -322,29 +514,198 @@ def qxub(ctx, execdir, verbose, **params):
     ctx.obj["dry"] = params["dry"]
     ctx.obj["quiet"] = params["quiet"]
 
-    # Set up command completion callback to log the command
-    # Skip history logging if we're in a subprocess (to prevent infinite loops)
-    # Also skip for executor commands since they handle their own logging with resource data
-    is_subprocess = os.getenv("QXUB_SUBPROCESS")
-    is_executor_command = len(sys.argv) > 1 and sys.argv[1] in ["conda", "module", "sing"]
-
-    if not is_subprocess and not is_executor_command:
-
-        def log_command_on_exit():
-            try:
-                history_manager.log_execution(ctx, success=True)
-            except Exception as e:
-                logging.debug("Failed to log execution: %s", e)
-
-        # Register callback to be called when the command completes
-        ctx.call_on_close(log_command_on_exit)
-    else:
-        if is_subprocess:
-            logging.debug("Skipping history logging - running as subprocess")
-        else:
-            logging.debug("Skipping history logging - executor command will handle it")
+    # If we reach here and have an execution context, execute the job
+    if has_execution_context:
+        if conda_env:
+            execute_conda(ctx, command, conda_env, template, pre, post)
+        elif module_list:
+            execute_module(ctx, command, module_list, template, pre, post)
+        elif container:
+            execute_singularity(ctx, command, container, bind, template, pre, post)
 
 
+def execute_conda(ctx, command, env, template=None, pre=None, post=None):
+    """Execute command in conda environment."""
+    if not env:
+        click.echo("Error: No conda environment available. Either activate a conda environment or use --env to specify one.", err=True)
+        ctx.exit(2)
+    
+    # Use default template if not provided
+    if not template:
+        template = _get_conda_template()
+    
+    ctx_obj = ctx.obj
+    out = Path(ctx_obj["out"])
+    err = Path(ctx_obj["err"])
+
+    # Log parameters and context
+    for key, value in ctx_obj.items():
+        logging.debug("Context: %s = %s", key, value)
+    logging.debug("Conda environment: %s", env)
+    logging.debug("Jobscript template: %s", template)
+    logging.debug("Command: %s", command)
+    logging.debug("Pre-commands: %s", pre)
+    logging.debug("Post-commands: %s", post)
+
+    # Construct qsub command
+    cmd_str = " ".join(command)
+    # Base64 encode the command to avoid escaping issues
+    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
+    submission_vars = (
+        f'env={env},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
+        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
+    )
+    if pre:
+        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
+        submission_vars += f',pre_cmd_b64="{pre_b64}"'
+    if post:
+        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
+        submission_vars += f',post_cmd_b64="{post_b64}"'
+
+    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
+    logging.info("Submission command: %s", submission_command)
+
+    if ctx_obj["dry"]:
+        print(f"Dry run - would execute: {submission_command}")
+        return
+
+    # Submit job and handle monitoring
+    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    
+    # Log job execution for resource tracking
+    resource_tracker.log_job_resources(
+        job_id=job_id,
+        context_type="conda",
+        context_value=env,
+        command=cmd_str,
+        submission_command=submission_command,
+        resources=ctx_obj["options"]
+    )
+
+
+def execute_module(ctx, command, modules, template=None, pre=None, post=None):
+    """Execute command with environment modules."""
+    if not modules:
+        click.echo("Error: No environment modules specified.", err=True)
+        ctx.exit(2)
+    
+    # Use default template if not provided
+    if not template:
+        template = _get_module_template()
+    
+    ctx_obj = ctx.obj
+    out = Path(ctx_obj["out"])
+    err = Path(ctx_obj["err"])
+
+    # Log parameters and context
+    for key, value in ctx_obj.items():
+        logging.debug("Context: %s = %s", key, value)
+    logging.debug("Environment modules: %s", modules)
+    logging.debug("Jobscript template: %s", template)
+    logging.debug("Command: %s", command)
+    logging.debug("Pre-commands: %s", pre)
+    logging.debug("Post-commands: %s", post)
+
+    # Construct qsub command
+    cmd_str = " ".join(command)
+    mods_str = " ".join(modules)
+    # Base64 encode the command to avoid escaping issues
+    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
+    submission_vars = (
+        f'mods="{mods_str}",cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
+        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
+    )
+    if pre:
+        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
+        submission_vars += f',pre_cmd_b64="{pre_b64}"'
+    if post:
+        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
+        submission_vars += f',post_cmd_b64="{post_b64}"'
+
+    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
+    logging.info("Submission command: %s", submission_command)
+
+    if ctx_obj["dry"]:
+        print(f"Dry run - would execute: {submission_command}")
+        return
+
+    # Submit job and handle monitoring
+    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    
+    # Log job execution for resource tracking
+    resource_tracker.log_job_resources(
+        job_id=job_id,
+        context_type="module",
+        context_value=mods_str,
+        command=cmd_str,
+        submission_command=submission_command,
+        resources=ctx_obj["options"]
+    )
+
+
+def execute_singularity(ctx, command, container, bind=None, template=None, pre=None, post=None):
+    """Execute command in Singularity container."""
+    if not container:
+        click.echo("Error: Singularity container path is required.", err=True)
+        ctx.exit(2)
+    
+    # Use default template if not provided
+    if not template:
+        template = _get_singularity_template()
+    
+    ctx_obj = ctx.obj
+    out = Path(ctx_obj["out"])
+    err = Path(ctx_obj["err"])
+
+    # Log parameters and context
+    for key, value in ctx_obj.items():
+        logging.debug("Context: %s = %s", key, value)
+    logging.debug("Singularity container: %s", container)
+    logging.debug("Bind mounts: %s", bind)
+    logging.debug("Jobscript template: %s", template)
+    logging.debug("Command: %s", command)
+    logging.debug("Pre-commands: %s", pre)
+    logging.debug("Post-commands: %s", post)
+
+    # Construct qsub command
+    cmd_str = " ".join(command)
+    # Base64 encode the command to avoid escaping issues
+    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
+    submission_vars = (
+        f'sif={container},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
+        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
+    )
+    if bind:
+        submission_vars += f',bind="{bind}"'
+    if pre:
+        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
+        submission_vars += f',pre_cmd_b64="{pre_b64}"'
+    if post:
+        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
+        submission_vars += f',post_cmd_b64="{post_b64}"'
+
+    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
+    logging.info("Submission command: %s", submission_command)
+
+    if ctx_obj["dry"]:
+        print(f"Dry run - would execute: {submission_command}")
+        return
+
+    # Submit job and handle monitoring
+    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    
+    # Log job execution for resource tracking
+    resource_tracker.log_job_resources(
+        job_id=job_id,
+        context_type="singularity",
+        context_value=container,
+        command=cmd_str,
+        submission_command=submission_command,
+        resources=ctx_obj["options"]
+    )
+
+
+# CLI Management Commands (these remain as separate commands)
 qxub.add_command(config_cli)
 qxub.add_command(alias_cli)
 qxub.add_command(alias_test_cli)
