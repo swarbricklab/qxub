@@ -67,6 +67,7 @@ class QxubGroup(click.Group):
                     ctx,
                     ctx.params["execdir"],
                     ctx.params["verbose"],
+                    ctx.params["version"],
                     ctx.params["env"],
                     ctx.params["mod"],
                     ctx.params["mods"],
@@ -82,6 +83,7 @@ class QxubGroup(click.Group):
                         not in [
                             "execdir",
                             "verbose",
+                            "version",
                             "env",
                             "mod",
                             "mods",
