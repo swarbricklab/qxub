@@ -141,7 +141,9 @@ def inefficient(threshold, limit):
     jobs = resource_tracker.get_inefficient_jobs(threshold, limit)
 
     if not jobs:
-        console.print(f"✅ No jobs found with efficiency below {threshold}%", style="green")
+        console.print(
+            f"✅ No jobs found with efficiency below {threshold}%", style="green"
+        )
         return
 
     table = Table(title=f"Inefficient Jobs (< {threshold}% efficiency)")
@@ -199,9 +201,15 @@ def inefficient(threshold, limit):
 
     # Show recommendations
     console.print("\n💡 [bold]Optimization Tips:[/bold]")
-    console.print("• Low memory efficiency: Request less memory or use memory-optimized algorithms")
-    console.print("• Low time efficiency: Request shorter walltime or optimize your code")
-    console.print("• Low CPU efficiency: Use more CPU cores or optimize for parallelization")
+    console.print(
+        "• Low memory efficiency: Request less memory or use memory-optimized algorithms"
+    )
+    console.print(
+        "• Low time efficiency: Request shorter walltime or optimize your code"
+    )
+    console.print(
+        "• Low CPU efficiency: Use more CPU cores or optimize for parallelization"
+    )
 
 
 @resources.command()
@@ -211,7 +219,9 @@ def trends(days):
     trend_data = resource_tracker.get_resource_trends(days)
 
     if not trend_data:
-        console.print(f"📊 No resource data available for the last {days} days", style="yellow")
+        console.print(
+            f"📊 No resource data available for the last {days} days", style="yellow"
+        )
         return
 
     table = Table(title=f"Resource Usage Trends (Last {days} days)")
@@ -279,7 +289,9 @@ def show(job_id):
         # Basic info
         console.print(f"Exit Status: {resource_data.get('exit_status', '?')}")
         console.print(f"Queue: {resource_data.get('execution', {}).get('queue', '?')}")
-        console.print(f"Host: {resource_data.get('execution', {}).get('exec_host', '?')}")
+        console.print(
+            f"Host: {resource_data.get('execution', {}).get('exec_host', '?')}"
+        )
 
         # Resource comparison table
         table = Table(title="Resource Usage Comparison")

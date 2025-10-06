@@ -61,23 +61,34 @@ class QxubCommand(click.Command):
                 if match in command_options:
                     click.echo(f"   {match}  ({self.name} option)", err=True)
                 else:
-                    click.echo(f"   {match}  (qxub option - put before '{self.name}')", err=True)
+                    click.echo(
+                        f"   {match}  (qxub option - put before '{self.name}')",
+                        err=True,
+                    )
 
         # Provide specific guidance for this subcommand
         click.echo(f"\n📖 Option placement for 'qxub {self.name}':", err=True)
-        click.echo(f"   ✅ qxub --queue normal {self.name} --env myenv command", err=True)
-        click.echo(f"   ❌ qxub {self.name} --queue normal --env myenv command", err=True)
+        click.echo(
+            f"   ✅ qxub --queue normal {self.name} --env myenv command", err=True
+        )
+        click.echo(
+            f"   ❌ qxub {self.name} --queue normal --env myenv command", err=True
+        )
 
         # Check if this looks like a command argument that should use --
         if unknown_option.startswith("-") and self._looks_like_command_argument(
             unknown_option, args
         ):
-            click.echo("\n   If this is part of your command, use '--' to separate:", err=True)
             click.echo(
-                f"   ✅ qxub {self.name} --env myenv -- python script.py {unknown_option}", err=True
+                "\n   If this is part of your command, use '--' to separate:", err=True
             )
             click.echo(
-                f"   ❌ qxub {self.name} --env myenv python script.py {unknown_option}", err=True
+                f"   ✅ qxub {self.name} --env myenv -- python script.py {unknown_option}",
+                err=True,
+            )
+            click.echo(
+                f"   ❌ qxub {self.name} --env myenv python script.py {unknown_option}",
+                err=True,
             )
 
         # Show relevant help
@@ -149,7 +160,9 @@ def _get_default_template():
     """Get the default PBS template file path."""
     # Try pkg_resources first
     try:
-        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qconda.pbs")
+        template_path = pkg_resources.resource_filename(
+            __name__, "jobscripts/qconda.pbs"
+        )
         if os.path.exists(template_path):
             return template_path
     except (ImportError, AttributeError, FileNotFoundError):

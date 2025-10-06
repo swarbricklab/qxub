@@ -10,7 +10,12 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from .resource_parser import size_to_bytes, time_to_seconds, bytes_to_human, seconds_to_time
+from .resource_parser import (
+    size_to_bytes,
+    time_to_seconds,
+    bytes_to_human,
+    seconds_to_time,
+)
 
 
 class ResourceTracker:
@@ -102,7 +107,9 @@ class ResourceTracker:
                 "exit_code": resource_data.get("exit_status"),
                 # Requested resources (convert to MB/seconds)
                 "mem_requested_mb": self._parse_size_to_mb(requested.get("mem")),
-                "time_requested_sec": self._parse_time_to_sec(requested.get("walltime")),
+                "time_requested_sec": self._parse_time_to_sec(
+                    requested.get("walltime")
+                ),
                 "cpus_requested": self._parse_int(requested.get("ncpus")),
                 "jobfs_requested_mb": self._parse_size_to_mb(requested.get("jobfs")),
                 # Used resources
@@ -260,7 +267,12 @@ class ResourceTracker:
                 ORDER BY timestamp DESC
                 LIMIT ?
             """,
-                (efficiency_threshold, efficiency_threshold, efficiency_threshold, limit),
+                (
+                    efficiency_threshold,
+                    efficiency_threshold,
+                    efficiency_threshold,
+                    limit,
+                ),
             )
 
             return [dict(row) for row in cursor.fetchall()]

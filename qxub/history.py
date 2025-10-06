@@ -134,7 +134,9 @@ class CommandHistoryLogger:
 
         return entry
 
-    def log_command(self, ctx: click.Context, success: bool = True, error: Optional[str] = None):
+    def log_command(
+        self, ctx: click.Context, success: bool = True, error: Optional[str] = None
+    ):
         """Log a command execution to the history file."""
         try:
             history_entry = self._create_history_entry(ctx)

@@ -273,7 +273,9 @@ def wait_for_job_exit_status(job_id, initial_wait=5, poll_interval=5, max_attemp
             )
             time.sleep(poll_interval)
 
-    logging.warning("Could not get exit status for job %s after %d attempts", job_id, max_attempts)
+    logging.warning(
+        "Could not get exit status for job %s after %d attempts", job_id, max_attempts
+    )
     return 1  # Return failure exit code if we can't determine the real status
 
 
@@ -381,7 +383,14 @@ def parse_qstat_fx_output(qstat_output):
             resource_key = key[15:]  # Remove 'resources_used.' prefix
             data["resources_used"][resource_key] = value
 
-        elif key in ["exec_host", "exec_vnode", "queue", "session_id", "project", "group_list"]:
+        elif key in [
+            "exec_host",
+            "exec_vnode",
+            "queue",
+            "session_id",
+            "project",
+            "group_list",
+        ]:
             # Execution environment
             data["execution"][key] = value
 
@@ -582,7 +591,9 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     else:
         spinner_msg = f"Job {job_id[:8]} - Waiting"
 
-    with JobSpinner(spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator):
+    with JobSpinner(
+        spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator
+    ):
         time.sleep(60)
 
     logging.debug("Starting job monitoring")
@@ -678,8 +689,12 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
     qstat_thread = threading.Thread(
         target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
     )
-    out_thread = threading.Thread(target=tail, args=(out_file, "STDOUT", coordinator), daemon=True)
-    err_thread = threading.Thread(target=tail, args=(err_file, "STDERR", coordinator), daemon=True)
+    out_thread = threading.Thread(
+        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
+    )
 
     # Set up signal handler for Ctrl-C
     def signal_handler(signum, frame):
@@ -706,7 +721,11 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
         logging.info("Job monitoring completed")
 
         # Return the job's exit status
-        return coordinator.job_exit_status if coordinator.job_exit_status is not None else 0
+        return (
+            coordinator.job_exit_status
+            if coordinator.job_exit_status is not None
+            else 0
+        )
 
     except KeyboardInterrupt:
         logging.info("KeyboardInterrupt received, shutting down...")

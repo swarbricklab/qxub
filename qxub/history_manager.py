@@ -124,7 +124,9 @@ class HistoryManager:
             recipe_data = self._extract_recipe_from_command(ctx, command_line)
 
             # Only proceed if we have a valid executor (not config commands, etc.)
-            if not recipe_data.get("executor") or recipe_data["executor"].get("type") not in [
+            if not recipe_data.get("executor") or recipe_data["executor"].get(
+                "type"
+            ) not in [
                 "conda",
                 "module",
                 "sing",
@@ -162,7 +164,9 @@ class HistoryManager:
                 }
             else:
                 # Update existing recipe metadata
-                recipes_config.recipes[recipe_hash].metadata.last_seen = datetime.now().isoformat()
+                recipes_config.recipes[recipe_hash].metadata.last_seen = (
+                    datetime.now().isoformat()
+                )
                 recipes_config.recipes[recipe_hash].metadata.run_count += 1
 
             # Save recipes file
@@ -198,7 +202,9 @@ class HistoryManager:
                     "joblog": None,  # To be filled in later if available
                     "status": "completed" if success else "failed",
                     "timestamp": datetime.now().isoformat(),
-                    "exit_code": resource_data.get("exit_status") if resource_data else None,
+                    "exit_code": (
+                        resource_data.get("exit_status") if resource_data else None
+                    ),
                 },
             }
 
@@ -320,7 +326,9 @@ class HistoryManager:
         recipes = self.get_recipes()
         return recipes.get(recipe_hash)
 
-    def get_executions_for_recipe(self, recipe_hash: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_executions_for_recipe(
+        self, recipe_hash: str, limit: int = 10
+    ) -> List[Dict[str, Any]]:
         """Get executions for a specific recipe."""
         if not self.executions_file.exists():
             return []

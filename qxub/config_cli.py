@@ -218,7 +218,9 @@ def init():
         click.echo("Edit the file to customize your defaults and aliases")
     except click.ClickException:
         click.echo("❌ User configuration file already exists")
-        click.echo("Use 'qxub config edit' to modify or 'qxub config reset' to recreate")
+        click.echo(
+            "Use 'qxub config edit' to modify or 'qxub config reset' to recreate"
+        )
 
 
 # Alias management subcommands
@@ -325,7 +327,9 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
         errors.append(f"Invalid subcommand type: {subcommand_type}")
 
     if not cmd:
-        warnings.append("No 'cmd' specified - alias can only be used with command override")
+        warnings.append(
+            "No 'cmd' specified - alias can only be used with command override"
+        )
 
     # Check subcommand-specific requirements
     if subcommand_type == "sing":
@@ -375,10 +379,14 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
 @click.option("--cmd", help="Command to execute")
 @click.option("--name", help="Job name")
 @click.option("--queue", help="Queue name")
-@click.option("--resources", multiple=True, help="Resource requests (can specify multiple)")
+@click.option(
+    "--resources", multiple=True, help="Resource requests (can specify multiple)"
+)
 @click.option("--env", help="Conda environment (for conda subcommand)")
 @click.option("--mod", help="Single module to load (for module subcommand)")
-@click.option("--mods", help="Multiple modules to load, comma-separated (for module subcommand)")
+@click.option(
+    "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"
+)
 @click.option("--sif", help="Singularity container (for sing subcommand)")
 def set_alias(alias_name: str, **kwargs):
     """Create or update an alias."""
@@ -542,7 +550,9 @@ def show_history_item(index):
 
         # Convert to 1-based indexing (most recent is 1)
         if index < 1 or index > len(commands):
-            console.print(f"❌ Invalid index. Available range: 1-{len(commands)}", style="red")
+            console.print(
+                f"❌ Invalid index. Available range: 1-{len(commands)}", style="red"
+            )
             return
 
         # Get command (index 1 = most recent, so we need to reverse)
@@ -576,7 +586,9 @@ def show_history_item(index):
         if alias_structure:
             console.print("🏗️ Alias-like Structure:", style="bold")
             yaml_content = OmegaConf.to_yaml(OmegaConf.create(alias_structure))
-            syntax = Syntax(yaml_content, "yaml", theme="github-dark", line_numbers=True)
+            syntax = Syntax(
+                yaml_content, "yaml", theme="github-dark", line_numbers=True
+            )
             console.print(syntax)
 
     except Exception as e:
@@ -609,7 +621,9 @@ def history_to_alias(index, alias_name, overwrite):
 
         # Convert to 1-based indexing (most recent is 1)
         if index < 1 or index > len(commands):
-            console.print(f"❌ Invalid index. Available range: 1-{len(commands)}", style="red")
+            console.print(
+                f"❌ Invalid index. Available range: 1-{len(commands)}", style="red"
+            )
             return
 
         # Get command (index 1 = most recent, so we need to reverse)
@@ -649,8 +663,13 @@ def history_to_alias(index, alias_name, overwrite):
         # Save the alias
         config_manager.save_alias(alias_name, alias_def)
 
-        action = "Updated" if (alias_name in existing_aliases and overwrite) else "Created"
-        console.print(f"✅ {action} alias '{alias_name}' from history item #{index}", style="green")
+        action = (
+            "Updated" if (alias_name in existing_aliases and overwrite) else "Created"
+        )
+        console.print(
+            f"✅ {action} alias '{alias_name}' from history item #{index}",
+            style="green",
+        )
 
         # Show the created alias
         console.print("\n📋 Created alias structure:", style="bold")

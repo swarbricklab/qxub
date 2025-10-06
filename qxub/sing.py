@@ -50,7 +50,9 @@ def _get_default_template():
     """Get the default PBS template file path."""
     # Try pkg_resources first
     try:
-        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qsing.pbs")
+        template_path = pkg_resources.resource_filename(
+            __name__, "jobscripts/qsing.pbs"
+        )
         if os.path.exists(template_path):
             return template_path
     except (ImportError, AttributeError, FileNotFoundError):
@@ -77,7 +79,9 @@ def _get_default_template():
     }
 )
 @click.argument("cmd", nargs=-1)
-@click.option("--sif", required=True, help="Path to the Singularity .sif container file")
+@click.option(
+    "--sif", required=True, help="Path to the Singularity .sif container file"
+)
 @click.option(
     "--template",
     default=_get_default_template(),
@@ -85,7 +89,8 @@ def _get_default_template():
 )
 @click.option(
     "--pre",
-    help="Command to run before the singularity command " "(use quotes for commands with options)",
+    help="Command to run before the singularity command "
+    "(use quotes for commands with options)",
 )
 @click.option(
     "--post",

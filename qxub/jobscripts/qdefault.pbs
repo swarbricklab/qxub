@@ -1,0 +1,119 @@
+#! /bin/bash
+#PBS -N qdefault
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -W umask=0027
+#PBS -j oe
+
+# Logging
+echo "📁 Execution directory: $cwd"
+echo "🔧 Default execution (no environment activation)"
+
+# Decode base64 encoded commands
+if [ -n "$cmd_b64" ]; then
+    cmd=$(echo "$cmd_b64" | base64 -d)
+fi
+if [ -n "$pre_cmd_b64" ]; then
+    pre_cmd=$(echo "$pre_cmd_b64" | base64 -d)
+fi
+if [ -n "$post_cmd_b64" ]; then
+    post_cmd=$(echo "$post_cmd_b64" | base64 -d)
+fi
+
+echo "💻 Command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Post-command: $post_cmd"
+fi
+echo "📄 STDOUT file: $out"
+echo "📄 STDERR file: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
+echo "👤 Current user: $(whoami)"
+echo "📍 Current directory: $(pwd)"
+
+# Strict mode with error handling
+set -e
+
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "💥 Failed command: $BASH_COMMAND"
+    exit $exit_code
+}
+
+# Set trap for error handling
+trap error_handler ERR
+
+# Check required variables
+if [ -z "$cmd" ]; then
+    echo "❌ ERROR: No command provided"
+    exit 1
+fi
+
+if [ -z "$cwd" ]; then
+    echo "❌ ERROR: No working directory provided"
+    exit 1
+fi
+
+# Change to execution directory
+cd "$cwd" || { echo "❌ ERROR: Failed to change to directory $cwd"; exit 1; }
+
+# Set output redirection for quiet mode
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, don't redirect stdout/stderr to files
+    exec_prefix=""
+else
+    # Create output directories
+    out_dir=$(dirname "$out")
+    err_dir=$(dirname "$err")
+    
+    mkdir -p "$out_dir" "$err_dir"
+    
+    # Test write permissions
+    if ! touch "$out" "$err"; then
+        echo "❌ ERROR: Cannot write to output files $out and $err"
+        exit 1
+    fi
+    
+    exec_prefix="exec 1>\"$out\" 2>\"$err\""
+fi
+
+# Execute pre-command if provided
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Executing pre-command..."
+    if [ "$quiet" = "true" ]; then
+        eval "$pre_cmd"
+    else
+        eval "$exec_prefix; $pre_cmd"
+    fi
+    echo "✅ Pre-command completed"
+fi
+
+# Execute main command
+echo "💻 Executing main command..."
+if [ "$quiet" = "true" ]; then
+    eval "$cmd"
+else
+    eval "$exec_prefix; $cmd"
+fi
+echo "✅ Command completed successfully"
+
+# Execute post-command if provided
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Executing post-command..."
+    if [ "$quiet" = "true" ]; then
+        eval "$post_cmd"
+    else
+        eval "$exec_prefix; $post_cmd"
+    fi
+    echo "✅ Post-command completed"
+fi
+
+echo "🎉 Job completed successfully"

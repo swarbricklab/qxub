@@ -142,11 +142,15 @@ def executions(limit):
 
         status = execution.get("execution", {}).get("status", "unknown")
         status_style = (
-            "green" if status == "completed" else "red" if status == "failed" else "yellow"
+            "green"
+            if status == "completed"
+            else "red" if status == "failed" else "yellow"
         )
 
         working_dir = execution.get("context", {}).get("working_directory", "")
-        working_dir = working_dir.replace(str(click.get_app_dir("qxub", force_posix=True)), "~")
+        working_dir = working_dir.replace(
+            str(click.get_app_dir("qxub", force_posix=True)), "~"
+        )
         working_dir = working_dir[-30:] if len(working_dir) > 30 else working_dir
 
         table.add_row(
@@ -205,7 +209,9 @@ def runs(recipe_hash, limit):
     executions_list = history_manager.get_executions_for_recipe(recipe_hash, limit)
 
     if not executions_list:
-        console.print(f"📝 No executions found for recipe {recipe_hash}", style="yellow")
+        console.print(
+            f"📝 No executions found for recipe {recipe_hash}", style="yellow"
+        )
         return
 
     console.print(f"📋 Executions for Recipe: {recipe_hash}", style="bold")
@@ -231,13 +237,17 @@ def runs(recipe_hash, limit):
 
         status = execution.get("execution", {}).get("status", "unknown")
         status_style = (
-            "green" if status == "completed" else "red" if status == "failed" else "yellow"
+            "green"
+            if status == "completed"
+            else "red" if status == "failed" else "yellow"
         )
 
         working_dir = execution.get("context", {}).get("working_directory", "")
         job_id = execution.get("execution", {}).get("job_id") or "—"
 
-        table.add_row(time_str, f"[{status_style}]{status}[/{status_style}]", working_dir, job_id)
+        table.add_row(
+            time_str, f"[{status_style}]{status}[/{status_style}]", working_dir, job_id
+        )
 
     console.print(table)
 
@@ -282,14 +292,21 @@ def recipe_to_alias(recipe_hash, alias_name, overwrite):
         # Convert to alias format
         alias_def = history_manager.convert_recipe_to_alias(recipe_hash)
         if not alias_def:
-            console.print(f"❌ Could not convert recipe {recipe_hash} to alias format", style="red")
+            console.print(
+                f"❌ Could not convert recipe {recipe_hash} to alias format",
+                style="red",
+            )
             return
 
         # Save the alias
         config_manager.save_alias(alias_name, alias_def)
 
-        action = "Updated" if (alias_name in existing_aliases and overwrite) else "Created"
-        console.print(f"✅ {action} alias '{alias_name}' from recipe {recipe_hash}", style="green")
+        action = (
+            "Updated" if (alias_name in existing_aliases and overwrite) else "Created"
+        )
+        console.print(
+            f"✅ {action} alias '{alias_name}' from recipe {recipe_hash}", style="green"
+        )
 
         # Show the created alias
         console.print("\n📋 Created alias structure:", style="bold")
