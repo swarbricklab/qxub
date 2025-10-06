@@ -1,18 +1,9 @@
 """
-Alias execution CLI for qxub.
-
-Provides commands for executing aliases with optional overrides and command arguments.
+Alias CLI commands for qxub.
 """
 
-# pylint: disable=import-outside-toplevel
-# pylint: disable=import-outside-toplevel,cyclic-import
 import click
-from rich.console import Console
-
 from .config_manager import config_manager
-
-
-console = Console()
 
 
 @click.command(name="alias")
@@ -38,19 +29,105 @@ console = Console()
 @click.option("--bind", multiple=True, help="Override bind paths")
 @click.option("--env-var", multiple=True, help="Override environment variables")
 @click.pass_context
-def alias_cli(
-    ctx, alias_name: str, command_args: tuple, **overrides
-):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):
     """Execute an alias with optional overrides and command arguments.
+
+    Special management commands:
+        qxub alias list - List all available aliases
+        qxub alias test <alias_name> - Test an alias without executing
 
     Examples:
         qxub alias dvc_push
         qxub alias train_model --queue gpuvolta
         qxub alias analysis -- input.bam output.bam
         qxub alias quick_task --cmd "python script.py"
-        qxub alias module_task --mod python3
-        qxub alias multi_task --mods "python3,samtools,gcc"
     """
+    # Handle special management commands
+    if alias_name == "list":
+        _handle_alias_list()
+        return
+    elif alias_name == "test":
+        if not command_args:
+            click.echo("❌ 'test' command requires an alias name")
+            ctx.exit(2)
+        _handle_alias_test(command_args[0])
+        return
+
+    # Handle normal alias execution
+    _handle_alias_execution(ctx, alias_name, command_args, overrides)
+
+
+def _handle_alias_list():
+    """List all available aliases."""
+    aliases = config_manager.list_aliases()
+    if not aliases:
+        click.echo("No aliases configured.")
+        return
+
+    click.echo("Available aliases:")
+    for alias_name in aliases:
+        alias_def = config_manager.get_alias(alias_name)
+        if alias_def:
+            # Determine execution context
+            if alias_def.get("env"):
+                context = f"conda (env: {alias_def['env']})"
+            elif alias_def.get("mod"):
+                context = f"module (mod: {alias_def['mod']})"
+            elif alias_def.get("mods"):
+                context = f"modules (mods: {alias_def['mods']})"
+            elif alias_def.get("sif"):
+                context = f"singularity (sif: {alias_def['sif']})"
+            else:
+                context = "default"
+
+            cmd = alias_def.get("cmd", "(requires command args)")
+            click.echo(f"  • {alias_name}: {context} - {cmd}")
+
+
+def _handle_alias_test(alias_name: str):
+    """Test an alias without executing it (dry run)."""
+    # Get the alias definition
+    alias_def = config_manager.get_alias(alias_name)
+    if not alias_def:
+        click.echo(f"❌ Alias '{alias_name}' not found")
+        click.echo("Available aliases:")
+        for alias in config_manager.list_aliases():
+            click.echo(f"  • {alias}")
+        return
+
+    click.echo(f"🧪 Testing alias: {alias_name}")
+
+    # Show alias definition
+    click.echo("📋 Alias definition:")
+    for key, value in alias_def.items():
+        if isinstance(value, (list, tuple)):
+            click.echo(f"  {key}: {', '.join(str(v) for v in value)}")
+        else:
+            click.echo(f"  {key}: {value}")
+
+    # Determine execution context
+    execution_context = "default"
+    if alias_def.get("env"):
+        execution_context = f"conda (env: {alias_def['env']})"
+    elif alias_def.get("mod"):
+        execution_context = f"module (mod: {alias_def['mod']})"
+    elif alias_def.get("mods"):
+        execution_context = f"modules (mods: {alias_def['mods']})"
+    elif alias_def.get("sif"):
+        execution_context = f"singularity (sif: {alias_def['sif']})"
+
+    click.echo("✅ Alias validation:")
+    click.echo(f"  • Execution context: {execution_context}")
+    click.echo(f"  • Command: {alias_def.get('cmd', '(none - requires command args)')}")
+
+    if alias_def.get("sif") and not alias_def.get("sif"):
+        click.echo("  ⚠️  Warning: No Singularity container specified")
+
+    click.echo("🎉 Alias test completed")
+
+
+def _handle_alias_execution(ctx, alias_name: str, command_args: tuple, overrides: dict):
+    """Execute an alias with optional additional arguments."""
     # Get the alias definition
     alias_def = config_manager.get_alias(alias_name)
     if not alias_def:
@@ -60,57 +137,19 @@ def alias_cli(
             click.echo(f"  • {alias}")
         ctx.exit(2)
 
-    # Parse the new structured alias format
-    main_options = alias_def.get("main", {})
-    subcommand_def = alias_def.get("subcommand", {})
-    target_def = alias_def.get("target", {})
-
-    # Check for legacy format and migrate
-    if "subcommand" in alias_def and isinstance(alias_def["subcommand"], str):
-        # Legacy format - migrate to new structure
-        subcommand_type = alias_def["subcommand"]
-        main_options = {
-            k: v
-            for k, v in alias_def.items()
-            if k not in ["subcommand", "env", "mod", "sif", "bind", "env_var"]
-        }
-        subcommand_def = {
-            "type": subcommand_type,
-            **{
-                k: v
-                for k, v in alias_def.items()
-                if k in ["env", "mod", "sif", "bind", "env_var"]
-            },
-        }
-        target_def = {"cmd": alias_def.get("cmd")}
-
-    # Get subcommand type
-    subcommand_type = subcommand_def.get("type")
-    if not subcommand_type:
-        click.echo(f"❌ Alias '{alias_name}' missing subcommand type")
-        ctx.exit(2)
-
-    if subcommand_type not in ["conda", "module", "sing"]:
-        click.echo(
-            f"❌ Invalid subcommand type in alias '{alias_name}': {subcommand_type}"
-        )
-        ctx.exit(2)
-
-    # Prepare the command
-    cmd = overrides.get("cmd") or target_def.get("cmd")
-    if not cmd and not command_args:
-        click.echo(f"❌ No command specified for alias '{alias_name}'")
-        click.echo(
-            "Either define 'cmd' in the target section or provide command arguments"
-        )
-        ctx.exit(2)
-
-    # Append command arguments if provided
-    if command_args:
-        if cmd:
-            cmd = f"{cmd} {' '.join(command_args)}"
-        else:
-            cmd = " ".join(command_args)
+    # Handle legacy format migration
+    if "subcommand" in alias_def:
+        click.echo("⚠️  Migrating legacy alias format...")
+        # Convert old subcommand format to new unified CLI format
+        subcommand = alias_def.get("subcommand")
+        if subcommand == "conda":
+            alias_def["env"] = alias_def.get("env")
+        elif subcommand == "mod":
+            alias_def["mod"] = alias_def.get("mod")
+        elif subcommand == "sing":
+            alias_def["sif"] = alias_def.get("sif")
+        # Remove legacy fields
+        alias_def.pop("subcommand", None)
 
     # Remove None values from overrides, and empty tuples from Click multiple options
     clean_overrides = {
@@ -119,196 +158,63 @@ def alias_cli(
         if v is not None and not (isinstance(v, tuple) and len(v) == 0)
     }
 
-    # Resolve template variables in alias definition before using it
-    # Get template variables for resolution
-    template_vars = config_manager.get_template_variables(
-        name=main_options.get("name"),
-        project=main_options.get("project"),
-        queue=main_options.get("queue"),
-    )
+    # Build the command line for the unified CLI
+    cmd_args = ["qxub"]
 
-    # Resolve templates in all parts of the alias definition
-    main_options = config_manager.resolve_templates(main_options, template_vars)
-    subcommand_def = config_manager.resolve_templates(subcommand_def, template_vars)
-    target_def = config_manager.resolve_templates(target_def, template_vars)
+    # Add execution context options (from alias, can be overridden)
+    if clean_overrides.get("env") or alias_def.get("env"):
+        cmd_args.extend(["--env", clean_overrides.get("env") or alias_def["env"]])
+    elif clean_overrides.get("mod") or alias_def.get("mod"):
+        cmd_args.extend(["--mod", clean_overrides.get("mod") or alias_def["mod"]])
+    elif clean_overrides.get("mods") or alias_def.get("mods"):
+        mods = clean_overrides.get("mods") or alias_def["mods"]
+        if isinstance(mods, str):
+            mods = mods.split(",")
+        for mod in mods:
+            cmd_args.extend(["--mod", mod.strip()])
+    elif clean_overrides.get("sif") or alias_def.get("sif"):
+        cmd_args.extend(["--sif", clean_overrides.get("sif") or alias_def["sif"]])
 
-    # Merge alias options with CLI overrides
-    # Main options (for qxub command level)
-    main_opts = main_options.copy()
-    for key in [
-        "name",
-        "queue",
-        "project",
-        "joblog",
-        "out",
-        "err",
-        "pre",
-        "post",
-        "resources",
-    ]:
-        if key in clean_overrides:
-            main_opts[key] = clean_overrides[key]
+    # Add all PBS-related options from alias (can be overridden)
+    pbs_options = ["walltime", "mem", "ncpus", "jobfs", "queue", "project", "name"]
+    for option in pbs_options:
+        value = clean_overrides.get(option) or alias_def.get(option)
+        if value:
+            cmd_args.extend([f"--{option}", str(value)])
 
-    # Subcommand options
-    sub_opts = subcommand_def.copy()
-    for key in ["env", "mod", "mods", "sif", "bind", "env_var"]:
-        if key in clean_overrides:
-            sub_opts[key] = clean_overrides[key]
-
-    # Build the qxub command with proper option ordering
-    qxub_cmd = ["qxub"]
-
-    # Add global options from parent context first
-    if ctx.parent:
-        parent_params = ctx.parent.params
-        # Add global options that affect execution
-        if parent_params.get("dry"):
-            qxub_cmd.append("--dry-run")
-        if parent_params.get("quiet"):
-            qxub_cmd.append("--quiet")
-        if parent_params.get("no_wait"):
-            qxub_cmd.append("--no-wait")
-
-    # Add main options after global options
-    if main_opts.get("name"):
-        qxub_cmd.extend(["--name", main_opts["name"]])
-    if main_opts.get("queue"):
-        qxub_cmd.extend(["--queue", main_opts["queue"]])
-    if main_opts.get("project"):
-        qxub_cmd.extend(["--project", main_opts["project"]])
-    if main_opts.get("joblog"):
-        qxub_cmd.extend(["--joblog", main_opts["joblog"]])
-    if main_opts.get("out"):
-        qxub_cmd.extend(["--out", main_opts["out"]])
-    if main_opts.get("err"):
-        qxub_cmd.extend(["--err", main_opts["err"]])
-    if main_opts.get("pre"):
-        qxub_cmd.extend(["--pre", main_opts["pre"]])
-    if main_opts.get("post"):
-        qxub_cmd.extend(["--post", main_opts["post"]])
-
-    # Add resources (can be multiple)
-    if main_opts.get("resources"):
-        resources = main_opts["resources"]
-        # Handle both tuples (from Click multiple=True) and lists
+    # Add resources (can be multiple, and can be overridden)
+    resources = clean_overrides.get("resources") or alias_def.get("resources")
+    if resources:
         if isinstance(resources, (list, tuple)):
             for resource in resources:
-                qxub_cmd.extend(["--resources", resource])
+                cmd_args.extend(["--resources", resource])
         else:
-            qxub_cmd.extend(["--resources", resources])
+            cmd_args.extend(["--resources", resources])
 
-    # Add the subcommand type
-    qxub_cmd.append(subcommand_type)
+    # Add separator before command
+    cmd_args.append("--")
 
-    # Add subcommand-specific options
-    if subcommand_type == "conda":
-        if sub_opts.get("env"):
-            qxub_cmd.extend(["--env", sub_opts["env"]])
-        if sub_opts.get("pre"):
-            qxub_cmd.extend(["--pre", sub_opts["pre"]])
-        if sub_opts.get("post"):
-            qxub_cmd.extend(["--post", sub_opts["post"]])
-    elif subcommand_type == "module":
-        if sub_opts.get("mod"):
-            qxub_cmd.extend(["--mod", sub_opts["mod"]])
-        if sub_opts.get("mods"):
-            for mod in sub_opts["mods"]:
-                qxub_cmd.extend(["--mod", mod])
-        if sub_opts.get("pre"):
-            qxub_cmd.extend(["--pre", sub_opts["pre"]])
-        if sub_opts.get("post"):
-            qxub_cmd.extend(["--post", sub_opts["post"]])
-    elif subcommand_type == "sing":
-        if sub_opts.get("sif"):
-            qxub_cmd.extend(["--sif", sub_opts["sif"]])
-        if sub_opts.get("bind"):
-            bind_paths = sub_opts["bind"]
-            # Handle both tuples (from Click multiple=True) and lists
-            if isinstance(bind_paths, (list, tuple)):
-                for bind in bind_paths:
-                    qxub_cmd.extend(["--bind", bind])
-            else:
-                qxub_cmd.extend(["--bind", bind_paths])
-        if sub_opts.get("env_var"):
-            env_vars = sub_opts["env_var"]
-            # Handle both tuples (from Click multiple=True) and lists
-            if isinstance(env_vars, (list, tuple)):
-                for env_var in env_vars:
-                    qxub_cmd.extend(["--env-var", env_var])
-            else:
-                qxub_cmd.extend(["--env-var", env_vars])
+    # Add the command from alias or override
+    cmd = clean_overrides.get("cmd") or alias_def.get("cmd")
+    if cmd:
+        cmd_args.extend(cmd.split())
 
-    # Add the command to execute
-    qxub_cmd.append(cmd)
+    # Add additional arguments provided by user
+    cmd_args.extend(command_args)
 
-    # Show what would be executed
-    click.echo(f"🏃 Executing alias '{alias_name}' with command:")
-    # Ensure all elements are strings before joining
-    qxub_cmd_str = []
-    for item in qxub_cmd:
-        if isinstance(item, (list, tuple)):
-            qxub_cmd_str.extend(str(x) for x in item)
-        else:
-            qxub_cmd_str.append(str(item))
-    click.echo(f"   {' '.join(qxub_cmd_str)}")
-    click.echo()
+    click.echo(f"🚀 Executing alias: {alias_name}")
+    click.echo(f"📝 Command: {' '.join(cmd_args)}")
 
-    # Execute the command
-    import subprocess
-    import os
+    # Import here to avoid circular imports
+    from .cli import qxub as main_cli
 
-    # Set environment variable to prevent history logging in subprocess
-    env = os.environ.copy()
-    env["QXUB_SUBPROCESS"] = "1"
-
-    # Execute as a shell command to properly isolate the subprocess
-    cmd_str = " ".join(qxub_cmd_str)
-    result = subprocess.run(cmd_str, shell=True, env=env)
-
-    # Exit with the same code as the executed command
-    exit(result.returncode)
-
-
-# Test command for aliases
-@click.command(name="alias-test")
-@click.argument("alias_name")
-@click.pass_context
-def alias_test_cli(ctx, alias_name: str):
-    """Test an alias without executing it (dry run)."""
-    # pylint: disable=duplicate-code
-    # Get the alias definition
-    alias_def = config_manager.get_alias(alias_name)
-    if not alias_def:
-        click.echo(f"❌ Alias '{alias_name}' not found")
-        ctx.exit(2)
-
-    click.echo(f"🧪 Testing alias: {alias_name}")
-
-    # Show resolved configuration
-    resolved_options = config_manager.resolve_options({}, alias_name)
-
-    click.echo("📋 Resolved configuration:")
-    for key, value in resolved_options.items():
-        if isinstance(value, dict):
-            click.echo(f"  {key}:")
-            for subkey, subvalue in value.items():
-                click.echo(f"    {subkey}: {subvalue}")
-        else:
-            click.echo(f"  {key}: {value}")
-
-    # Validate the alias
-    subcommand = alias_def.get("subcommand")
-    cmd = alias_def.get("cmd")
-
-    click.echo("✅ Alias validation:")
-    click.echo(f"  • Subcommand: {subcommand}")
-    click.echo(f"  • Command: {cmd or '(none - requires command args)'}")
-
-    if subcommand == "sing":
-        sif = resolved_options.get("sing", {}).get("sif")
-        if not sif:
-            click.echo("  ⚠️  Warning: No Singularity container specified")
-        else:
-            click.echo(f"  • Container: {sif}")
-
-    click.echo("🎉 Alias test completed")
+    # Execute the command by invoking the main CLI
+    try:
+        # Remove 'qxub' from the beginning since we're calling it directly
+        main_cli(cmd_args[1:], standalone_mode=False)
+    except SystemExit as e:
+        # Re-raise the exit code
+        ctx.exit(e.code)
+    except Exception as e:
+        click.echo(f"❌ Error executing alias: {e}")
+        ctx.exit(1)

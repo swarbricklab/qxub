@@ -13,7 +13,7 @@ import difflib
 import base64
 import click
 from .config_cli import config_cli
-from .alias_cli import alias_cli, alias_test_cli
+from .alias_cli import alias_cli
 from .history_cli import history
 from .resources_cli import resources
 from .config import setup_logging
@@ -835,6 +835,5 @@ def _get_default_template():
 # CLI Management Commands (these remain as separate commands)
 qxub.add_command(config_cli)
 qxub.add_command(alias_cli)
-qxub.add_command(alias_test_cli)
 qxub.add_command(history)
 qxub.add_command(resources)

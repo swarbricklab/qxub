@@ -59,10 +59,10 @@ qxub config alias list              # List all aliases
 # Set up environment
 qxub config set defaults.project "ds01"
 
-# Create analysis pipeline
-qxub config alias set preprocess --subcommand conda --env datasci --cmd "python preprocess.py"
-qxub config alias set train --subcommand conda --env pytorch --cmd "python train.py" --queue gpuvolta --resources "ngpus=1,ncpus=12"
-qxub config alias set evaluate --subcommand conda --env datasci --cmd "python evaluate.py"
+# Create analysis pipeline using new unified CLI format
+qxub config alias set preprocess --env datasci --cmd "python preprocess.py"
+qxub config alias set train --env pytorch --cmd "python train.py" --queue gpuvolta --resources "ngpus=1,ncpus=12"
+qxub config alias set evaluate --env datasci --cmd "python evaluate.py"
 
 # Execute pipeline
 qxub alias preprocess data/
@@ -72,10 +72,10 @@ qxub alias evaluate
 
 ### Bioinformatics
 ```bash
-# Set up tools
-qxub config alias set qc --subcommand module --mods "fastqc,multiqc" --cmd "fastqc"
-qxub config alias set align --subcommand module --mods "bwa,samtools" --cmd "bwa mem ref.fa"
-qxub config alias set variants --subcommand sing --sif "/containers/gatk.sif" --cmd "gatk HaplotypeCaller"
+# Set up tools using unified CLI format
+qxub config alias set qc --mods "fastqc,multiqc" --cmd "fastqc"
+qxub config alias set align --mods "bwa,samtools" --cmd "bwa mem ref.fa"
+qxub config alias set variants --sif "/containers/gatk.sif" --cmd "gatk HaplotypeCaller"
 
 # Execute analysis
 qxub alias qc reads.fastq.gz
@@ -85,10 +85,10 @@ qxub alias variants -I aligned.bam -R ref.fa
 
 ### Data Management
 ```bash
-# Set up data operations
-qxub config alias set dvc_push --subcommand conda --env dvc3 --cmd "dvc push" --queue copyq
-qxub config alias set backup --subcommand module --mod rsync --cmd "rsync -av" --queue copyq
-qxub config alias set sync_cloud --subcommand conda --env tools --cmd "rclone sync"
+# Set up data operations using unified CLI format
+qxub config alias set dvc_push --env dvc3 --cmd "dvc push" --queue copyq
+qxub config alias set backup --mod rsync --cmd "rsync -av" --queue copyq
+qxub config alias set sync_cloud --env tools --cmd "rclone sync"
 
 # Execute operations
 qxub alias dvc_push

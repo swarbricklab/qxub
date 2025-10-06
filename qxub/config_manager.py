@@ -258,11 +258,31 @@ class ConfigManager:
             },
             "aliases": {
                 "example": {
-                    "subcommand": "conda",
                     "cmd": 'echo "Hello from qxub alias!"',
                     "name": "example",
-                    "conda": {"env": "base"},
-                }
+                    "env": "base",  # Direct execution context option
+                },
+                "module_example": {
+                    "cmd": "samtools --version",
+                    "name": "samtools_test",
+                    "mod": "samtools",  # Single module
+                },
+                "multi_module_example": {
+                    "cmd": "python analysis.py",
+                    "name": "analysis",
+                    "mods": "python3,gcc",  # Multiple modules
+                },
+                "container_example": {
+                    "cmd": "python script.py",
+                    "name": "container_job",
+                    "sif": "/containers/analysis.sif",
+                    "bind": ["/data:/data"],
+                },
+                "default_example": {
+                    "cmd": "echo 'Direct PBS execution'",
+                    "name": "simple_job",
+                    # No execution context = default execution
+                },
             },
         }
 

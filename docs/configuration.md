@@ -1,6 +1,6 @@
 # Configuration Guide
 
-`qxub` 1.0 introduces a comprehensive configuration system that eliminates repetitive command-line options and enables powerful workflow management.
+`qxub` 2.0 introduces a comprehensive configuration system that eliminates repetitive command-line options and enables powerful workflow management.
 
 ## Quick Start
 
@@ -27,10 +27,10 @@ Once configured, your commands become much simpler:
 
 ```bash
 # Before configuration:
-qxub --project a56 --queue normal --resources mem=4GB conda --env myenv -- python script.py
+qxub --project a56 --queue normal -l mem=4GB --env myenv -- python script.py
 
 # After configuration:
-qxub conda --env myenv -- python script.py  # Uses your defaults automatically
+qxub --env myenv -- python script.py  # Uses your defaults automatically
 ```
 
 ## Configuration Management
