@@ -1,101 +1,120 @@
 # Option Placement Guide
 
-Understanding where to place options in `qxub` commands is crucial for successful usage. This guide explains the rules and provides clear examples.
+Understanding where to place options in `qxub` commands is crucial for successful usage. With qxub 2.0's unified CLI, option placement is much simpler than before.
 
 ## The Golden Rule
 
-**Main options must come BEFORE subcommands, subcommand options come AFTER subcommands.**
+**All qxub options must come BEFORE the `--` separator, all target command options come AFTER.**
 
 ```bash
-qxub [MAIN_OPTIONS] SUBCOMMAND [SUBCOMMAND_OPTIONS] [ARGUMENTS]
+qxub [OPTIONS] -- [COMMAND] [COMMAND_ARGUMENTS]
 ```
 
-## Main Options vs Subcommand Options
+## Option Categories
 
-### Main Options (for qxub itself)
-These control PBS job submission and must come **before** any subcommand:
+### Execution Context Options (mutually exclusive)
+Choose ONE execution context for your job:
+
+| Option | Alternative Names | Description | Example |
+|--------|-------------------|-------------|---------|
+| `--env` | `--conda` | Conda environment | `--env myenv` |
+| `--mod` | | Single module (repeatable) | `--mod python3 --mod gcc` |
+| `--mods` | `--modules` | Comma-separated modules | `--mods python3,gcc` |
+| `--sif` | `--sing`, `--singularity` | Singularity container | `--sif container.sif` |
+
+### PBS Job Options
+These control PBS job submission:
 
 | Option | Description | Example |
 |--------|-------------|---------|
 | `--name` | Job name | `--name analysis_job` |
 | `--queue` | PBS queue | `--queue normal` |
 | `--project` | Project code | `--project a56` |
-| `--resources` | PBS resources | `--resources mem=16GB,ncpus=4` |
+| `-l` | PBS resources (repeatable) | `-l mem=16GB -l ncpus=4` |
 | `--out` | STDOUT log path | `--out /logs/output.log` |
 | `--err` | STDERR log path | `--err /logs/error.log` |
 | `--joblog` | Job log path | `--joblog /logs/job.log` |
 | `--execdir` | Working directory | `--execdir /scratch/work/` |
-| `--dry-run` | Preview command | `--dry-run` |
+
+### Control Options
+These control qxub behavior:
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--dry` | Preview command only | `--dry` |
 | `--quiet` | Submit and exit | `--quiet` |
+| `--verbose` | Increase verbosity | `-v`, `-vv`, `-vvv` |
 
-### Subcommand Options (specific to each subcommand)
-These configure the execution environment and come **after** the subcommand:
+### Pre/Post Command Options
+These add setup and cleanup commands:
 
-#### conda subcommand options:
-- `--env` - Conda environment name
-- `--pre` - Command to run before main command  
-- `--post` - Command to run after main command
-
-#### module subcommand options:
-- `--mod` - Single module to load
-- `--mods` - Comma-separated modules to load
-- `--pre` - Command to run before main command
-- `--post` - Command to run after main command
-
-#### sing subcommand options:
-- `--sif` - Singularity image file
-- `--bind` - Bind mount paths
-- `--env` - Environment variables
-- `--pre` - Command to run before main command
-- `--post` - Command to run after main command
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--pre` | Command before main command | `--pre "echo Starting"` |
+| `--post` | Command after main command | `--post "echo Done"` |
 
 ## Correct Examples
 
 ### Basic Commands
 
 ```bash
-# ✅ Correct: Main options before subcommand
-qxub --name myjob --queue normal conda --env myenv -- python script.py
-qxub --resources mem=16GB module --mod samtools -- samtools --version
-qxub --project a56 --queue gpuvolta --resources ngpus=1,ncpus=12 conda --env pytorch -- python train.py
+# ✅ Correct: Conda environment execution
+qxub --env myenv -- python script.py
+qxub --conda myenv --queue normal --name myjob -- python script.py
 
-# ✅ Correct: Global flags immediately after qxub
-qxub --dry-run conda --env myenv -- python script.py
-qxub --quiet --name background_job conda --env myenv -- python script.py
+# ✅ Correct: Module execution  
+qxub --mod samtools -- samtools --version
+qxub --mods python3,gcc -l mem=16GB -- python analysis.py
+qxub --mod python3 --mod gcc -- python script.py
+
+# ✅ Correct: Singularity execution
+qxub --sif container.sif -- python script.py  
+qxub --singularity /containers/blast.sif --bind /data --project bio01 -- blastn -query input.fa
+
+# ✅ Correct: Default execution (no environment)
+qxub -- echo "Hello world"
+qxub -l mem=8GB -l walltime=01:00:00 -- ./my_program
+
+# ✅ Correct: Control options
+qxub --dry --env myenv -- python script.py
+qxub --quiet --name background_job --env myenv -- python script.py
 ```
-
-### Alias Execution
-
-**The `alias` subcommand is special** - it accepts both global qxub options and override options:
-
-```bash
-# ✅ Correct: Global options before alias subcommand
-qxub --dry-run alias myalias
-qxub --quiet alias myalias
-
-# ✅ Correct: Override options after alias name  
-qxub alias dvc_push --queue normal
-qxub alias analysis --env different_env --resources mem=16GB
-qxub alias gpu_job --queue gpuvolta --cmd "python train.py --epochs 100"
-
-# ✅ Correct: Combination of both
-qxub --dry-run alias myalias --queue express
-```
-
-The alias subcommand accepts override options because it needs to modify the original alias definition with your changes.
 
 ### Complex Commands
 
 ```bash
-# ✅ Correct: Full option placement
-qxub --name "analysis_$(date +%Y%m%d)" --queue normal --resources mem=16GB,ncpus=4 \
-     conda --env analysis --pre "echo Starting" --post "echo Done" -- \
+# ✅ Correct: Full option placement with pre/post commands
+qxub --name "analysis_$(date +%Y%m%d)" --queue normal -l mem=16GB -l ncpus=4 \
+     --env analysis --pre "echo Starting" --post "echo Done" -- \
      python analyze.py --input data.csv --output results.csv
 
-# ✅ Correct: Singularity with multiple options
-qxub --project bio01 --queue express --resources mem=32GB,ncpus=8 \
-     sing --sif /containers/analysis.sif --bind /data:/data --env DEBUG=1 -- \
-     python pipeline.py
+# ✅ Correct: GPU job with multiple resources
+qxub --project a56 --queue gpuvolta -l ngpus=1 -l ncpus=12 -l mem=32GB \
+     --conda pytorch -- python train.py --epochs 100
+
+# ✅ Correct: Container with binds and environment variables  
+qxub --project bio01 --queue express -l mem=32GB -l ncpus=8 \
+     --sif /containers/analysis.sif --bind /data:/data -- \
+     bash -c 'export DEBUG=1 && python pipeline.py'
+```
+
+### Alias Execution
+
+```bash
+# ✅ Correct: Basic alias execution
+qxub alias myalias
+
+# ✅ Correct: Global options before alias
+qxub --dry alias myalias
+qxub --quiet alias myalias
+
+# ✅ Correct: Override options after alias name  
+qxub alias dvc_push --queue normal
+qxub alias analysis --env different_env -l mem=16GB
+qxub alias gpu_job --queue gpuvolta --cmd "python train.py --epochs 100"
+
+# ✅ Correct: Combination of both
+qxub --dry alias myalias --queue express
 ```
 
 ## Common Mistakes
@@ -103,78 +122,93 @@ qxub --project bio01 --queue express --resources mem=32GB,ncpus=8 \
 ### Wrong Option Placement
 
 ```bash
-# ❌ Wrong: Main options after subcommand
-qxub conda --env myenv --name myjob --queue normal -- python script.py
-#    ^^^^^ conda subcommand    ^^^^^^^^^^^^^^^^^^^ main options (wrong place!)
+# ❌ Wrong: Execution context option after command
+qxub -- python script.py --env myenv
+#    ^^^^^^^^^^^^^^^^^^^^^^ command   ^^^^^^^^^^^^ qxub option (wrong place!)
 
-# ❌ Wrong: Global flags at the end  
-qxub conda --env myenv -- python script.py --dry-run
-#    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ command  ^^^^^^^^^ global flag (wrong place!)
+# ❌ Wrong: PBS options after --
+qxub --env myenv -- python script.py --queue normal
+#    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ correct  ^^^^^^^^^^^^^^ qxub option (wrong place!)
 
-# ❌ Wrong: Global flags after alias options
-qxub alias myalias --queue normal --dry-run
-#    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ alias execution ^^^^^^^^^ global flag (wrong place!)
+# ❌ Wrong: Control flags mixed with command arguments
+qxub --env myenv -- python script.py --dry
+#    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ command  ^^^^^ qxub option (wrong place!)
 ```
 
 ### Corrected Versions
 
 ```bash
-# ✅ Correct: Fixed option placement
-qxub --name myjob --queue normal conda --env myenv -- python script.py
-qxub --dry-run conda --env myenv -- python script.py
-qxub --dry-run alias myalias --queue normal
+# ✅ Correct: All qxub options before --
+qxub --env myenv -- python script.py
+qxub --env myenv --queue normal -- python script.py  
+qxub --dry --env myenv -- python script.py
 ```
 
-## Special Case: Alias Subcommand
-
-The `alias` subcommand is unique because it accepts override options after the alias name. This allows you to modify any aspect of the original alias definition:
+### Mutually Exclusive Execution Contexts
 
 ```bash
-# ✅ Correct: Override any alias option
-qxub alias myalias --queue normal        # Override queue
-qxub alias myalias --resources mem=16GB  # Override resources  
-qxub alias myalias --env different_env   # Override environment
-qxub alias myalias --cmd "new command"   # Override command completely
+# ❌ Wrong: Multiple execution contexts
+qxub --env myenv --mod python3 -- python script.py
+qxub --conda pytorch --sif container.sif -- python script.py
 
-# ✅ Correct: Multiple overrides
-qxub alias gpu_training --queue express --resources mem=32GB --cmd "python train.py --debug"
-
-# ✅ Correct: Global options still come first
-qxub --dry-run alias myalias --queue normal
-qxub --quiet alias background_job --resources mem=8GB
+# ✅ Correct: Single execution context
+qxub --env myenv -- python script.py
+qxub --mod python3 -- python script.py
+qxub --sif container.sif -- python script.py
 ```
+
+## Alternative Option Names
+
+qxub 2.0 provides multiple option names for better usability:
+
+```bash
+# All equivalent conda options:
+qxub --env myenv -- python script.py
+qxub --conda myenv -- python script.py
+
+# All equivalent module options:
+qxub --mod python3 -- python script.py        # Single module
+qxub --mods python3,gcc -- python script.py   # Comma-separated
+qxub --modules python3,gcc -- python script.py # Alternative name
+
+# All equivalent Singularity options:
+qxub --sif container.sif -- python script.py
+qxub --sing container.sif -- python script.py  
+qxub --singularity container.sif -- python script.py
+```
+
+## Special Case: Default Execution
+
+When no execution context is specified, qxub uses default execution (direct PBS submission):
+
+```bash
+# ✅ Correct: Default execution patterns
+qxub -- echo "Hello world"
+qxub -l walltime=02:00:00 -- ./compiled_program
+qxub --pre "mkdir -p /tmp/work" --post "rm -rf /tmp/work" -- python script.py
+qxub --name data-processing -l mem=32GB -- ./process_data.sh
+```
+
+This is useful for:
+- Running compiled programs that don't need specific environments
+- Simple shell commands and scripts  
+- Jobs where you want to use system-installed tools
+- Custom setups that don't fit conda/module/container patterns
 
 ### Why Alias is Special
 
-Unlike other subcommands that have fixed option sets, aliases need to accept any possible override because:
-
-1. **Aliases can contain any combination of options** from their original definition
-2. **Users need flexibility** to override any part of an alias at runtime  
-3. **Aliases are shortcuts** - if you couldn't override options, you'd need separate aliases for every variation
-
-### Alias Override Categories
-
-The alias subcommand accepts these override types:
-
-**Main qxub options:** `--name`, `--queue`, `--project`, `--resources`, `--out`, `--err`, `--joblog`
-
-**Subcommand options:** `--env`, `--mod`, `--mods`, `--sif`, `--bind`, `--pre`, `--post`
-
-**Command options:** `--cmd` (completely replace the command)
-
-All of these come **after** the alias name in the command.
-
 ## Why This Matters
 
-The option placement rules exist because:
+The `--` separator rules exist because:
 
-1. **qxub needs main options first** to configure the PBS job submission
-2. **Subcommands need their options** to configure the execution environment
-3. **Command arguments come last** so they can be properly passed through
+1. **Clear separation**: qxub options vs target command options
+2. **Unambiguous parsing**: No confusion about which options belong where  
+3. **Consistent behavior**: Same rules apply regardless of execution context
+4. **Prevents conflicts**: Target command options can't interfere with qxub
 
 When options are in the wrong place:
 - qxub may not recognize them (`No such option` errors)
-- Options may be ignored silently
+- Options may be passed to the wrong component
 - The generated PBS script may be incorrect
 
 ## Option Placement by Use Case
@@ -183,11 +217,11 @@ When options are in the wrong place:
 
 ```bash
 # Basic analysis
-qxub --name analysis --project ds01 conda --env datasci -- python analyze.py
+qxub --name analysis --project ds01 --env datasci -- python analyze.py
 
 # GPU training  
-qxub --name training --queue gpuvolta --resources ngpus=1,ncpus=12,mem=32GB \
-     conda --env pytorch -- python train.py
+qxub --name training --queue gpuvolta -l ngpus=1 -l ncpus=12 -l mem=32GB \
+     --conda pytorch -- python train.py --epochs 100 --batch-size 64
 
 # With alias override
 qxub --queue express alias gpu_training
@@ -197,35 +231,46 @@ qxub --queue express alias gpu_training
 
 ```bash
 # Quality control
-qxub --name qc --resources mem=8GB,ncpus=2 \
-     module --mods "fastqc,multiqc" -- fastqc reads.fastq.gz
+qxub --name qc -l mem=8GB -l ncpus=2 \
+     --mods fastqc,multiqc -- fastqc reads.fastq.gz
 
 # Alignment
-qxub --name alignment --resources mem=32GB,ncpus=16 \
-     module --mods "bwa,samtools" -- bwa mem ref.fa reads1.fq reads2.fq
+qxub --name alignment -l mem=32GB -l ncpus=16 \
+     --mods bwa,samtools -- bwa mem ref.fa reads1.fq reads2.fq
 
 # Container analysis
 qxub --name variants --project bio01 \
-     sing --sif /containers/gatk.sif --bind /data:/data -- \
+     --sif /containers/gatk.sif --bind /data:/data -- \
      gatk HaplotypeCaller -I input.bam -R ref.fa -O variants.vcf
 ```
 
-### Data Management
+### System Administration
 
 ```bash
 # Data transfer
-qxub --name backup --queue copyq \
-     module --mod rsync -- rsync -av /data/ /backup/
+qxub --name backup --queue copyq -- rsync -av /data/ /backup/
 
-# Cloud sync with alias
-qxub --queue copyq alias cloud_sync
+# System maintenance
+qxub -l walltime=02:00:00 --name cleanup \
+     --pre "echo Starting cleanup" --post "echo Cleanup complete" -- \
+     bash cleanup_script.sh
 
-# DVC operations
-qxub --name dvc_push --queue copyq \
-     conda --env dvc3 -- dvc push
+# Monitoring
+qxub --quiet --name monitoring -- ./monitor_system.py --daemon
 ```
 
 ## Quick Reference
+
+| Syntax | Description |
+|--------|-------------|
+| `qxub [OPTIONS] -- [COMMAND]` | Basic pattern |
+| `qxub --env NAME -- [COMMAND]` | Conda execution |
+| `qxub --mod MODULE -- [COMMAND]` | Single module |
+| `qxub --mods MOD1,MOD2 -- [COMMAND]` | Multiple modules |
+| `qxub --sif IMAGE -- [COMMAND]` | Singularity container |
+| `qxub -- [COMMAND]` | Default execution |
+
+**Remember**: All qxub options before `--`, all command options after `--`
 
 ### Template for New Commands
 

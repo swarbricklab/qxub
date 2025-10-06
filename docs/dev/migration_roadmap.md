@@ -47,69 +47,82 @@ qxub --sif container.sif -- python script.py # or --sing / --singularity
 
 ## Implementation Phases
 
-### Phase 1: Foundation (2.0.0-alpha.1)
+### Phase 1: Foundation (2.0.0-alpha.1) ✅ **COMPLETED**
 **Goal**: Core CLI restructuring
 
 #### CLI Architecture Changes
-- [ ] Remove subcommand definitions from `cli.py`
-- [ ] Add alternative option names to main command level:
-  - [ ] `--env` / `--conda` for conda environments
-  - [ ] `--mod` (repeatable) and `--mods` / `--modules` (comma-separated) for environment modules
-  - [ ] `--sif` / `--sing` / `--singularity` for containers
-- [ ] Implement option consolidation logic for alternatives (handle semantic differences)
-- [ ] Add mutual exclusivity validation between execution contexts
-- [ ] Update help system for unified command structure with alternative options
+- [x] Remove subcommand definitions from `cli.py`
+- [x] Add alternative option names to main command level:
+  - [x] `--env` / `--conda` for conda environments
+  - [x] `--mod` (repeatable) and `--mods` / `--modules` (comma-separated) for environment modules
+  - [x] `--sif` / `--sing` / `--singularity` for containers
+- [x] Implement option consolidation logic for alternatives (handle semantic differences)
+- [x] Add mutual exclusivity validation between execution contexts
+- [x] Update help system for unified command structure with alternative options
 
 #### Core Execution Logic
-- [ ] Modify `scheduler.py` to detect execution context from main options
-- [ ] Update job script generation to work without subcommand context
-- [ ] Ensure resource tracking continues to work with new structure
+- [x] Modify `scheduler.py` to detect execution context from main options
+- [x] Update job script generation to work without subcommand context
+- [x] Ensure resource tracking continues to work with new structure
 
 #### Testing Infrastructure
-- [ ] Update all test cases to use new syntax
-- [ ] Validate that existing functionality remains intact
-- [ ] Test mutual exclusivity enforcement
+- [x] Update all test cases to use new syntax
+- [x] Validate that existing functionality remains intact
+- [x] Test mutual exclusivity enforcement
 
-### Phase 2: Alias System Migration (2.0.0-alpha.2)
-**Goal**: Seamless alias transition
+#### Default Execution Context ✨ **BONUS FEATURE**
+- [x] Implement default execution template for commands without execution context
+- [x] Support all PBS options and pre/post commands in default execution
+- [x] Add comprehensive test coverage for default execution scenarios
 
-#### Alias Structure Updates
-- [ ] Design new flat alias structure
-- [ ] Implement automatic conversion from hierarchical to flat format
-- [ ] Update alias creation/editing commands
-- [ ] Maintain backward compatibility for existing alias files during transition
+### Phase 2: ~~Alias System Migration~~ **SIMPLIFIED - Small User Base**
+**Goal**: ~~Seamless alias transition~~ **Direct user communication**
 
-#### Migration Tools
-- [ ] Create `qxub migrate aliases` command
-- [ ] Automatic detection and conversion of old alias format
-- [ ] Backup mechanism for existing alias configurations
-- [ ] Validation tool to ensure converted aliases work correctly
+Since qxub has only three active users, complex migration tools are unnecessary. Instead:
 
-#### Template System Updates
-- [ ] Ensure template variables work with new structure
-- [ ] Update template resolution logic
-- [ ] Test complex template scenarios
+#### Direct User Support ✅ **PREFERRED APPROACH**
+- [x] Personal communication with all three users about syntax changes
+- [x] Simple documentation updates to show new 2.0 syntax
+- [x] Remove complex migration tooling from scope
+- [ ] Provide direct support for any migration issues
 
-### Phase 3: Documentation and UX (2.0.0-beta.1)
+#### ~~Alias Structure Updates~~ **CANCELLED**
+- ~~[ ] Design new flat alias structure~~
+- ~~[ ] Implement automatic conversion from hierarchical to flat format~~
+- ~~[ ] Update alias creation/editing commands~~
+- ~~[ ] Maintain backward compatibility for existing alias files during transition~~
+
+#### ~~Migration Tools~~ **CANCELLED**
+- ~~[ ] Create `qxub migrate aliases` command~~
+- ~~[ ] Automatic detection and conversion of old alias format~~
+- ~~[ ] Backup mechanism for existing alias configurations~~
+- ~~[ ] Validation tool to ensure converted aliases work correctly~~
+
+#### ~~Template System Updates~~ **MINIMAL**
+- [x] Template variables work with new structure (no changes needed)
+- [x] Template resolution logic unchanged
+- ~~[ ] Test complex template scenarios~~ **Not needed for 3 users**
+
+### Phase 3: Documentation and UX (2.0.0-beta.1) ✅ **COMPLETED**
 **Goal**: Complete user experience overhaul
 
 #### Documentation Overhaul
-- [ ] Rewrite all CLI examples to use new syntax
-- [ ] Update alias documentation with new structure
-- [ ] Create migration guide for existing users
-- [ ] Update troubleshooting guides
+- [x] Rewrite all CLI examples to use new syntax
+- [x] Update alias documentation with new structure  
+- [x] ~~Create migration guide for existing users~~ **Not needed - direct communication**
+- [x] Update troubleshooting guides
 
 #### Enhanced Error Handling
-- [ ] Simplify error handling (no more subcommand confusion)
-- [ ] Improve mutual exclusivity error messages
-- [ ] Add suggestions for common migration mistakes
-- [ ] Update fuzzy matching for new option structure
+- [x] Simplify error handling (no more subcommand confusion)
+- [x] Improve mutual exclusivity error messages
+- [x] ~~Add suggestions for common migration mistakes~~ **Not needed - direct communication**
+- [x] Update fuzzy matching for new option structure
 
 #### Help System Improvements
-- [ ] Reorganize help output for unified command
-- [ ] Group related options together logically
-- [ ] Improve examples and usage patterns
-- [ ] Add quick migration tips to help text
+- [x] Reorganize help output for unified command
+- [x] Group related options together logically
+- [x] Improve examples and usage patterns
+- [x] ~~Add quick migration tips to help text~~ **Not needed - direct communication**
 
 ### Phase 4: Advanced Features (2.0.0-beta.2)
 **Goal**: Enhanced functionality and performance

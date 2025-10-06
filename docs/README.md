@@ -1,6 +1,6 @@
 # qsub_tools Documentation
 
-Welcome to the complete documentation for qsub_tools 1.0! 
+Welcome to the complete documentation for qsub_tools 2.0! 
 
 ## Quick Navigation
 
@@ -46,7 +46,7 @@ Aliases enable ultra-simple workflow execution by combining:
 
 **Key Commands:**
 ```bash
-qxub config alias set myalias --subcommand conda --env myenv --cmd "python script.py"
+qxub config alias set myalias --env myenv --cmd "python script.py"
 qxub alias myalias                  # Execute alias
 qxub alias myalias --queue normal   # Execute with overrides
 qxub config alias list              # List all aliases
