@@ -16,13 +16,14 @@ qxub sing --sif container.sif python script.py
 ### Proposed (2.0)
 ```bash
 qxub --env myenv -- python script.py          # or --conda myenv
-qxub --mod python3,gcc -- python script.py   # or --module python3,gcc
+qxub --mod python3 --mod gcc -- python script.py   # multiple modules
+qxub --mods python3,gcc -- python script.py        # or --modules python3,gcc  
 qxub --sif container.sif -- python script.py # or --sing / --singularity
 ```
 
 **Alternative Options**: For better usability, multiple option names are supported:
 - `--env` / `--conda`: Conda environment execution
-- `--mod` / `--module`: Environment module execution  
+- `--mod` (repeatable) / `--mods` / `--modules`: Environment module execution  
 - `--sif` / `--sing` / `--singularity`: Singularity container execution
 
 **Note**: The `--` separator is required to clearly separate qxub options from target command options.
@@ -53,9 +54,9 @@ qxub --sif container.sif -- python script.py # or --sing / --singularity
 - [ ] Remove subcommand definitions from `cli.py`
 - [ ] Add alternative option names to main command level:
   - [ ] `--env` / `--conda` for conda environments
-  - [ ] `--mod` / `--module` / `--mods` for environment modules
+  - [ ] `--mod` (repeatable) and `--mods` / `--modules` (comma-separated) for environment modules
   - [ ] `--sif` / `--sing` / `--singularity` for containers
-- [ ] Implement option consolidation logic for alternatives
+- [ ] Implement option consolidation logic for alternatives (handle semantic differences)
 - [ ] Add mutual exclusivity validation between execution contexts
 - [ ] Update help system for unified command structure with alternative options
 
@@ -183,10 +184,16 @@ qxub --conda myenv --queue normal -- python script.py  # Alternative
 # Before (1.x)
 qxub module --mods python3,gcc --resources mem=8GB make
 
-# After (2.0) - Multiple option styles supported
-qxub --mods python3,gcc --resources mem=8GB -- make
-qxub --mod python3,gcc --resources mem=8GB -- make      # Alternative
-qxub --module python3,gcc --resources mem=8GB -- make   # Alternative
+# After (2.0) - Different module option styles
+qxub --mods python3,gcc --resources mem=8GB -- make           # Comma-separated list
+qxub --modules python3,gcc --resources mem=8GB -- make        # Alternative name
+qxub --mod python3 --mod gcc --resources mem=8GB -- make      # Repeatable single option
+
+# Before (1.x) - single module
+qxub module --mod python3 python script.py
+
+# After (2.0) 
+qxub --mod python3 -- python script.py                       # Single module
 
 # Before (1.x)
 qxub sing --sif /path/to/container.sif --bind /data python
@@ -237,27 +244,36 @@ qxub --singularity /containers/blast.sif -- blastn -query input.fa
 ```python
 @click.command()
 @click.option('--env', '--conda', help='Conda environment for execution')
-@click.option('--mod', '--module', '--mods', help='Environment modules to load')
+@click.option('--mod', multiple=True, help='Environment module to load (repeatable)')
+@click.option('--mods', '--modules', help='Comma-separated list of environment modules')
 @click.option('--sif', '--sing', '--singularity', help='Singularity container image')
 @click.option('--bind', help='Singularity bind mounts')
 # ... all existing PBS options remain at main level
 @click.argument('command', nargs=-1)
-def qxub(env, conda, mod, module, mods, sif, sing, singularity, bind, command, **kwargs):
+def qxub(env, conda, mod, mods, modules, sif, sing, singularity, bind, command, **kwargs):
     # Consolidate alternative option names
     conda_env = env or conda
-    modules = mod or module or mods
+    
+    # Handle module options: --mod (multiple) vs --mods/--modules (comma-separated)
+    module_list = None
+    if mod:
+        module_list = list(mod)  # --mod can be used multiple times
+    elif mods or modules:
+        module_str = mods or modules
+        module_list = [m.strip() for m in module_str.split(',')]
+    
     container = sif or sing or singularity
     
     # Validate mutual exclusivity
-    execution_contexts = [conda_env, modules, container]
+    execution_contexts = [conda_env, module_list, container]
     if sum(bool(x) for x in execution_contexts) > 1:
         raise click.ClickException("Cannot specify multiple execution contexts")
     
     # Detect execution context and delegate
     if conda_env:
         execute_conda(conda_env, command, **kwargs)
-    elif modules:
-        execute_module(modules, command, **kwargs)
+    elif module_list:
+        execute_module(module_list, command, **kwargs)
     elif container:
         execute_singularity(container, bind, command, **kwargs)
     else:
@@ -289,7 +305,17 @@ aliases:
 ```
 
 ### Alternative Option Names
-Providing multiple option names for the same functionality improves usability:
+Providing multiple option names improves usability, with some having semantic differences:
+
+#### Module Options - Semantic Differences
+- **`--mod`**: Single module, repeatable (e.g., `--mod python3 --mod gcc`)
+- **`--mods` / `--modules`**: Comma-separated list (e.g., `--mods python3,gcc`)
+
+Both approaches result in the same module list but offer different input styles for user preference.
+
+#### Pure Alternatives (Same Semantics)
+- **`--env` / `--conda`**: Conda environment execution (identical functionality)
+- **`--sif` / `--sing` / `--singularity`**: Container execution (identical functionality)
 
 #### Benefits
 - **Intuitive**: `--conda` clearly indicates conda execution
