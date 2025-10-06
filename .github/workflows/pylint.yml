@@ -1,0 +1,22 @@
+name: Code Formatting
+
+on: [push, pull_request]
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: 3.9
+          auto-update-conda: true
+          environment-file: environment.dev.yaml  
+          activate-environment: test
+          
+      - name: Check code formatting with Black
+        shell: bash -el {0}
+        run: |
+          black --check --diff $(git ls-files '*.py')

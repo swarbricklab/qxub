@@ -1,6 +1,6 @@
 # Alias Guide
 
-Aliases are the most powerful feature of qxub 1.0, enabling ultra-simple execution of complex workflows. Instead of typing long commands repeatedly, create reusable aliases that encapsulate your entire workflow configuration.
+Aliases are the most powerful feature of qxub 1.1, enabling ultra-simple execution of complex workflows. Instead of typing long commands repeatedly, create reusable aliases that encapsulate your entire workflow configuration.
 
 ## Quick Start
 
@@ -80,7 +80,7 @@ qxub alias myalias --cmd "python different_script.py"
 
 ## Hierarchical Alias Structure
 
-Version 1.0 introduces a hierarchical structure that prevents common CLI syntax errors by separating main qxub options from subcommand-specific options:
+Version 1.1 introduces a hierarchical structure that prevents common CLI syntax errors by separating main qxub options from subcommand-specific options:
 
 ```yaml
 aliases:

@@ -4,9 +4,16 @@ Welcome to the complete documentation for qsub_tools 1.0!
 
 ## Quick Navigation
 
+### User Documentation
 - **[Configuration Guide](configuration.md)** - Complete guide to setting up defaults, template variables, and config management
 - **[Alias Guide](aliases.md)** - Create and manage workflow aliases for ultra-simple execution
+- **[Option Placement Guide](option-placement.md)** - Understand command-line option ordering rules
 - **[README](../README.md)** - Quick start and essential information
+
+### Developer Documentation
+- **[Developer Guide](dev/README.md)** - Technical documentation for developers
+- **[Threading Architecture](dev/threading-architecture.md)** - Multi-threaded job monitoring system
+- **[Threading Troubleshooting](dev/threading-troubleshooting.md)** - Debug threading issues
 
 ## Documentation Overview
 
@@ -14,6 +21,7 @@ Welcome to the complete documentation for qsub_tools 1.0!
 1. **Read the [README](../README.md)** for installation and basic usage
 2. **Set up [Configuration](configuration.md)** to eliminate repetitive options
 3. **Create [Aliases](aliases.md)** for your common workflows
+4. **Learn [Option Placement](option-placement.md)** to avoid command-line errors
 
 ### Configuration System
 The configuration system allows you to:

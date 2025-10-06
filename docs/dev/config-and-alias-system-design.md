@@ -1,3 +1,39 @@
+# qxub Developer Documentation
+
+Welcome to the qxub developer documentation! This section provides detailed technical information for developers working on or extending qxub.
+
+## Architecture Documentation
+
+### [Threading Architecture](threading-architecture.md)
+Complete guide to qxub's multi-threaded job monitoring system:
+- **OutputCoordinator**: Central thread synchronization
+- **Thread Responsibilities**: Monitor, STDOUT/STDERR tail, spinner
+- **Signal Flow**: Event-based coordination between threads
+- **Exit Code Propagation**: How job exit codes flow through the system
+- **Graceful Shutdown**: Ctrl-C handling and cleanup
+
+### [Threading Diagrams](threading-diagrams.md) 
+Visual representations of the threading system:
+- **State Diagrams**: Thread lifecycle and transitions
+- **Sequence Diagrams**: Message flow between components
+- **Event Timeline**: Timing of signals and coordination
+- **Control Flow**: Different execution scenarios
+
+### [Threading Troubleshooting](threading-troubleshooting.md)
+Practical debugging guide for threading issues:
+- **Common Problems**: Hanging, wrong exit codes, missing output
+- **Diagnostic Tools**: Debug logging, thread inspection
+- **Testing Strategies**: Unit testing, integration testing
+- **Emergency Procedures**: Kill processes, clean up orphaned jobs
+
+## System Design Documentation
+
+### [Config and Alias System Design](config-and-alias-system-design.md)
+
+*Note: The remainder of this file contains the existing config and alias system documentation.*
+
+---
+
 # Config and Alias System Design
 
 ## Overview

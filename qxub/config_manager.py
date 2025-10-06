@@ -64,9 +64,7 @@ class ConfigManager:
             try:
                 return OmegaConf.load(config_file)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                click.echo(
-                    f"Warning: Failed to load user config {config_file}: {e}", err=True
-                )
+                click.echo(f"Warning: Failed to load user config {config_file}: {e}", err=True)
         return None
 
     def _load_configs(self):
@@ -126,9 +124,7 @@ class ConfigManager:
 
         # Add custom template variables from config
         if self.merged_config and "templates" in self.merged_config:
-            config_templates = OmegaConf.to_container(
-                self.merged_config.templates, resolve=True
-            )
+            config_templates = OmegaConf.to_container(self.merged_config.templates, resolve=True)
             if isinstance(config_templates, dict):
                 template_vars.update(config_templates)
 
@@ -144,17 +140,13 @@ class ConfigManager:
                 try:
                     return value.format(**template_vars)
                 except KeyError as e:
-                    click.echo(
-                        f"Warning: Unknown template variable {e} in '{value}'", err=True
-                    )
+                    click.echo(f"Warning: Unknown template variable {e} in '{value}'", err=True)
                     return value
             return value
         if isinstance(value, (list, tuple)):
             return [self.resolve_templates(item, template_vars) for item in value]
         if isinstance(value, dict):
-            return {
-                k: self.resolve_templates(v, template_vars) for k, v in value.items()
-            }
+            return {k: self.resolve_templates(v, template_vars) for k, v in value.items()}
         if OmegaConf.is_config(value):
             # Handle OmegaConf DictConfig
             resolved = {}
@@ -177,9 +169,7 @@ class ConfigManager:
             or alias_name not in self.merged_config.aliases
         ):
             return None
-        return OmegaConf.to_container(
-            self.merged_config.aliases[alias_name], resolve=True
-        )
+        return OmegaConf.to_container(self.merged_config.aliases[alias_name], resolve=True)
 
     def list_aliases(self) -> List[str]:
         """List all available aliases."""
@@ -229,9 +219,7 @@ class ConfigManager:
         user_config_file = self._get_user_config_dir() / "config.yaml"
 
         if user_config_file.exists():
-            raise click.ClickException(
-                f"User config file already exists: {user_config_file}"
-            )
+            raise click.ClickException(f"User config file already exists: {user_config_file}")
 
         # Create directory
         user_config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -315,6 +303,36 @@ class ConfigManager:
         resolved = self.resolve_templates(resolved, template_vars)
 
         return resolved
+
+    def save_alias(self, alias_name: str, alias_definition: Dict[str, Any]):
+        """Save an alias to the user configuration."""
+        user_config_file = self._get_user_config_dir() / "config.yaml"
+
+        # Ensure user config directory exists
+        user_config_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing user config or create new
+        if user_config_file.exists():
+            try:
+                user_config = OmegaConf.load(user_config_file)
+            except Exception:
+                user_config = OmegaConf.create({})
+        else:
+            user_config = OmegaConf.create({})
+
+        # Ensure aliases section exists
+        if "aliases" not in user_config:
+            user_config.aliases = {}
+
+        # Add the new alias
+        user_config.aliases[alias_name] = alias_definition
+
+        # Save back to file
+        with open(user_config_file, "w", encoding="utf-8") as f:
+            OmegaConf.save(user_config, f, resolve=True)
+
+        # Reload configs to pick up the new alias
+        self._load_configs()
 
 
 # Global config manager instance

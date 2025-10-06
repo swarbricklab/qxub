@@ -1,6 +1,6 @@
 # qsub_tools
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/swarbricklab/qsub_tools)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/swarbricklab/qsub_tools)
 
 A powerful wrapper around PBS `qsub` that eliminates boilerplate when running jobs in conda environments, with modules, or in containers.
 
@@ -118,6 +118,21 @@ See full [CHANGELOG](#changelog) below for complete details.
 ---
 
 ## Changelog
+
+### Version 1.1.0 - Enhanced CLI, Resource Tracking, and System Improvements
+
+**🎯 Major Features:**
+- **Enhanced CLI Error Handling**: Intelligent error messages with fuzzy matching for typos and contextual guidance for option placement
+- **Resource Efficiency Tracking**: SQLite-based system for analyzing job performance with efficiency metrics and trend analysis
+- **Comprehensive Threading Improvements**: Fixed infinite loop bugs, proper exit code propagation, and enhanced job monitoring
+- **Dual-Log History System**: Separate computational recipes from execution records for better analysis and alias conversion
+- **System Configuration Support**: XDG-compliant system-wide configurations for organizational defaults
+
+**🔧 Technical Enhancements:**
+- **Custom Click Classes**: QxubGroup and QxubCommand with intelligent error handling and suggestion system
+- **Resource Tracking Integration**: Automatic efficiency calculations integrated with job completion workflow
+- **Enhanced Documentation**: Comprehensive threading architecture docs and development guides
+- **Robust Testing**: System configuration tests and realistic usage scenario validation
 
 ### Version 1.0.1 - Documentation and Linting Improvements
 

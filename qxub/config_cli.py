@@ -16,6 +16,7 @@ from rich.syntax import Syntax
 from omegaconf import OmegaConf
 
 from .config_manager import config_manager
+from .history import history_logger
 
 
 console = Console()
@@ -217,9 +218,7 @@ def init():
         click.echo("Edit the file to customize your defaults and aliases")
     except click.ClickException:
         click.echo("❌ User configuration file already exists")
-        click.echo(
-            "Use 'qxub config edit' to modify or 'qxub config reset' to recreate"
-        )
+        click.echo("Use 'qxub config edit' to modify or 'qxub config reset' to recreate")
 
 
 # Alias management subcommands
@@ -326,9 +325,7 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
         errors.append(f"Invalid subcommand type: {subcommand_type}")
 
     if not cmd:
-        warnings.append(
-            "No 'cmd' specified - alias can only be used with command override"
-        )
+        warnings.append("No 'cmd' specified - alias can only be used with command override")
 
     # Check subcommand-specific requirements
     if subcommand_type == "sing":
@@ -378,14 +375,10 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
 @click.option("--cmd", help="Command to execute")
 @click.option("--name", help="Job name")
 @click.option("--queue", help="Queue name")
-@click.option(
-    "--resources", multiple=True, help="Resource requests (can specify multiple)"
-)
+@click.option("--resources", multiple=True, help="Resource requests (can specify multiple)")
 @click.option("--env", help="Conda environment (for conda subcommand)")
 @click.option("--mod", help="Single module to load (for module subcommand)")
-@click.option(
-    "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"
-)
+@click.option("--mods", help="Multiple modules to load, comma-separated (for module subcommand)")
 @click.option("--sif", help="Singularity container (for sing subcommand)")
 def set_alias(alias_name: str, **kwargs):
     """Create or update an alias."""
@@ -473,3 +466,197 @@ def delete(alias_name: str):
             raise click.Abort()
     else:
         click.echo("Delete cancelled")
+
+
+@config_cli.group(name="history")
+def history_cli():
+    """Manage qxub command history."""
+    pass
+
+
+@history_cli.command(name="list")
+@click.option("--limit", "-n", default=10, help="Number of recent commands to show")
+@click.option("--all", "show_all", is_flag=True, help="Show all available history")
+def list_history(limit, show_all):
+    """List recent qxub commands from history."""
+    try:
+        if show_all:
+            limit = 1000  # Get maximum available
+
+        commands = history_logger.get_recent_commands(limit)
+
+        if not commands:
+            console.print("📝 No command history found", style="yellow")
+            return
+
+        title_text = "All" if show_all else f"Last {min(limit, len(commands))}"
+        table = Table(title=f"Recent qxub Commands ({title_text})")
+        table.add_column("Time", style="cyan", no_wrap=True)
+        table.add_column("Command", style="green")
+        table.add_column("Type", style="yellow")
+        table.add_column("Status", style="magenta")
+
+        for cmd in commands:
+            timestamp = cmd.get("timestamp", "Unknown")
+            # Format timestamp to be more readable
+            if timestamp != "Unknown":
+                try:
+                    from datetime import datetime
+
+                    dt = datetime.fromisoformat(timestamp)
+                    timestamp = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    pass
+
+            command_line = cmd.get("command_line", "")
+            # Truncate long commands
+            if len(command_line) > 60:
+                command_line = command_line[:57] + "..."
+
+            cmd_type = ""
+            if "subcommand" in cmd:
+                cmd_type = cmd["subcommand"].get("type", "")
+            elif "config" in command_line:
+                cmd_type = "config"
+
+            status = "✅ Success" if cmd.get("success", True) else "❌ Failed"
+
+            table.add_row(timestamp, command_line, cmd_type, status)
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"❌ Error reading command history: {e}", style="red")
+
+
+@history_cli.command(name="show")
+@click.argument("index", type=int)
+def show_history_item(index):
+    """Show detailed information about a specific history item."""
+    try:
+        commands = history_logger.get_recent_commands(1000)  # Get all available
+
+        if not commands:
+            console.print("📝 No command history found", style="yellow")
+            return
+
+        # Convert to 1-based indexing (most recent is 1)
+        if index < 1 or index > len(commands):
+            console.print(f"❌ Invalid index. Available range: 1-{len(commands)}", style="red")
+            return
+
+        # Get command (index 1 = most recent, so we need to reverse)
+        cmd = commands[-(index)]
+
+        console.print(f"📋 Command History Item #{index}", style="bold blue")
+        console.print("")
+
+        # Show basic info
+        console.print(f"⏰ Time: {cmd.get('timestamp', 'Unknown')}")
+        console.print(f"📂 Directory: {cmd.get('working_directory', 'Unknown')}")
+        console.print(f"✅ Success: {cmd.get('success', True)}")
+        if cmd.get("error"):
+            console.print(f"❌ Error: {cmd['error']}", style="red")
+        console.print("")
+
+        # Show command line
+        console.print("💻 Command Line:", style="bold")
+        console.print(cmd.get("command_line", ""), style="green")
+        console.print("")
+
+        # Show alias-like structure
+        alias_structure = {}
+        if "main" in cmd:
+            alias_structure["main"] = cmd["main"]
+        if "subcommand" in cmd:
+            alias_structure["subcommand"] = cmd["subcommand"]
+        if "target" in cmd:
+            alias_structure["target"] = cmd["target"]
+
+        if alias_structure:
+            console.print("🏗️ Alias-like Structure:", style="bold")
+            yaml_content = OmegaConf.to_yaml(OmegaConf.create(alias_structure))
+            syntax = Syntax(yaml_content, "yaml", theme="github-dark", line_numbers=True)
+            console.print(syntax)
+
+    except Exception as e:
+        console.print(f"❌ Error showing history item: {e}", style="red")
+
+
+@history_cli.command(name="clear")
+@click.confirmation_option(prompt="Are you sure you want to clear all command history?")
+def clear_history():
+    """Clear all command history."""
+    try:
+        history_logger.clear_history()
+        console.print("🗑️ Command history cleared", style="green")
+    except Exception as e:
+        console.print(f"❌ Error clearing history: {e}", style="red")
+
+
+@history_cli.command(name="to-alias")
+@click.argument("index", type=int)
+@click.argument("alias_name")
+@click.option("--overwrite", is_flag=True, help="Overwrite existing alias")
+def history_to_alias(index, alias_name, overwrite):
+    """Create an alias from a history item."""
+    try:
+        commands = history_logger.get_recent_commands(1000)  # Get all available
+
+        if not commands:
+            console.print("📝 No command history found", style="yellow")
+            return
+
+        # Convert to 1-based indexing (most recent is 1)
+        if index < 1 or index > len(commands):
+            console.print(f"❌ Invalid index. Available range: 1-{len(commands)}", style="red")
+            return
+
+        # Get command (index 1 = most recent, so we need to reverse)
+        cmd = commands[-(index)]
+
+        # Only allow creation from execution commands, not config commands
+        if "subcommand" not in cmd or cmd["subcommand"].get("type") not in [
+            "conda",
+            "module",
+            "sing",
+        ]:
+            console.print(
+                "❌ Can only create aliases from execution commands (conda, module, sing)",
+                style="red",
+            )
+            return
+
+        # Check if alias already exists
+        existing_aliases = config_manager.list_aliases()
+        if alias_name in existing_aliases and not overwrite:
+            console.print(
+                f"❌ Alias '{alias_name}' already exists. Use --overwrite to replace it.",
+                style="red",
+            )
+            return
+
+        # Create alias structure
+        alias_def = {}
+        if "main" in cmd:
+            alias_def["main"] = cmd["main"]
+        if "subcommand" in cmd:
+            alias_def["subcommand"] = cmd["subcommand"]
+        if "target" in cmd and cmd["target"]:
+            # Convert target list to cmd string for alias format
+            alias_def["target"] = {"cmd": " ".join(cmd["target"])}
+
+        # Save the alias
+        config_manager.save_alias(alias_name, alias_def)
+
+        action = "Updated" if (alias_name in existing_aliases and overwrite) else "Created"
+        console.print(f"✅ {action} alias '{alias_name}' from history item #{index}", style="green")
+
+        # Show the created alias
+        console.print("\n📋 Created alias structure:", style="bold")
+        yaml_content = OmegaConf.to_yaml(OmegaConf.create(alias_def))
+        syntax = Syntax(yaml_content, "yaml", theme="github-dark", line_numbers=True)
+        console.print(syntax)
+
+    except Exception as e:
+        console.print(f"❌ Error creating alias from history: {e}", style="red")

@@ -10,6 +10,7 @@ import sys
 import signal
 import logging
 import base64
+import shutil
 from pathlib import Path
 import click
 import pkg_resources
@@ -25,7 +26,13 @@ def _signal_handler(signum, frame):
     # pylint: disable=unused-argument
     if _CURRENT_JOB_ID:
         # Clear the current line completely before printing cleanup messages
-        print("\r" + " " * 100 + "\r", end="", flush=True)
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+            clear_width = terminal_width
+        except Exception:
+            clear_width = 100
+
+        print("\r" + " " * clear_width + "\r", end="", flush=True)
         print("🛑 Interrupted! Cleaning up job...")
         success = qdel(_CURRENT_JOB_ID, quiet=False)
         if success:
@@ -43,9 +50,7 @@ def _get_default_template():
     """Get the default PBS template file path."""
     # Try pkg_resources first
     try:
-        template_path = pkg_resources.resource_filename(
-            __name__, "jobscripts/qsing.pbs"
-        )
+        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qsing.pbs")
         if os.path.exists(template_path):
             return template_path
     except (ImportError, AttributeError, FileNotFoundError):
@@ -72,9 +77,7 @@ def _get_default_template():
     }
 )
 @click.argument("cmd", nargs=-1)
-@click.option(
-    "--sif", required=True, help="Path to the Singularity .sif container file"
-)
+@click.option("--sif", required=True, help="Path to the Singularity .sif container file")
 @click.option(
     "--template",
     default=_get_default_template(),
@@ -82,8 +85,7 @@ def _get_default_template():
 )
 @click.option(
     "--pre",
-    help="Command to run before the singularity command "
-    "(use quotes for commands with options)",
+    help="Command to run before the singularity command " "(use quotes for commands with options)",
 )
 @click.option(
     "--post",
@@ -202,14 +204,23 @@ def sing(
 
     # Pass success message to monitor_and_tail for spinner display
     if not ctx_obj["quiet"]:
-        success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        success_message = f"🚀 Job {job_id[:8]}"
     else:
         success_message = None
 
     try:
-        monitor_and_tail(
+        job_exit_status = monitor_and_tail(
             job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
         )
+
+        # Exit with the same status as the job
+        if job_exit_status != 0:
+            logging.info("Job failed with exit status %d", job_exit_status)
+        else:
+            logging.info("Job completed successfully")
+
+        sys.exit(job_exit_status)
+
     finally:
         # Clear job ID when monitoring completes (successfully or via interrupt)
         _CURRENT_JOB_ID = None

@@ -76,11 +76,7 @@ def alias_cli(
         }
         subcommand_def = {
             "type": subcommand_type,
-            **{
-                k: v
-                for k, v in alias_def.items()
-                if k in ["env", "mod", "sif", "bind", "env_var"]
-            },
+            **{k: v for k, v in alias_def.items() if k in ["env", "mod", "sif", "bind", "env_var"]},
         }
         target_def = {"cmd": alias_def.get("cmd")}
 
@@ -91,18 +87,14 @@ def alias_cli(
         ctx.exit(2)
 
     if subcommand_type not in ["conda", "module", "sing"]:
-        click.echo(
-            f"❌ Invalid subcommand type in alias '{alias_name}': {subcommand_type}"
-        )
+        click.echo(f"❌ Invalid subcommand type in alias '{alias_name}': {subcommand_type}")
         ctx.exit(2)
 
     # Prepare the command
     cmd = overrides.get("cmd") or target_def.get("cmd")
     if not cmd and not command_args:
         click.echo(f"❌ No command specified for alias '{alias_name}'")
-        click.echo(
-            "Either define 'cmd' in the target section or provide command arguments"
-        )
+        click.echo("Either define 'cmd' in the target section or provide command arguments")
         ctx.exit(2)
 
     # Append command arguments if provided
@@ -255,8 +247,15 @@ def alias_cli(
 
     # Execute the command
     import subprocess
+    import os
 
-    result = subprocess.run(qxub_cmd_str)
+    # Set environment variable to prevent history logging in subprocess
+    env = os.environ.copy()
+    env["QXUB_SUBPROCESS"] = "1"
+
+    # Execute as a shell command to properly isolate the subprocess
+    cmd_str = " ".join(qxub_cmd_str)
+    result = subprocess.run(cmd_str, shell=True, env=env)
 
     # Exit with the same code as the executed command
     exit(result.returncode)
