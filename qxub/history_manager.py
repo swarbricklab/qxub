@@ -54,53 +54,82 @@ class HistoryManager:
         if len(sys.argv) > 1:
             args = sys.argv[1:]  # Skip script name
 
-            # Find executor type (conda, module, sing)
-            executor_types = ["conda", "module", "sing"]
-            executor_idx = None
+            # For unified CLI (qxub 2.0), determine executor type from execution context options
             executor_type = None
+            executor_params = {}
 
-            for i, arg in enumerate(args):
-                if arg in executor_types:
-                    executor_idx = i
-                    executor_type = arg
-                    break
+            # Check for execution context options
+            i = 0
+            while i < len(args):
+                arg = args[i]
 
-            if executor_idx is not None:
-                # Parse executor arguments
-                executor_params = {"type": executor_type}
-                i = executor_idx + 1
-
-                while i < len(args):
-                    arg = args[i]
-                    if arg == "--":
-                        # Skip the separator and start target from next argument
-                        i += 1
-                        if i < len(args):
-                            recipe["target"] = {"cmd": " ".join(args[i:])}
-                        break
-                    elif arg.startswith("--"):
-                        # This is an executor option
-                        option_name = arg[2:]  # Remove --
-                        if (
-                            i + 1 < len(args)
-                            and not args[i + 1].startswith("-")
-                            and args[i + 1] != "--"
-                        ):
-                            # Has a value
-                            executor_params[option_name] = args[i + 1]
-                            i += 2
-                        else:
-                            # Flag without value
-                            executor_params[option_name] = True
-                            i += 1
-                    elif not arg.startswith("-"):
-                        # This is the start of the target command
+                if arg == "--env" and i + 1 < len(args):
+                    # Conda environment specified
+                    executor_type = "conda"
+                    executor_params["env"] = args[i + 1]
+                    i += 2
+                elif arg == "--mod" and i + 1 < len(args):
+                    # Module specified
+                    executor_type = "module"
+                    executor_params["name"] = args[i + 1]
+                    i += 2
+                elif arg == "--sif" and i + 1 < len(args):
+                    # Singularity container specified
+                    executor_type = "sing"
+                    executor_params["image"] = args[i + 1]
+                    i += 2
+                elif arg == "--":
+                    # Found command separator - everything after is the target command
+                    i += 1
+                    if i < len(args):
                         recipe["target"] = {"cmd": " ".join(args[i:])}
-                        break
-                    else:
-                        i += 1
+                    break
+                elif (
+                    arg.startswith("--")
+                    and i + 1 < len(args)
+                    and not args[i + 1].startswith("-")
+                ):
+                    # Other executor options
+                    option_name = arg[2:]  # Remove --
+                    executor_params[option_name] = args[i + 1]
+                    i += 2
+                elif arg.startswith("--"):
+                    # Flag without value
+                    option_name = arg[2:]  # Remove --
+                    executor_params[option_name] = True
+                    i += 1
+                elif not arg.startswith("-"):
+                    # This is the start of the target command (no -- separator found)
+                    recipe["target"] = {"cmd": " ".join(args[i:])}
+                    break
+                else:
+                    i += 1
 
+            # Set executor type and params
+            if executor_type:
+                executor_params["type"] = executor_type
                 recipe["executor"] = executor_params
+
+            # If no explicit executor type found, check for legacy subcommand format for backward compatibility
+            if not executor_type:
+                executor_types = ["conda", "module", "sing"]
+                for j, arg in enumerate(args):
+                    if arg in executor_types:
+                        executor_type = arg
+                        recipe["executor"] = {"type": executor_type}
+                        # Parse remaining arguments for this legacy format
+                        k = j + 1
+                        while k < len(args):
+                            if args[k] == "--":
+                                k += 1
+                                if k < len(args):
+                                    recipe["target"] = {"cmd": " ".join(args[k:])}
+                                break
+                            elif not args[k].startswith("-"):
+                                recipe["target"] = {"cmd": " ".join(args[k:])}
+                                break
+                            k += 1
+                        break
 
         return recipe
 

@@ -628,10 +628,21 @@ def execute_conda(ctx, command, env, template=None, pre=None, post=None):
 
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
+        # Log history even for dry runs
+        try:
+            history_manager.log_execution(ctx, success=True)
+        except Exception as e:
+            logging.debug("Failed to log execution history: %s", e)
         return
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Log execution to history system
+    try:
+        history_manager.log_execution(ctx, success=True, job_id=job_id)
+    except Exception as e:
+        logging.debug("Failed to log execution history: %s", e)
 
     # Log job execution for resource tracking
     # Note: ResourceTracker expects resource_data which is available after job completion
@@ -690,10 +701,21 @@ def execute_module(ctx, command, modules, template=None, pre=None, post=None):
 
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
+        # Log history even for dry runs
+        try:
+            history_manager.log_execution(ctx, success=True)
+        except Exception as e:
+            logging.debug("Failed to log execution history: %s", e)
         return
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Log execution to history system
+    try:
+        history_manager.log_execution(ctx, success=True, job_id=job_id)
+    except Exception as e:
+        logging.debug("Failed to log execution history: %s", e)
 
     # Log job execution for resource tracking
     try:
@@ -754,10 +776,21 @@ def execute_singularity(
 
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
+        # Log history even for dry runs
+        try:
+            history_manager.log_execution(ctx, success=True)
+        except Exception as e:
+            logging.debug("Failed to log execution history: %s", e)
         return
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Log execution to history system
+    try:
+        history_manager.log_execution(ctx, success=True, job_id=job_id)
+    except Exception as e:
+        logging.debug("Failed to log execution history: %s", e)
 
     # Log job execution for resource tracking
     try:
@@ -805,10 +838,21 @@ def execute_default(ctx, command, template=None, pre=None, post=None):
 
     if ctx_obj["dry"]:
         click.echo(f"Dry run - would execute: {submission_command}")
+        # Log history even for dry runs
+        try:
+            history_manager.log_execution(ctx, success=True)
+        except Exception as e:
+            logging.debug("Failed to log execution history: %s", e)
         return
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Log execution to history system
+    try:
+        history_manager.log_execution(ctx, success=True, job_id=job_id)
+    except Exception as e:
+        logging.debug("Failed to log execution history: %s", e)
 
     # Log job execution for resource tracking
     try:
