@@ -437,7 +437,19 @@ def _get_singularity_template():
 @click.option("--post", help="Command to run after the main command")
 @click.pass_context
 def qxub(
-    ctx, execdir, verbose, version, env, mod, mods, sif, bind, template, pre, post, **params
+    ctx,
+    execdir,
+    verbose,
+    version,
+    env,
+    mod,
+    mods,
+    sif,
+    bind,
+    template,
+    pre,
+    post,
+    **params,
 ):
     """
     Submit PBS jobs with conda environments, environment modules, or Singularity containers.
@@ -457,9 +469,10 @@ def qxub(
     # Handle version flag first
     if version:
         from . import __version__
+
         click.echo(f"qxub {__version__}")
         ctx.exit()
-    
+
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
     logging.debug("Remaining args: %s", ctx.args)
