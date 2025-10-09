@@ -1,0 +1,54 @@
+name: test_platform
+type: pbs
+host: test.example.com
+description: Test platform for auto-queue selection
+queues:
+  - name: small
+    type: compute
+    description: Small jobs
+    limits:
+      walltime: 1h
+      max_memory: 4GB
+      max_cpus: 4
+    cost_per_hour: 1.0
+    
+  - name: normal
+    type: compute
+    description: Normal jobs  
+    limits:
+      walltime: 48h
+      max_memory: 192GB
+      max_cpus: 48
+    cost_per_hour: 2.0
+    
+  - name: hugemem
+    type: compute
+    description: High memory jobs
+    limits:
+      walltime: 48h
+      max_memory: 1024GB
+      max_cpus: 64
+    cost_per_hour: 8.0
+    
+  - name: gpu
+    type: gpu
+    description: GPU jobs
+    limits:
+      walltime: 48h
+      max_memory: 192GB
+      max_cpus: 48
+      max_gpus: 4
+    cost_per_hour: 10.0
+
+auto_selection_rules:
+  - condition: "gpu_requested > 0"
+    queue: gpu
+  - condition: "memory > 200GB"
+    queue: hugemem
+  - condition: "memory <= 4GB"
+    queue: small
+  - condition: "cpus > 48"
+    queue: hugemem
+  - condition: "cpus >= 0"  # Always true condition for default
+    queue: normal
+    is_default: true
