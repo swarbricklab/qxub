@@ -408,7 +408,11 @@ def _get_singularity_template():
 @click.option(
     "-l", "--resources", multiple=True, help="Job resource (default: configured)"
 )
-@click.option("-q", "--queue", help="Job queue (default: configured or normal, use 'auto' for intelligent selection)")
+@click.option(
+    "-q",
+    "--queue",
+    help="Job queue (default: configured or normal, use 'auto' for intelligent selection)",
+)
 @click.option("-N", "--name", help="Job name (default: configured or qt)")
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
@@ -466,7 +470,7 @@ def qxub(
         qxub --mod python3 --mod gcc -- make
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
-        
+
     Use --queue auto for intelligent queue selection:
         qxub --queue auto -l mem=500GB --env myenv -- python big_job.py
     """
@@ -584,19 +588,21 @@ def qxub(
             from .platform import PlatformLoader
             from .resource_utils import parse_memory_size, parse_walltime
             from pathlib import Path
-            
+
             # Check for QXUB_PLATFORM_PATHS environment variable
-            platform_paths_env = os.environ.get('QXUB_PLATFORM_PATHS')
+            platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
             if platform_paths_env:
-                search_paths = [Path(p.strip()) for p in platform_paths_env.split(':')]
+                search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
                 loader = PlatformLoader(search_paths=search_paths)
             else:
                 loader = PlatformLoader()
-            
+
             platform_names = loader.list_platforms()
-            
+
             if not platform_names:
-                logging.warning("No platforms available for auto queue selection, using 'normal'")
+                logging.warning(
+                    "No platforms available for auto queue selection, using 'normal'"
+                )
                 params["queue"] = "normal"
             else:
                 # Build requirements from resources
@@ -606,25 +612,35 @@ def qxub(
                         if "=" in resource:
                             key, value = resource.split("=", 1)
                             if key == "mem":
-                                requirements["memory"] = value  # Keep as string for condition parsing
+                                requirements["memory"] = (
+                                    value  # Keep as string for condition parsing
+                                )
                             elif key == "walltime":
-                                requirements["walltime"] = value  # Keep as string for condition parsing
+                                requirements["walltime"] = (
+                                    value  # Keep as string for condition parsing
+                                )
                             elif key == "ncpus":
-                                requirements["cpus"] = int(value)  # Use "cpus" not "ncpus"
+                                requirements["cpus"] = int(
+                                    value
+                                )  # Use "cpus" not "ncpus"
                             elif key in ["ngpus", "gpu"]:
                                 gpu_count = int(value) if value.isdigit() else 1
-                                requirements["gpu_requested"] = gpu_count  # Use "gpu_requested" for conditions
-                                requirements["gpus"] = gpu_count  # Keep "gpus" for validation
-                
+                                requirements["gpu_requested"] = (
+                                    gpu_count  # Use "gpu_requested" for conditions
+                                )
+                                requirements["gpus"] = (
+                                    gpu_count  # Keep "gpus" for validation
+                                )
+
                 # Try to find best queue from any platform
                 best_queue = None
-                best_cost = float('inf')
-                
+                best_cost = float("inf")
+
                 for platform_name in platform_names:
                     platform = loader.get_platform(platform_name)
                     if not platform:
                         continue
-                        
+
                     try:
                         selected_queue = platform.select_queue(requirements)
                         if selected_queue:
@@ -637,27 +653,38 @@ def qxub(
                                 # Convert walltime to hours if it's a string
                                 if isinstance(walltime_hours, str):
                                     from .resource_utils import parse_walltime
-                                    walltime_hours = parse_walltime(walltime_hours) or 1.0
+
+                                    walltime_hours = (
+                                        parse_walltime(walltime_hours) or 1.0
+                                    )
                                 elif isinstance(walltime_hours, (int, float)):
-                                    walltime_hours = walltime_hours / 3600.0  # Convert seconds to hours
-                                
+                                    walltime_hours = (
+                                        walltime_hours / 3600.0
+                                    )  # Convert seconds to hours
+
                                 cost = queue.estimate_su_cost(cores, walltime_hours)
                                 if cost < best_cost:
                                     best_cost = cost
                                     best_queue = selected_queue
                     except Exception as e:
-                        logging.debug(f"Failed to select queue from platform {platform.name}: {e}")
+                        logging.debug(
+                            f"Failed to select queue from platform {platform.name}: {e}"
+                        )
                         continue
-                
+
                 if best_queue:
                     params["queue"] = best_queue
                     logging.info(f"Auto-selected queue: {best_queue}")
                 else:
-                    logging.warning("No suitable queue found for requirements, using 'normal'")
+                    logging.warning(
+                        "No suitable queue found for requirements, using 'normal'"
+                    )
                     params["queue"] = "normal"
-                    
+
         except ImportError:
-            logging.warning("Platform system not available for auto queue selection, using 'normal'")
+            logging.warning(
+                "Platform system not available for auto queue selection, using 'normal'"
+            )
             params["queue"] = "normal"
         except Exception as e:
             logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
