@@ -1,12 +1,19 @@
 # qsub_tools Documentation
 
-Welcome to the complete documentation for qsub_tools 1.0! 
+Welcome to the complete documentation for qsub_tools 2.0! 
 
 ## Quick Navigation
 
+### User Documentation
 - **[Configuration Guide](configuration.md)** - Complete guide to setting up defaults, template variables, and config management
 - **[Alias Guide](aliases.md)** - Create and manage workflow aliases for ultra-simple execution
+- **[Option Placement Guide](option-placement.md)** - Understand command-line option ordering rules
 - **[README](../README.md)** - Quick start and essential information
+
+### Developer Documentation
+- **[Developer Guide](dev/README.md)** - Technical documentation for developers
+- **[Threading Architecture](dev/threading-architecture.md)** - Multi-threaded job monitoring system
+- **[Threading Troubleshooting](dev/threading-troubleshooting.md)** - Debug threading issues
 
 ## Documentation Overview
 
@@ -14,6 +21,7 @@ Welcome to the complete documentation for qsub_tools 1.0!
 1. **Read the [README](../README.md)** for installation and basic usage
 2. **Set up [Configuration](configuration.md)** to eliminate repetitive options
 3. **Create [Aliases](aliases.md)** for your common workflows
+4. **Learn [Option Placement](option-placement.md)** to avoid command-line errors
 
 ### Configuration System
 The configuration system allows you to:
@@ -38,7 +46,7 @@ Aliases enable ultra-simple workflow execution by combining:
 
 **Key Commands:**
 ```bash
-qxub config alias set myalias --subcommand conda --env myenv --cmd "python script.py"
+qxub config alias set myalias --env myenv --cmd "python script.py"
 qxub alias myalias                  # Execute alias
 qxub alias myalias --queue normal   # Execute with overrides
 qxub config alias list              # List all aliases
@@ -51,10 +59,10 @@ qxub config alias list              # List all aliases
 # Set up environment
 qxub config set defaults.project "ds01"
 
-# Create analysis pipeline
-qxub config alias set preprocess --subcommand conda --env datasci --cmd "python preprocess.py"
-qxub config alias set train --subcommand conda --env pytorch --cmd "python train.py" --queue gpuvolta --resources "ngpus=1,ncpus=12"
-qxub config alias set evaluate --subcommand conda --env datasci --cmd "python evaluate.py"
+# Create analysis pipeline using new unified CLI format
+qxub config alias set preprocess --env datasci --cmd "python preprocess.py"
+qxub config alias set train --env pytorch --cmd "python train.py" --queue gpuvolta --resources "ngpus=1,ncpus=12"
+qxub config alias set evaluate --env datasci --cmd "python evaluate.py"
 
 # Execute pipeline
 qxub alias preprocess data/
@@ -64,10 +72,10 @@ qxub alias evaluate
 
 ### Bioinformatics
 ```bash
-# Set up tools
-qxub config alias set qc --subcommand module --mods "fastqc,multiqc" --cmd "fastqc"
-qxub config alias set align --subcommand module --mods "bwa,samtools" --cmd "bwa mem ref.fa"
-qxub config alias set variants --subcommand sing --sif "/containers/gatk.sif" --cmd "gatk HaplotypeCaller"
+# Set up tools using unified CLI format
+qxub config alias set qc --mods "fastqc,multiqc" --cmd "fastqc"
+qxub config alias set align --mods "bwa,samtools" --cmd "bwa mem ref.fa"
+qxub config alias set variants --sif "/containers/gatk.sif" --cmd "gatk HaplotypeCaller"
 
 # Execute analysis
 qxub alias qc reads.fastq.gz
@@ -77,10 +85,10 @@ qxub alias variants -I aligned.bam -R ref.fa
 
 ### Data Management
 ```bash
-# Set up data operations
-qxub config alias set dvc_push --subcommand conda --env dvc3 --cmd "dvc push" --queue copyq
-qxub config alias set backup --subcommand module --mod rsync --cmd "rsync -av" --queue copyq
-qxub config alias set sync_cloud --subcommand conda --env tools --cmd "rclone sync"
+# Set up data operations using unified CLI format
+qxub config alias set dvc_push --env dvc3 --cmd "dvc push" --queue copyq
+qxub config alias set backup --mod rsync --cmd "rsync -av" --queue copyq
+qxub config alias set sync_cloud --env tools --cmd "rclone sync"
 
 # Execute operations
 qxub alias dvc_push

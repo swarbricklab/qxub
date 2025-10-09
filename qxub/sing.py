@@ -10,6 +10,7 @@ import sys
 import signal
 import logging
 import base64
+import shutil
 from pathlib import Path
 import click
 import pkg_resources
@@ -25,7 +26,13 @@ def _signal_handler(signum, frame):
     # pylint: disable=unused-argument
     if _CURRENT_JOB_ID:
         # Clear the current line completely before printing cleanup messages
-        print("\r" + " " * 100 + "\r", end="", flush=True)
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+            clear_width = terminal_width
+        except Exception:
+            clear_width = 100
+
+        print("\r" + " " * clear_width + "\r", end="", flush=True)
         print("🛑 Interrupted! Cleaning up job...")
         success = qdel(_CURRENT_JOB_ID, quiet=False)
         if success:
@@ -202,14 +209,23 @@ def sing(
 
     # Pass success message to monitor_and_tail for spinner display
     if not ctx_obj["quiet"]:
-        success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        success_message = f"🚀 Job {job_id[:8]}"
     else:
         success_message = None
 
     try:
-        monitor_and_tail(
+        job_exit_status = monitor_and_tail(
             job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
         )
+
+        # Exit with the same status as the job
+        if job_exit_status != 0:
+            logging.info("Job failed with exit status %d", job_exit_status)
+        else:
+            logging.info("Job completed successfully")
+
+        sys.exit(job_exit_status)
+
     finally:
         # Clear job ID when monitoring completes (successfully or via interrupt)
         _CURRENT_JOB_ID = None

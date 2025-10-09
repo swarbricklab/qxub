@@ -1,6 +1,6 @@
 # Alias Guide
 
-Aliases are the most powerful feature of qxub 1.0, enabling ultra-simple execution of complex workflows. Instead of typing long commands repeatedly, create reusable aliases that encapsulate your entire workflow configuration.
+Aliases are the most powerful feature of qxub 2.0, enabling ultra-simple execution of complex workflows. Instead of typing long commands repeatedly, create reusable aliases that encapsulate your entire workflow configuration.
 
 ## Quick Start
 
@@ -9,9 +9,8 @@ Think of aliases as shortcuts for your common workflows. Instead of remembering 
 ```bash
 # Create a simple alias for a common task
 qxub config alias set dvc_push \
-  --subcommand conda \
-  --cmd "dvc push" \
   --env dvc3 \
+  --cmd "dvc push" \
   --queue copyq
 
 # Now just execute it
@@ -41,11 +40,10 @@ qxub config alias test myalias
 ### Creating and Modifying Aliases
 
 ```bash
-# Create a new alias
+# Create a new alias using unified CLI format
 qxub config alias set myalias \
-  --subcommand conda \
-  --cmd "python script.py" \
   --env myenv \
+  --cmd "python script.py" \
   --name "job_{date}"
 
 # Update existing alias
@@ -78,27 +76,34 @@ qxub alias myalias --cmd "python different_script.py"
 > Global options like `--dry-run` still come before `alias`.
 > See the **[Option Placement Guide](option-placement.md)** for complete details.
 
-## Hierarchical Alias Structure
+## Alias Structure
 
-Version 1.0 introduces a hierarchical structure that prevents common CLI syntax errors by separating main qxub options from subcommand-specific options:
+qxub 2.0 uses a simplified flat structure that maps directly to the unified CLI format:
 
 ```yaml
 aliases:
   my_workflow:
-    main:                    # Options for qxub command level
-      name: "workflow_{date}"
-      queue: "normal"
-      resources:
-        - "mem=16GB"
-        - "ncpus=4"
-    subcommand:             # Subcommand-specific options
-      type: conda           # or 'module', 'sing'
-      env: "myenv"
-    target:                 # Command to execute
-      cmd: "python analysis.py"
+    # Execution context (choose one)
+    env: "myenv"              # Conda environment
+    # mod: "python3"          # Single module
+    # mods: "python3,gcc"     # Multiple modules  
+    # sif: "/path/to.sif"     # Singularity container
+    
+    # PBS job options
+    name: "workflow_{date}"
+    queue: "normal"
+    resources:
+      - "mem=16GB"
+      - "ncpus=4"
+    
+    # Command to execute
+    cmd: "python analysis.py"
 ```
 
-This structure ensures proper option placement and prevents the common error of putting main options after subcommands.
+This structure directly corresponds to the unified CLI:
+```bash
+qxub --env myenv --name "workflow_{date}" --queue normal -l mem=16GB -l ncpus=4 -- python analysis.py
+```
 
 ## Creating Aliases
 
@@ -107,25 +112,22 @@ This structure ensures proper option placement and prevents the common error of 
 ```bash
 # Basic conda alias
 qxub config alias set analysis \
-  --subcommand conda \
-  --cmd "python analyze.py" \
   --env myenv \
+  --cmd "python analyze.py" \
   --name "analysis_{date}"
 
 # GPU-enabled conda alias (note proper resource specification)
 qxub config alias set gpu_training \
-  --subcommand conda \
-  --cmd "python train.py" \
   --env pytorch \
+  --cmd "python train.py" \
   --queue gpuvolta \
   --resources "ngpus=1,ncpus=12,mem=32GB" \
   --name "training_{timestamp}"
 
 # Data processing alias
 qxub config alias set preprocess \
-  --subcommand conda \
-  --cmd "python preprocess.py" \
   --env datasci \
+  --cmd "python preprocess.py" \
   --resources "mem=8GB,ncpus=2" \
   --name "preprocess_{date}"
 ```
@@ -135,24 +137,21 @@ qxub config alias set preprocess \
 ```bash
 # Single module
 qxub config alias set samtools_analysis \
-  --subcommand module \
-  --cmd "samtools view -c" \
   --mod samtools \
+  --cmd "samtools view -c" \
   --name "sam_analysis_{timestamp}"
 
 # Multiple modules (comma-separated)
 qxub config alias set bioinformatics \
-  --subcommand module \
-  --cmd "python pipeline.py" \
   --mods "python3,samtools,gcc" \
+  --cmd "python pipeline.py" \
   --resources "mem=16GB,ncpus=4" \
   --name "bio_pipeline_{date}"
 
 # R analysis
 qxub config alias set r_analysis \
-  --subcommand module \
-  --cmd "Rscript analysis.R" \
   --mods "R,gcc" \
+  --cmd "Rscript analysis.R" \
   --resources "mem=12GB,ncpus=2" \
   --name "r_analysis_{time}"
 ```
@@ -162,27 +161,24 @@ qxub config alias set r_analysis \
 ```bash
 # Basic container alias
 qxub config alias set container_analysis \
-  --subcommand sing \
-  --cmd "python analysis.py" \
   --sif "/containers/analysis.sif" \
+  --cmd "python analysis.py" \
   --bind "/data:/data" \
   --name "container_{timestamp}"
 
 # Jupyter notebook in container
 qxub config alias set jupyter \
-  --subcommand sing \
-  --cmd "jupyter lab --no-browser --ip=0.0.0.0" \
   --sif "/containers/jupyter.sif" \
+  --cmd "jupyter lab --no-browser --ip=0.0.0.0" \
   --bind "/home:/home,/data:/data" \
   --name "jupyter_{user}_{time}"
 
 # Complex container workflow
 qxub config alias set rnaseq \
-  --subcommand sing \
-  --cmd "nextflow run nf-core/rnaseq" \
   --sif "/containers/nextflow.sif" \
+  --cmd "nextflow run nf-core/rnaseq" \
   --bind "/data:/data,/scratch:/scratch" \
-  --env "THREADS=8" \
+  --env-var "THREADS=8" \
   --resources "mem=64GB,ncpus=16" \
   --queue express \
   --name "rnaseq_{date}"
@@ -301,25 +297,22 @@ qxub alias evaluate models/best_model.pt
 ```bash
 # Quality control
 qxub config alias set qc \
-  --subcommand module \
-  --cmd "fastqc" \
   --mods "fastqc,multiqc" \
+  --cmd "fastqc" \
   --resources "mem=4GB,ncpus=2" \
   --name "qc_{date}"
 
 # Alignment
 qxub config alias set align \
-  --subcommand module \
-  --cmd "bwa mem ref.fa" \
   --mods "bwa,samtools" \
+  --cmd "bwa mem ref.fa" \
   --resources "mem=32GB,ncpus=16" \
   --name "align_{timestamp}"
 
 # Variant calling
 qxub config alias set variants \
-  --subcommand sing \
-  --cmd "gatk HaplotypeCaller" \
   --sif "/containers/gatk.sif" \
+  --cmd "gatk HaplotypeCaller" \
   --bind "/data:/data" \
   --resources "mem=16GB,ncpus=4" \
   --name "variants_{date}"
@@ -335,14 +328,12 @@ qxub alias variants -I aligned.bam -R ref.fa -O variants.vcf
 ```bash
 # DVC operations
 qxub config alias set dvc_push \
-  --subcommand conda \
   --env dvc3 \
   --cmd "dvc push" \
   --queue copyq \
   --name "push_{time}"
 
 qxub config alias set dvc_pull \
-  --subcommand conda \
   --env dvc3 \
   --cmd "dvc pull" \
   --queue copyq \
@@ -350,7 +341,6 @@ qxub config alias set dvc_pull \
 
 # Backup operations
 qxub config alias set backup \
-  --subcommand module \
   --mod rsync \
   --cmd "rsync -av --progress" \
   --queue copyq \
@@ -358,7 +348,6 @@ qxub config alias set backup \
 
 # Cloud sync
 qxub config alias set sync_cloud \
-  --subcommand conda \
   --env tools \
   --cmd "rclone sync --progress" \
   --queue copyq \
@@ -379,7 +368,6 @@ When creating GPU aliases, always specify both GPU and CPU requirements:
 ```bash
 # ✅ Correct: Specify both GPU and CPU
 qxub config alias set gpu_job \
-  --subcommand conda \
   --env pytorch \
   --cmd "python train.py" \
   --queue gpuvolta \
@@ -393,13 +381,13 @@ qxub config alias set gpu_job \
 
 ### Option Placement
 
-The hierarchical structure ensures options go to the right place automatically, but when overriding, remember the rules:
+The flat structure maps directly to unified CLI options, but when overriding, remember the rules:
 
 ```bash
-# ✅ Correct: Main options can be overridden
+# ✅ Correct: Any option can be overridden at runtime
 qxub alias myalias --queue normal --resources "mem=8GB"
 
-# ✅ Correct: Subcommand options can be overridden  
+# ✅ Correct: Execution context can be overridden  
 qxub alias myalias --env newenv --mods "python3,gcc"
 
 # ✅ Correct: Command can be completely overridden

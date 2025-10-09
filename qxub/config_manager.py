@@ -113,7 +113,8 @@ class ConfigManager:
         now = datetime.now()
         user = pwd.getpwuid(os.getuid()).pw_name
 
-        return {
+        # Start with built-in template variables
+        template_vars = {
             "user": user,
             "project": project or "",
             "name": name or "",
@@ -122,6 +123,16 @@ class ConfigManager:
             "date": now.strftime("%Y%m%d"),
             "time": now.strftime("%H%M%S"),
         }
+
+        # Add custom template variables from config
+        if self.merged_config and "templates" in self.merged_config:
+            config_templates = OmegaConf.to_container(
+                self.merged_config.templates, resolve=True
+            )
+            if isinstance(config_templates, dict):
+                template_vars.update(config_templates)
+
+        return template_vars
 
     def resolve_templates(
         self, value: Any, template_vars: Dict[str, str]
@@ -247,11 +258,31 @@ class ConfigManager:
             },
             "aliases": {
                 "example": {
-                    "subcommand": "conda",
                     "cmd": 'echo "Hello from qxub alias!"',
                     "name": "example",
-                    "conda": {"env": "base"},
-                }
+                    "env": "base",  # Direct execution context option
+                },
+                "module_example": {
+                    "cmd": "samtools --version",
+                    "name": "samtools_test",
+                    "mod": "samtools",  # Single module
+                },
+                "multi_module_example": {
+                    "cmd": "python analysis.py",
+                    "name": "analysis",
+                    "mods": "python3,gcc",  # Multiple modules
+                },
+                "container_example": {
+                    "cmd": "python script.py",
+                    "name": "container_job",
+                    "sif": "/containers/analysis.sif",
+                    "bind": ["/data:/data"],
+                },
+                "default_example": {
+                    "cmd": "echo 'Direct PBS execution'",
+                    "name": "simple_job",
+                    # No execution context = default execution
+                },
             },
         }
 
@@ -304,6 +335,36 @@ class ConfigManager:
         resolved = self.resolve_templates(resolved, template_vars)
 
         return resolved
+
+    def save_alias(self, alias_name: str, alias_definition: Dict[str, Any]):
+        """Save an alias to the user configuration."""
+        user_config_file = self._get_user_config_dir() / "config.yaml"
+
+        # Ensure user config directory exists
+        user_config_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing user config or create new
+        if user_config_file.exists():
+            try:
+                user_config = OmegaConf.load(user_config_file)
+            except Exception:
+                user_config = OmegaConf.create({})
+        else:
+            user_config = OmegaConf.create({})
+
+        # Ensure aliases section exists
+        if "aliases" not in user_config:
+            user_config.aliases = {}
+
+        # Add the new alias
+        user_config.aliases[alias_name] = alias_definition
+
+        # Save back to file
+        with open(user_config_file, "w", encoding="utf-8") as f:
+            OmegaConf.save(user_config, f, resolve=True)
+
+        # Reload configs to pick up the new alias
+        self._load_configs()
 
 
 # Global config manager instance

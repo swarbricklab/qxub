@@ -1,6 +1,6 @@
 # qsub_tools
 
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/swarbricklab/qsub_tools)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/swarbricklab/qsub_tools)
 
 A powerful wrapper around PBS `qsub` that eliminates boilerplate when running jobs in conda environments, with modules, or in containers.
 
@@ -17,22 +17,28 @@ pip install -e .
 ### Basic Usage
 
 ```bash
-# Run in conda environment (uses active environment by default)
-qxub conda -- python script.py
-qxub conda --env myenv -- python script.py
+# Run in conda environment
+qxub --env myenv -- python script.py
+qxub --conda myenv -- python script.py  # alternative option name
 
 # Run with environment modules  
-qxub module --mod samtools -- samtools --version
-qxub module --mods "python3,gcc" -- python analysis.py
+qxub --mod samtools -- samtools --version
+qxub --mods "python3,gcc" -- python analysis.py  # comma-separated
+qxub --mod python3 --mod gcc -- python analysis.py  # repeatable
 
 # Run in Singularity container
-qxub sing --sif container.sif -- python script.py
+qxub --sif container.sif -- python script.py
+qxub --singularity container.sif -- python script.py  # alternative
 
-# Add PBS options (main options go before subcommand)
-qxub --resources mem=16GB --queue normal conda --env myenv -- python script.py
+# Run without specific environment (direct PBS submission)
+qxub -- echo "Hello world"
+qxub --pre "echo Starting" --post "echo Done" -- python script.py
+
+# Add PBS options (all options go before --)
+qxub -l mem=16GB --queue normal --env myenv -- python script.py
 
 # Preview commands without running
-qxub --dry-run conda --env myenv -- python script.py
+qxub --dry --env myenv -- python script.py
 ```
 
 ## Advanced Features
@@ -45,7 +51,7 @@ qxub config set defaults.project "a56"
 qxub config set defaults.queue "normal"
 
 # Create workflow aliases (optional)
-qxub config alias set dvc_push --subcommand conda --cmd "dvc push" --env dvc3 --queue copyq
+qxub config alias set dvc_push --env dvc3 --queue copyq --cmd "dvc push"
 
 # Execute aliases
 qxub alias dvc_push
@@ -59,29 +65,40 @@ qxub alias dvc_push
 
 > ⚠️ **Key things to remember:**
 >
-> 1. **Option placement**: Main options (`--name`, `--queue`, `--resources`) must come **before** the subcommand
-> 2. **GPU queues**: GPU queues like `gpuvolta` require both GPU and CPU specifications: `--resources ngpus=1,ncpus=12`
-> 3. **Global flags**: Options like `--dry-run` must come immediately after `qxub`
+> 1. **Option placement**: All qxub options must come **before** the `--` separator
+> 2. **Command separation**: Use `--` to separate qxub options from your command and its arguments
+> 3. **GPU queues**: GPU queues like `gpuvolta` require both GPU and CPU specifications: `-l ngpus=1,ncpus=12`
+> 4. **Alternative options**: Use `--env`/`--conda`, `--mod`/`--mods`/`--modules`, `--sif`/`--sing`/`--singularity` based on preference
 
-## Subcommands
+## Execution Contexts
 
-| Command | Description |
-|---------|-------------|
-| `conda` | Execute in conda environment |
-| `module` | Execute with environment modules |
-| `sing` | Execute in Singularity container |
-| `config` | Manage configuration (see [docs](docs/configuration.md)) |
-| `alias` | Execute workflow aliases (see [docs](docs/aliases.md)) |
+| Context | Options | Description |
+|---------|---------|-------------|
+| **Conda** | `--env`, `--conda` | Execute in conda environment |
+| **Modules** | `--mod` (repeatable), `--mods`, `--modules` | Execute with environment modules |
+| **Singularity** | `--sif`, `--sing`, `--singularity` | Execute in Singularity container |
+| **Default** | *(no context option)* | Direct PBS submission without environment |
 
 ## Common Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--dry-run` | Preview command without executing | `qxub --dry-run conda --env myenv script.py` |
-| `--quiet` | Submit and exit (no monitoring) | `qxub --quiet conda --env myenv script.py` |
-| `--resources` | PBS resource requirements | `--resources mem=16GB,ncpus=4` |
+| `--dry` | Preview command without executing | `qxub --dry --env myenv -- script.py` |
+| `--quiet` | Submit and exit (no monitoring) | `qxub --quiet --env myenv -- script.py` |
+| `-l` | PBS resource requirements | `-l mem=16GB -l ncpus=4` |
 | `--queue` | PBS queue name | `--queue normal` |
 | `--name` | Job name | `--name analysis_job` |
+| `--pre` | Command to run before main command | `--pre "echo Starting"` |
+| `--post` | Command to run after main command | `--post "echo Done"` |
+
+## Management Commands
+
+| Command | Description |
+|---------|-------------|
+| `qxub config` | Manage configuration (see [docs](docs/configuration.md)) |
+| `qxub alias` | Execute workflow aliases (see [docs](docs/aliases.md)) |
+| `qxub history` | View execution history |
+| `qxub resources` | View resource usage |
 
 ## Output and Monitoring
 
@@ -94,30 +111,79 @@ qxub alias dvc_push
 
 ```bash
 qxub --help                    # General help
-qxub conda --help             # Subcommand help
 qxub config --help            # Configuration help
+qxub alias --help             # Alias management help
+qxub history --help           # History management help
+qxub resources --help         # Resource tracking help
 ```
 
-## Version 1.0.0 Highlights
+## Examples
 
-**🎉 Major Features:**
-- **Hierarchical configuration** with defaults, template variables, and CLI overrides
-- **Workflow aliases** for ultra-simple execution (`qxub alias name`)
-- **Multi-environment support** - conda, modules, Singularity containers
-- **Smart error handling** with consistent exit codes
-- **Template variables** for dynamic paths and job names
+### Real-world Usage Patterns
 
-**🔧 Bug Fixes:**
-- Fixed option placement validation (main options before subcommands)
-- Fixed GPU queue resource requirements
-- Fixed alias option override logic
-- Consistent exit code 2 for all validation errors
+```bash
+# Data science workflow
+qxub --conda pytorch --queue gpuvolta -l ngpus=1 -l ncpus=12 --name gpu-training -- python train.py --epochs 100
 
-See full [CHANGELOG](#changelog) below for complete details.
+# Bioinformatics pipeline
+qxub --modules samtools,bwa -l walltime=02:00:00 -l mem=16GB -- bash pipeline.sh
+
+# Container workflow
+qxub --singularity /containers/blast.sif --bind /data --name blast-search -- blastn -query input.fa -db nt
+
+# Simple script with setup and cleanup
+qxub --pre "mkdir -p /tmp/work" --post "rm -rf /tmp/work" -- python analyze_data.py
+
+# Direct PBS submission (no environment)
+qxub -l walltime=01:00:00 -l mem=8GB -- ./my_compiled_program
+```
 
 ---
 
 ## Changelog
+
+### Version 2.0.0 - Unified CLI Architecture
+
+**🎯 Major Features:**
+- **Unified Command Interface**: Eliminated subcommands in favor of execution context options (`--env`, `--mod`, `--sif`)
+- **Alternative Option Names**: Multiple option styles for better usability (`--env`/`--conda`, `--sif`/`--sing`/`--singularity`)
+- **Default Execution Template**: Direct PBS job submission without environment activation
+- **Enhanced Option Handling**: All options before `--` separator for unambiguous parsing
+- **Comprehensive Testing**: 39 automated tests ensuring reliability
+
+**🔧 Technical Improvements:**
+- **Simplified Architecture**: No more subcommand complexity
+- **Mutual Exclusivity Validation**: Prevents conflicting execution contexts
+- **Black Code Formatting**: Consistent code style across entire codebase
+- **Context Initialization Fixes**: Proper handling of execution contexts
+
+**⚠️ Breaking Changes:**
+- **CLI Syntax**: Changed from `qxub conda --env myenv -- cmd` to `qxub --env myenv -- cmd`
+- **Option Placement**: All qxub options must come before `--` separator
+- **Subcommand Removal**: `conda`, `module`, and `sing` subcommands no longer exist
+
+**✨ New Syntax Examples:**
+```bash
+# Before (1.x)                        # After (2.0)
+qxub conda --env myenv -- python script.py    →    qxub --env myenv -- python script.py
+qxub module --mod python3 -- python script.py    →    qxub --mod python3 -- python script.py
+qxub sing --sif container.sif -- python script.py    →    qxub --sif container.sif -- python script.py
+```
+
+### Version 1.1.0 - Enhanced CLI, Resource Tracking, and System Improvements
+
+**🎯 Major Features:**
+- **Enhanced CLI Error Handling**: Intelligent error messages with fuzzy matching for typos and contextual guidance for option placement
+- **Resource Efficiency Tracking**: SQLite-based system for analyzing job performance with efficiency metrics and trend analysis
+- **Comprehensive Threading Improvements**: Fixed infinite loop bugs, proper exit code propagation, and enhanced job monitoring
+- **Dual-Log History System**: Separate computational recipes from execution records for better analysis and alias conversion
+- **System Configuration Support**: XDG-compliant system-wide configurations for organizational defaults
+
+**🔧 Technical Enhancements:**
+- **Custom Click Classes**: QxubGroup and QxubCommand with intelligent error handling and suggestion system
+- **Resource Tracking Integration**: Automatic efficiency calculations integrated with job completion workflow
+- **Enhanced Documentation**: Comprehensive threading architecture docs and development guides
+- **Robust Testing**: System configuration tests and realistic usage scenario validation
 
 ### Version 1.0.1 - Documentation and Linting Improvements
 

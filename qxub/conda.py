@@ -10,11 +10,122 @@ import sys
 import signal
 import logging
 import base64
+import shutil
 from pathlib import Path
+import difflib
 import click
 import pkg_resources
 from .cli import qxub
-from .scheduler import qsub, monitor_and_tail, print_status, qdel
+from .scheduler import qsub, monitor_and_tail, print_status, qdel, get_job_resource_data
+from .resource_tracker import resource_tracker
+
+
+class QxubCommand(click.Command):
+    """Custom Click command with enhanced error handling for unknown options."""
+
+    def parse_args(self, ctx, args):
+        """Override parse_args to provide better error messages for unknown options."""
+        try:
+            return super().parse_args(ctx, args)
+        except click.NoSuchOption as e:
+            self.handle_unknown_option_error(ctx, e, args)
+
+    def handle_unknown_option_error(self, ctx, error, args):
+        """Provide helpful suggestions for unknown options."""
+        unknown_option = error.option_name
+
+        # Get all valid options for this command
+        command_options = []
+        for param in self.params:
+            if isinstance(param, click.Option):
+                command_options.extend(param.opts)
+
+        # Get parent qxub options
+        parent_options = []
+        if ctx.parent and ctx.parent.command:
+            for param in ctx.parent.command.params:
+                if isinstance(param, click.Option):
+                    parent_options.extend(param.opts)
+
+        # Find close matches
+        close_matches = difflib.get_close_matches(
+            unknown_option, command_options + parent_options, n=3, cutoff=0.6
+        )
+
+        # Build helpful error message
+        click.echo(f"Error: No such option: {unknown_option}", err=True)
+
+        if close_matches:
+            click.echo("\n💡 Did you mean:", err=True)
+            for match in close_matches:
+                if match in command_options:
+                    click.echo(f"   {match}  ({self.name} option)", err=True)
+                else:
+                    click.echo(
+                        f"   {match}  (qxub option - put before '{self.name}')",
+                        err=True,
+                    )
+
+        # Provide specific guidance for this subcommand
+        click.echo(f"\n📖 Option placement for 'qxub {self.name}':", err=True)
+        click.echo(
+            f"   ✅ qxub --queue normal {self.name} --env myenv command", err=True
+        )
+        click.echo(
+            f"   ❌ qxub {self.name} --queue normal --env myenv command", err=True
+        )
+
+        # Check if this looks like a command argument that should use --
+        if unknown_option.startswith("-") and self._looks_like_command_argument(
+            unknown_option, args
+        ):
+            click.echo(
+                "\n   If this is part of your command, use '--' to separate:", err=True
+            )
+            click.echo(
+                f"   ✅ qxub {self.name} --env myenv -- python script.py {unknown_option}",
+                err=True,
+            )
+            click.echo(
+                f"   ❌ qxub {self.name} --env myenv python script.py {unknown_option}",
+                err=True,
+            )
+
+        # Show relevant help
+        click.echo(f"\n🔍 For help: qxub {self.name} --help", err=True)
+
+        ctx.exit(2)
+
+    def _looks_like_command_argument(self, option, args):
+        """Check if the unknown option looks like it should be part of a command."""
+        # Common command-line options that users might accidentally use
+        command_like_options = [
+            "-c",
+            "-i",
+            "-o",
+            "-f",
+            "-d",
+            "-r",
+            "-t",
+            "-s",
+            "-n",
+            "-p",
+            "-h",
+            "--input",
+            "--output",
+            "--file",
+            "--config",
+            "--help",
+            "--version",
+            "--debug",
+            "--verbose",
+            "--quiet",
+            "--force",
+            "--recursive",
+        ]
+
+        return option in command_like_options
+
 
 # Global variable to track current job for signal handling
 _CURRENT_JOB_ID = None  # pylint: disable=invalid-name
@@ -25,7 +136,13 @@ def _signal_handler(signum, frame):
     # pylint: disable=unused-argument
     if _CURRENT_JOB_ID:
         # Clear the current line completely before printing cleanup messages
-        print("\r" + " " * 100 + "\r", end="", flush=True)
+        try:
+            terminal_width = shutil.get_terminal_size().columns
+            clear_width = terminal_width
+        except Exception:
+            clear_width = 100
+
+        print("\r" + " " * clear_width + "\r", end="", flush=True)
         print("🛑 Interrupted! Cleaning up job...")
         success = qdel(_CURRENT_JOB_ID, quiet=False)
         if success:
@@ -64,8 +181,8 @@ def _get_default_template():
     )
 
 
-@qxub.command()
-@click.argument("cmd", nargs=-1)
+@qxub.command(cls=QxubCommand)
+@click.argument("cmd", nargs=-1, required=False)
 @click.option(
     "--env",
     default=os.getenv("CONDA_DEFAULT_ENV"),
@@ -164,7 +281,7 @@ def conda(
 
     # Show success message with job ID
     if not ctx_obj["quiet"]:
-        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        success_msg = f"✓ Job {job_id[:8]} submitted"
         print_status(success_msg, final=False)
 
     logging.info("Your job has been successfully submitted")
@@ -182,14 +299,38 @@ def conda(
 
     # Pass success message to monitor_and_tail for spinner display
     if not ctx_obj["quiet"]:
-        success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        success_message = f"🚀 Job {job_id[:8]}"
     else:
         success_message = None
 
     try:
-        monitor_and_tail(
+        job_exit_status = monitor_and_tail(
             job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
         )
+
+        # Capture resource data for resource tracking (only if not a subprocess)
+        is_subprocess = os.getenv("QXUB_SUBPROCESS")
+        if not is_subprocess:
+            try:
+                resource_data = get_job_resource_data(job_id)
+                if resource_data:
+                    # Extract command for logging
+                    command = " ".join(sys.argv)
+                    resource_tracker.log_job_resources(job_id, resource_data, command)
+                    logging.debug("Logged resource data for job %s", job_id)
+                else:
+                    logging.debug("No resource data available for job %s", job_id)
+            except Exception as e:
+                logging.debug("Failed to log resource data: %s", e)
+
+        # Exit with the same status as the job
+        if job_exit_status != 0:
+            logging.info("Job failed with exit status %d", job_exit_status)
+        else:
+            logging.info("Job completed successfully")
+
+        sys.exit(job_exit_status)
+
     finally:
         # Clear job ID when monitoring completes (successfully or via interrupt)
         _CURRENT_JOB_ID = None
