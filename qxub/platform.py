@@ -479,6 +479,26 @@ class QueueSelector:
         result = QueueSelectionResult()
         preferences = preferences or {}
         
+        # First, check platform auto-selection rules
+        auto_selected_queue = self.platform.select_queue(resources)
+        if auto_selected_queue and auto_selected_queue in self.platform.queues:
+            # Validate the auto-selected queue
+            queue = self.platform.queues[auto_selected_queue]
+            validation_result = queue.validate_resources(resources)
+            
+            if validation_result.is_valid:
+                result.best_queue = auto_selected_queue
+                result.valid_queues = [auto_selected_queue]
+                
+                # Estimate cost
+                if queue.su_billing_rate:
+                    cpus = resources.get("cpus", 1)
+                    walltime_hours = parse_walltime(resources.get("walltime", "1:00:00")) or 1.0
+                    result.estimated_cost = queue.su_billing_rate * cpus * walltime_hours
+                
+                result.suggestions.append(f"Auto-selected based on platform rules")
+                return result
+        
         # Validate and collect eligible queues
         valid_queues = []
         invalid_queues = {}

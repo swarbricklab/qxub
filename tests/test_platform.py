@@ -256,10 +256,10 @@ def test_cost_estimation():
         selector = QueueSelector(platform)
         
         # Test cost estimation for normal queue (1.0 SU/CPU·hour)
-        resources = {"cpus": 4, "memory": "8GB", "walltime": "2:00:00"}
+        resources = {"cpus": 4, "memory": "8GB", "walltime": "4:00:00"}  # Longer walltime to avoid express queue
         result = selector.select_queue(resources)
         
-        expected_cost = 4 * 2.0 * 1.0  # 4 CPUs * 2 hours * 1.0 rate
+        expected_cost = 4 * 4.0 * 1.0  # 4 CPUs * 4 hours * 1.0 rate
         
         if result.estimated_cost and abs(result.estimated_cost - expected_cost) < 0.001:
             print(f"  ✅ Cost estimation: {result.estimated_cost} SU (expected {expected_cost})")

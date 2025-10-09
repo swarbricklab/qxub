@@ -196,14 +196,34 @@ def setup_logging(verbosity: int = None):
     if verbosity is None:
         verbosity = get_config().get("verbosity", 0)
     
+    # Get the root logger and configure it directly
+    root_logger = logging.getLogger()
+    
+    # Remove existing handlers to avoid conflicts
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Set the level and format based on verbosity
     if verbosity == 1:
-        logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
+        level = logging.WARNING
+        format_str = '%(levelname)s: %(message)s'
     elif verbosity == 2:
-        logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+        level = logging.INFO
+        format_str = '%(levelname)s: %(message)s'
     elif verbosity >= 3:
-        logging.basicConfig(level=logging.DEBUG, format='%(levelname)s:%(name)s: %(message)s')
+        level = logging.DEBUG
+        format_str = '%(levelname)s:%(name)s: %(message)s'
     else:
-        logging.basicConfig(level=logging.ERROR, format='%(levelname)s: %(message)s')
+        level = logging.ERROR
+        format_str = '%(levelname)s: %(message)s'
+    
+    # Configure the root logger
+    root_logger.setLevel(level)
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_str)
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
 
 
 def validate_config() -> List[str]:
