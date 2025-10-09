@@ -1,10 +1,16 @@
-# qxub Conda Integration Tests
+# qxub Testing Suite
 
-This directory contains comprehensive integration tests for the `qxub conda` subcommand, designed to catch bugs and validate functionality across different configurations and HPC environments.
+This directory contains comprehensive integration tests and testing utilities for qxub, designed to catch bugs and validate functionality across different configurations and HPC environments.
 
 ## Test Scripts
 
-### 1. `test_conda_dry.sh` - Quick Dry-Run Tests ⚡
+### Integration Tests
+
+### 1. `test_unified_cli.sh` - Unified CLI Tests ⚡
+
+**Purpose**: Validation of the new unified CLI interface (qxub 2.0+).
+
+### 2. `test_conda_dry.sh` - Quick Dry-Run Tests ⚡
 
 **Purpose**: Fast validation of command generation and parsing without submitting actual jobs.
 
