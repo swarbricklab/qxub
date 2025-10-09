@@ -77,12 +77,24 @@ class QxubConfig:
         return default
     
     def get_platform_search_paths(self) -> List[Path]:
-        """Get platform search paths from config or defaults."""
-        configured_paths = self.get("platform_search_paths", [])
+        """Get platform search paths from config, environment, or defaults."""
+        import os
         
+        # Check environment variable first
+        env_paths = os.getenv("QXUB_PLATFORM_PATHS")
+        if env_paths:
+            # Support both single path and colon-separated paths
+            if ":" in env_paths:
+                return [Path(p.strip()) for p in env_paths.split(":")]
+            else:
+                return [Path(env_paths)]
+        
+        # Then check config
+        configured_paths = self.get("platform_search_paths", [])
         if configured_paths:
             return [Path(p) for p in configured_paths]
         
+        # Finally use defaults
         return self.platform_search_paths
     
     def get_default_platform(self) -> Optional[str]:

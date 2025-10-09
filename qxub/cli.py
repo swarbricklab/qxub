@@ -466,6 +466,9 @@ def qxub(
         qxub --mod python3 --mod gcc -- make
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
+        
+    Use --queue auto for intelligent queue selection:
+        qxub --queue auto -l mem=500GB --env myenv -- python big_job.py
     """
     # Handle version flag first
     if version:
