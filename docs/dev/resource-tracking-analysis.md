@@ -10,7 +10,7 @@ Analysis of `qstat -fx` output to understand what resource information can be ca
 
 ```
 Resource_List.jobfs = 104857600b           # Jobfs storage (100MB)
-Resource_List.mem = 4294967296b            # Memory (4GB) 
+Resource_List.mem = 4294967296b            # Memory (4GB)
 Resource_List.mpiprocs = 1                 # MPI processes
 Resource_List.ncpus = 1                    # CPU cores
 Resource_List.nodect = 1                   # Node count
@@ -99,7 +99,7 @@ jobdir = /home/913/jr9959                 # Job home directory
   exit_code: 0
   duration: 4.2
   job_id: "151612099"
-  
+
   # NEW: Resource tracking
   resources:
     requested:
@@ -108,7 +108,7 @@ jobdir = /home/913/jr9959                 # Job home directory
       walltime: "00:30:00"
       jobfs: "104857600b"     # 100MB
       storage: "scratch/a56+gdata/a56"
-      
+
     used:
       mem: "135580kb"         # 132MB actual
       ncpus: 1
@@ -117,22 +117,22 @@ jobdir = /home/913/jr9959                 # Job home directory
       cpupercent: 48
       cput: "00:00:02"
       vmem: "135580kb"
-      
+
     efficiency:
       mem_efficiency: 3.2%    # 135580kb / 4194304kb * 100
       time_efficiency: 0.2%   # 4s / 1800s * 100
       cpu_efficiency: 48%     # cpupercent
-      
+
   execution:
     queue: "normal-exec"
     exec_host: "gadi-cpu-clx-2841/3"
     exec_vnode: "gadi-cpu-clx-2841:ncpus=1:mem=4194304kb:jobfs=102400kb"
     project: "a56"
     session_id: 2891068
-    
+
   timing:
     queued_at: "2025-10-05T10:25:10Z"     # qtime
-    started_at: "2025-10-05T10:25:15Z"    # stime  
+    started_at: "2025-10-05T10:25:15Z"    # stime
     finished_at: "2025-10-05T10:25:30Z"   # mtime
     queue_wait: 5                         # stime - qtime
     execution_time: 15                    # mtime - stime
@@ -143,11 +143,11 @@ jobdir = /home/913/jr9959                 # Job home directory
 ### Memory Efficiency
 ```python
 mem_used_kb = parse_size_to_kb(resources_used.mem)        # 135580kb
-mem_requested_kb = parse_size_to_kb(Resource_List.mem)    # 4194304kb  
+mem_requested_kb = parse_size_to_kb(Resource_List.mem)    # 4194304kb
 mem_efficiency = (mem_used_kb / mem_requested_kb) * 100   # 3.2%
 ```
 
-### Time Efficiency  
+### Time Efficiency
 ```python
 time_used_seconds = parse_time_to_seconds(resources_used.walltime)  # 4s
 time_requested_seconds = parse_time_to_seconds(Resource_List.walltime)  # 1800s
@@ -181,7 +181,7 @@ cpu_efficiency = int(resources_used.cpupercent)  # 48%
 - PBS uses various units: `b`, `kb`, `mb`, `gb`, `4294967296b`, `104857600b`
 - Need robust size parsing to bytes for comparison
 
-### Time Parsing  
+### Time Parsing
 - PBS uses `HH:MM:SS` format: `00:00:04`, `00:30:00`
 - Convert to seconds for calculations
 

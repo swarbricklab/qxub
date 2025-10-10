@@ -73,15 +73,15 @@ else
     # Create output directories
     out_dir=$(dirname "$out")
     err_dir=$(dirname "$err")
-    
+
     mkdir -p "$out_dir" "$err_dir"
-    
+
     # Test write permissions
     if ! touch "$out" "$err"; then
         echo "❌ ERROR: Cannot write to output files $out and $err"
         exit 1
     fi
-    
+
     exec_prefix="exec 1>\"$out\" 2>\"$err\""
 fi
 

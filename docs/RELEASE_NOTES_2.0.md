@@ -2,8 +2,8 @@
 
 ## 🎉 Major Release: Unified CLI Architecture
 
-**Release Date**: October 2025  
-**Version**: 2.0.0  
+**Release Date**: October 2025
+**Version**: 2.0.0
 **Breaking Changes**: Yes - see migration guide below
 
 ## Overview
@@ -18,7 +18,7 @@ Replaced complex subcommand structure with intuitive execution context options:
 ```bash
 # Before (qxub 1.x)
 qxub conda --env myenv python script.py
-qxub module --mod python3,gcc python script.py  
+qxub module --mod python3,gcc python script.py
 qxub sing --sif container.sif python script.py
 
 # After (qxub 2.0)
@@ -83,13 +83,13 @@ All subcommands have been removed. Update your commands as follows:
 # New: qxub --env myenv -- python script.py
 # Alt: qxub --conda myenv -- python script.py
 
-# Module Environment Execution  
+# Module Environment Execution
 # Old: qxub module --mod python3,gcc python script.py
 # New: qxub --mods python3,gcc -- python script.py
 # Alt: qxub --mod python3 --mod gcc -- python script.py
 
 # Singularity Container Execution
-# Old: qxub sing --sif container.sif python script.py  
+# Old: qxub sing --sif container.sif python script.py
 # New: qxub --sif container.sif -- python script.py
 # Alt: qxub --sing container.sif -- python script.py
 
@@ -108,7 +108,7 @@ Search and replace patterns for automated migration:
 ```bash
 # Basic replacements
 sed -i 's/qxub conda --env \([^ ]*\)/qxub --env \1 --/g' your_script.sh
-sed -i 's/qxub module --mod \([^ ]*\)/qxub --mod \1 --/g' your_script.sh  
+sed -i 's/qxub module --mod \([^ ]*\)/qxub --mod \1 --/g' your_script.sh
 sed -i 's/qxub sing --sif \([^ ]*\)/qxub --sif \1 --/g' your_script.sh
 ```
 
@@ -148,7 +148,7 @@ Multiple names for Singularity containers:
 
 ```bash
 qxub --sif container.sif -- command
-qxub --sing container.sif -- command  
+qxub --sing container.sif -- command
 qxub --singularity container.sif -- command
 ```
 
@@ -202,7 +202,7 @@ qxub --singularity container.sif -- command
 - **Intuitive syntax**: `--env` clearly indicates conda execution
 - **Flexible options**: Multiple names for the same functionality
 
-### **Enhanced Functionality** 
+### **Enhanced Functionality**
 - **Default execution**: New capability for environment-agnostic jobs
 - **Better validation**: Clear error messages for invalid combinations
 - **Improved help**: Reorganized and more accessible

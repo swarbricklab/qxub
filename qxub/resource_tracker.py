@@ -5,16 +5,17 @@ Tracks only key metrics: job_id, requested vs used resources, efficiency.
 Uses SQLite for simple querying and analysis.
 """
 
-import sqlite3
 import logging
+import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
+
 from .resource_parser import (
-    size_to_bytes,
-    time_to_seconds,
     bytes_to_human,
     seconds_to_time,
+    size_to_bytes,
+    time_to_seconds,
 )
 
 
@@ -42,30 +43,30 @@ class ResourceTracker:
                     timestamp TEXT NOT NULL,
                     command TEXT,
                     exit_code INTEGER,
-                    
+
                     -- Requested resources
                     mem_requested_mb INTEGER,
                     time_requested_sec INTEGER,
                     cpus_requested INTEGER,
                     jobfs_requested_mb INTEGER,
-                    
-                    -- Used resources  
+
+                    -- Used resources
                     mem_used_mb INTEGER,
                     time_used_sec INTEGER,
                     cpus_used INTEGER,
                     jobfs_used_mb INTEGER,
                     cpu_percent REAL,
-                    
+
                     -- Efficiency metrics (%)
                     mem_efficiency REAL,
                     time_efficiency REAL,
                     cpu_efficiency REAL,
                     jobfs_efficiency REAL,
-                    
+
                     -- Execution details
                     queue TEXT,
                     hostname TEXT,
-                    
+
                     -- Timing
                     queue_wait_sec INTEGER,
                     execution_sec INTEGER
@@ -208,8 +209,8 @@ class ResourceTracker:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT * FROM job_resources 
-                ORDER BY timestamp DESC 
+                SELECT * FROM job_resources
+                ORDER BY timestamp DESC
                 LIMIT ?
             """,
                 (limit,),
@@ -222,7 +223,7 @@ class ResourceTracker:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                SELECT 
+                SELECT
                     COUNT(*) as total_jobs,
                     AVG(mem_efficiency) as avg_mem_efficiency,
                     AVG(time_efficiency) as avg_time_efficiency,
@@ -231,7 +232,7 @@ class ResourceTracker:
                     COUNT(CASE WHEN mem_efficiency < 50 THEN 1 END) as low_mem_efficiency_jobs,
                     COUNT(CASE WHEN time_efficiency < 50 THEN 1 END) as low_time_efficiency_jobs,
                     COUNT(CASE WHEN cpu_efficiency < 50 THEN 1 END) as low_cpu_efficiency_jobs
-                FROM job_resources 
+                FROM job_resources
                 WHERE mem_efficiency IS NOT NULL
             """
             )
@@ -258,10 +259,10 @@ class ResourceTracker:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
-                SELECT job_id, command, mem_efficiency, time_efficiency, 
+                SELECT job_id, command, mem_efficiency, time_efficiency,
                        cpu_efficiency, mem_requested_mb, mem_used_mb,
                        time_requested_sec, time_used_sec, timestamp
-                FROM job_resources 
+                FROM job_resources
                 WHERE (mem_efficiency < ? OR time_efficiency < ? OR cpu_efficiency < ?)
                   AND mem_efficiency IS NOT NULL
                 ORDER BY timestamp DESC
@@ -282,7 +283,7 @@ class ResourceTracker:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """
-                SELECT 
+                SELECT
                     DATE(timestamp) as date,
                     COUNT(*) as job_count,
                     AVG(mem_efficiency) as avg_mem_eff,
@@ -290,7 +291,7 @@ class ResourceTracker:
                     AVG(cpu_efficiency) as avg_cpu_eff,
                     SUM(mem_requested_mb) as total_mem_req_mb,
                     SUM(mem_used_mb) as total_mem_used_mb
-                FROM job_resources 
+                FROM job_resources
                 WHERE timestamp > date('now', '-{} days')
                   AND mem_efficiency IS NOT NULL
                 GROUP BY DATE(timestamp)

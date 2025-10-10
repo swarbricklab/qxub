@@ -4,23 +4,26 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
+import base64
+import difflib
+import logging
 import os
 import sys
 from datetime import datetime
-import logging
 from pathlib import Path
-import difflib
-import base64
+
 import click
-from .config_cli import config_cli
+
 from .alias_cli import alias_cli
-from .history_cli import history
-from .resources_cli import resources
 from .config import setup_logging
+from .config_cli import config_cli
 from .config_manager import config_manager
+from .history_cli import history
 from .history_manager import history_manager
-from .scheduler import qsub, monitor_and_tail, print_status, qdel, get_job_resource_data
+from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resource_tracker import resource_tracker
+from .resources_cli import resources
+from .scheduler import get_job_resource_data, monitor_and_tail, print_status, qdel, qsub
 
 
 class QxubGroup(click.Group):
@@ -407,7 +410,11 @@ def _get_singularity_template():
 @click.option(
     "-l", "--resources", multiple=True, help="Job resource (default: configured)"
 )
-@click.option("-q", "--queue", help="Job queue (default: configured or normal)")
+@click.option(
+    "-q",
+    "--queue",
+    help="Job queue (default: configured or normal, use 'auto' for intelligent selection)",
+)
 @click.option("-N", "--name", help="Job name (default: configured or qt)")
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
@@ -465,6 +472,9 @@ def qxub(
         qxub --mod python3 --mod gcc -- make
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
+
+    Use --queue auto for intelligent queue selection:
+        qxub --queue auto -l mem=500GB --env myenv -- python big_job.py
     """
     # Handle version flag first
     if version:
@@ -573,6 +583,115 @@ def qxub(
     joblog = params["joblog"] or f"{params['name']}.log"
     if isinstance(joblog, str) and "{" in joblog:
         joblog = config_manager.resolve_templates(joblog, template_vars)
+
+    # Auto-select queue if needed
+    if params["queue"] == "auto":
+        try:
+            from pathlib import Path
+
+            from .platform import PlatformLoader
+            from .resource_utils import parse_memory_size, parse_walltime
+
+            # Check for QXUB_PLATFORM_PATHS environment variable
+            platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
+            if platform_paths_env:
+                search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
+                loader = PlatformLoader(search_paths=search_paths)
+            else:
+                loader = PlatformLoader()
+
+            platform_names = loader.list_platforms()
+
+            if not platform_names:
+                logging.warning(
+                    "No platforms available for auto queue selection, using 'normal'"
+                )
+                params["queue"] = "normal"
+            else:
+                # Build requirements from resources
+                requirements = {}
+                if params.get("resources"):
+                    for resource in params["resources"]:
+                        if "=" in resource:
+                            key, value = resource.split("=", 1)
+                            if key == "mem":
+                                requirements["memory"] = (
+                                    value  # Keep as string for condition parsing
+                                )
+                            elif key == "walltime":
+                                requirements["walltime"] = (
+                                    value  # Keep as string for condition parsing
+                                )
+                            elif key == "ncpus":
+                                requirements["cpus"] = int(
+                                    value
+                                )  # Use "cpus" not "ncpus"
+                            elif key in ["ngpus", "gpu"]:
+                                gpu_count = int(value) if value.isdigit() else 1
+                                requirements["gpu_requested"] = (
+                                    gpu_count  # Use "gpu_requested" for conditions
+                                )
+                                requirements["gpus"] = (
+                                    gpu_count  # Keep "gpus" for validation
+                                )
+
+                # Try to find best queue from any platform
+                best_queue = None
+                best_cost = float("inf")
+
+                for platform_name in platform_names:
+                    platform = loader.get_platform(platform_name)
+                    if not platform:
+                        continue
+
+                    try:
+                        selected_queue = platform.select_queue(requirements)
+                        if selected_queue:
+                            # Get estimated cost for comparison
+                            queue = platform.get_queue(selected_queue)
+                            if queue:
+                                # Estimate cost based on cores and walltime
+                                cores = requirements.get("cpus", 1)
+                                walltime_hours = requirements.get("walltime", 3600)
+                                # Convert walltime to hours if it's a string
+                                if isinstance(walltime_hours, str):
+                                    from .resource_utils import parse_walltime
+
+                                    walltime_hours = (
+                                        parse_walltime(walltime_hours) or 1.0
+                                    )
+                                elif isinstance(walltime_hours, (int, float)):
+                                    walltime_hours = (
+                                        walltime_hours / 3600.0
+                                    )  # Convert seconds to hours
+
+                                cost = queue.estimate_su_cost(cores, walltime_hours)
+                                if cost < best_cost:
+                                    best_cost = cost
+                                    best_queue = selected_queue
+                    except Exception as e:
+                        logging.debug(
+                            f"Failed to select queue from platform {platform.name}: {e}"
+                        )
+                        continue
+
+                if best_queue:
+                    params["queue"] = best_queue
+                    logging.info(f"Auto-selected queue: {best_queue}")
+                else:
+                    logging.warning(
+                        "No suitable queue found for requirements, using 'normal'"
+                    )
+                    params["queue"] = "normal"
+
+        except ImportError:
+            logging.warning(
+                "Platform system not available for auto queue selection, using 'normal'"
+            )
+            params["queue"] = "normal"
+        except Exception as e:
+            logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
+            params["queue"] = "normal"
 
     # Construct the qsub options
     options = "-N {name} -q {queue} -P {project} ".format_map(params)
@@ -907,3 +1026,7 @@ qxub.add_command(config_cli)
 qxub.add_command(alias_cli)
 qxub.add_command(history)
 qxub.add_command(resources)
+qxub.add_command(platform_cli)
+qxub.add_command(select_queue_cmd)
+qxub.add_command(validate_cmd)
+qxub.add_command(estimate_cmd)

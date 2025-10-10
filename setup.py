@@ -8,14 +8,14 @@ various options such as resource requests, project names, and conda environments
 Run 'pip install -e .' to install the package in editable mode for development purposes.
 """
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
 setup(
     name="qxub",
-    version="2.0.1",
+    version="2.1.0",
     author="James Robson",
     author_email="j.reeves@garvan.org.au",
     description="Simplified job submission to HPC",

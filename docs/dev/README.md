@@ -9,7 +9,7 @@ qxub uses a sophisticated multi-threaded architecture to provide real-time job m
 ### [📚 Threading Architecture](threading-architecture.md)
 **Complete technical guide** to qxub's threading system:
 - **OutputCoordinator**: Central thread synchronization hub
-- **Thread Responsibilities**: Monitor, STDOUT/STDERR tail, spinner  
+- **Thread Responsibilities**: Monitor, STDOUT/STDERR tail, spinner
 - **Signal Flow**: Event-based coordination mechanisms
 - **Exit Code Propagation**: How job exit codes flow through threads
 - **Graceful Shutdown**: Ctrl-C handling and resource cleanup
@@ -18,7 +18,7 @@ qxub uses a sophisticated multi-threaded architecture to provide real-time job m
 ### [📊 Threading Diagrams](threading-diagrams.md)
 **Visual representations** of thread interactions:
 - **State Diagrams**: Thread lifecycle and state transitions
-- **Sequence Diagrams**: Message flow between components  
+- **Sequence Diagrams**: Message flow between components
 - **Event Timeline**: Timing of signals and coordination
 - **Control Flow**: Different execution scenarios (success, failure, interruption)
 - **Memory Layout**: Resource usage patterns
@@ -60,7 +60,7 @@ pkill -TERM qxub
 
 ### Key Files for Threading
 - `qxub/scheduler.py` - Core threading logic, OutputCoordinator
-- `qxub/conda.py` - Conda executor with threading integration  
+- `qxub/conda.py` - Conda executor with threading integration
 - `qxub/module.py` - Module executor with threading integration
 - `qxub/sing.py` - Singularity executor with threading integration
 
@@ -95,7 +95,7 @@ When modifying the threading system:
 If you encounter threading-related issues:
 
 1. **Check the troubleshooting guide** - Most common issues are documented
-2. **Enable debug logging** - Use `QXUB_LOG_LEVEL=DEBUG` 
+2. **Enable debug logging** - Use `QXUB_LOG_LEVEL=DEBUG`
 3. **Gather thread dumps** - Include in bug reports
 4. **Test in isolation** - Reproduce with minimal examples
 5. **Document edge cases** - Help improve these docs

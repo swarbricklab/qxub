@@ -72,7 +72,7 @@ qxub alias myalias --env different_env --mods "python3,gcc"
 qxub alias myalias --cmd "python different_script.py"
 ```
 
-> 📖 **Note**: The `alias` subcommand is special - it accepts override options after the alias name. 
+> 📖 **Note**: The `alias` subcommand is special - it accepts override options after the alias name.
 > Global options like `--dry-run` still come before `alias`.
 > See the **[Option Placement Guide](option-placement.md)** for complete details.
 
@@ -86,16 +86,16 @@ aliases:
     # Execution context (choose one)
     env: "myenv"              # Conda environment
     # mod: "python3"          # Single module
-    # mods: "python3,gcc"     # Multiple modules  
+    # mods: "python3,gcc"     # Multiple modules
     # sif: "/path/to.sif"     # Singularity container
-    
+
     # PBS job options
     name: "workflow_{date}"
     queue: "normal"
     resources:
       - "mem=16GB"
       - "ncpus=4"
-    
+
     # Command to execute
     cmd: "python analysis.py"
 ```
@@ -193,7 +193,7 @@ If an alias defines a base command, you can append additional arguments:
 qxub alias count_reads input.bam        # Executes: samtools view -c input.bam
 qxub alias count_reads *.bam           # Executes: samtools view -c *.bam
 
-# Alias defines: cmd: "python analysis.py"  
+# Alias defines: cmd: "python analysis.py"
 qxub alias analyze --input data.csv    # Executes: python analysis.py --input data.csv
 ```
 
@@ -240,7 +240,7 @@ qxub config alias set light_task \
   --resources "mem=2GB,ncpus=1" \
   --name "light_{time}"
 
-# Heavy processing  
+# Heavy processing
 qxub config alias set heavy_task \
   --subcommand conda \
   --cmd "python heavy_script.py" \
@@ -387,7 +387,7 @@ The flat structure maps directly to unified CLI options, but when overriding, re
 # ✅ Correct: Any option can be overridden at runtime
 qxub alias myalias --queue normal --resources "mem=8GB"
 
-# ✅ Correct: Execution context can be overridden  
+# ✅ Correct: Execution context can be overridden
 qxub alias myalias --env newenv --mods "python3,gcc"
 
 # ✅ Correct: Command can be completely overridden

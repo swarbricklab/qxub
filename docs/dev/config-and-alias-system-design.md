@@ -12,7 +12,7 @@ Complete guide to qxub's multi-threaded job monitoring system:
 - **Exit Code Propagation**: How job exit codes flow through the system
 - **Graceful Shutdown**: Ctrl-C handling and cleanup
 
-### [Threading Diagrams](threading-diagrams.md) 
+### [Threading Diagrams](threading-diagrams.md)
 Visual representations of the threading system:
 - **State Diagrams**: Thread lifecycle and transitions
 - **Sequence Diagrams**: Message flow between components
@@ -69,28 +69,28 @@ Configuration follows XDG Base Directory specification with clear precedence:
 defaults:
   # Global qxub options
   name: "qt"
-  queue: "normal" 
+  queue: "normal"
   project: "a56"
   joblog: "{name}.log"  # Template support
   resources:
     - "mem=4GB"
     - "ncpus=1"
-  
+
   # Output paths (support templates)
   out: "/scratch/{project}/{user}/qt/{timestamp}/out"
   err: "/scratch/{project}/{user}/qt/{timestamp}/err"
-  
+
   # Subcommand-specific defaults
   conda:
     env: "base"
     pre: "echo Starting conda job"
     post: null
-  
+
   module:
     mod: ["python3"]
     pre: null
     post: "echo Module job completed"
-  
+
   sing:
     sif: null  # Must be specified
     bind: ["/scratch", "/g/data"]
@@ -104,30 +104,30 @@ aliases:
   dvc_push:
     subcommand: "conda"          # Which subcommand to use
     cmd: "dvc push"              # The actual command to run
-    name: "push" 
+    name: "push"
     queue: "copyq"
     conda:
       env: "dvc3"
-  
+
   train_model:
     subcommand: "conda"
     cmd: "python train.py --epochs 100"
     name: "ml_training"
     resources: ["mem=32GB", "ncpus=8", "ngpus=1"]
-    queue: "gpuvolta" 
+    queue: "gpuvolta"
     conda:
       env: "pytorch"
       pre: "nvidia-smi"
-  
+
   # Resource-only aliases (no subcommand/cmd - used as modifiers)
   gpu:
     resources: ["mem=32GB", "ncpus=8", "ngpus=1"]
     queue: "gpuvolta"
-  
+
   large:
-    resources: ["mem=64GB", "ncpus=16"] 
+    resources: ["mem=64GB", "ncpus=16"]
     queue: "express"
-  
+
   # Environment-only aliases
   ml_env:
     subcommand: "conda"
@@ -140,7 +140,7 @@ aliases:
 
 **Supported Variables**:
 - `{user}` - Current username
-- `{project}` - Project code  
+- `{project}` - Project code
 - `{timestamp}` - Current timestamp (YYYYMMDD_HHMMSS)
 - `{name}` - Job name
 - `{queue}` - Queue name
@@ -212,7 +212,7 @@ aliases:
     resources: ["mem=16GB", "ncpus=4"]
     conda:
       env: "pytorch"
-  
+
   gpu-ml:
     inherits: "base-ml"  # Inherit from base-ml
     resources: ["mem=32GB", "ncpus=8", "ngpus=1"]
@@ -291,7 +291,7 @@ qxub --dry alias dvc_push                      # Dry run alias
 qxub alias test dvc_push                       # Detailed test with validation
 qxub alias dvc_push --dry                      # Quick dry run (if allowed)
 
-# List aliases  
+# List aliases
 qxub alias list                                # List all available aliases
 ```
 
@@ -322,15 +322,15 @@ qxub alias list                                # List all available aliases
 class ConfigManager:
     def __init__(self):
         self.system_config = self._load_system_config()
-        self.user_config = self._load_user_config() 
+        self.user_config = self._load_user_config()
         self.merged_config = self._merge_configs()
-    
+
     def resolve_options(self, cli_args, aliases=None):
         """Resolve final options from config hierarchy + aliases + CLI"""
         # 1. Start with system defaults
         # 2. Apply user config
         # 3. Apply alias(es) in order
-        # 4. Apply CLI arguments  
+        # 4. Apply CLI arguments
         # 5. Resolve templates (timestamp, user, project, etc.)
         pass
 ```
@@ -351,16 +351,16 @@ def validate_option_placement(ctx, param, value):
 def resolve_alias(alias_name, overrides, global_opts):
     """Resolve alias with overrides and global options"""
     alias_def = config_manager.get_alias(alias_name)
-    
+
     # Apply overrides to alias definition
     resolved = merge_configs(alias_def, overrides)
-    
+
     # Apply global options
     resolved = merge_configs(resolved, global_opts)
-    
+
     # Resolve templates
     resolved = resolve_templates(resolved)
-    
+
     return resolved
 ```
 
@@ -380,7 +380,7 @@ def resolve_alias(alias_name, overrides, global_opts):
 ```bash
 # Data version control
 qxub alias dvc_push
-qxub alias dvc_pull  
+qxub alias dvc_pull
 
 # Model training
 qxub alias train_model
@@ -395,7 +395,7 @@ qxub alias analysis input.bam
 # Change resources
 qxub alias train_model --resources mem=64GB,ngpus=2
 
-# Change environment  
+# Change environment
 qxub alias dvc_push --env dvc4
 
 # Dry run

@@ -184,14 +184,14 @@ import unittest
 class TestThreading(unittest.TestCase):
     def test_thread_coordination(self):
         coordinator = OutputCoordinator()
-        
+
         def worker():
             time.sleep(0.1)
             coordinator.signal_output_started()
-        
+
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
-        
+
         # Test event signaling
         self.assertTrue(coordinator.wait_for_output_started(timeout=1))
         thread.join(timeout=1)
@@ -206,7 +206,7 @@ def test_full_flow():
     result = subprocess.run([
         "qxub", "conda", "--env", "base", "echo", "test"
     ], capture_output=True, text=True, timeout=60)
-    
+
     assert result.returncode == 0
     assert "test" in result.stdout
 ```
@@ -271,7 +271,7 @@ if event.wait(timeout=30):
 else:
     # Handle timeout
 
-# Good  
+# Good
 thread.join(timeout=5)
 if thread.is_alive():
     # Handle hung thread

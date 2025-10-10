@@ -12,9 +12,10 @@ import os
 import pwd
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from omegaconf import OmegaConf, DictConfig
+from typing import Any, Dict, List, Optional
+
 import click
+from omegaconf import DictConfig, OmegaConf
 
 # pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements,no-else-continue,duplicate-code
 

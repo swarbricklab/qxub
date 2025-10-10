@@ -4,23 +4,25 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
-import sys
+import logging
 import shlex
 import signal
-import time
-import logging
-import threading
 import subprocess
+import sys
+import threading
+import time
+
 import click
 import tailer
+
 from .resource_parser import (
-    size_to_bytes,
-    time_to_seconds,
+    bytes_to_human,
+    calculate_efficiency,
     parse_exec_host,
     parse_exec_vnode,
     parse_timestamp,
-    calculate_efficiency,
-    bytes_to_human,
+    size_to_bytes,
+    time_to_seconds,
 )
 
 

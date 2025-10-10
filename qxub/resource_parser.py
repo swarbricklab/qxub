@@ -8,8 +8,8 @@ This module provides functions to parse PBS resource formats from qstat -fx outp
 """
 
 import re
-from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 
 def size_to_bytes(size_str: str) -> int:

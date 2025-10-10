@@ -1,0 +1,354 @@
+# NCI Gadi Platform Definition
+# Complete queue definitions based on NCI documentation
+# Source: https://opus.nci.org.au/spaces/Help/pages/90308823/Queue+Limits
+# Last updated: October 2025
+
+platform:
+  name: nci_gadi
+  type: pbs_pro
+  host: gadi.nci.org.au
+  description: "National Computational Infrastructure Gadi supercomputer"
+
+  # Queue definitions with accurate NCI constraints
+  queues:
+    # Standard compute queues
+    normal:
+      description: "General purpose compute"
+      limits:
+        max_cpus: 20736
+        min_cpus: 1
+        max_memory: "190GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-672"
+          max_walltime: "48:00:00"
+        - cores: "720-1440"
+          max_walltime: "24:00:00"
+        - cores: "1488-2976"
+          max_walltime: "10:00:00"
+        - cores: "3024-20736"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 2.0
+      constraints:
+        - no_gpu: true
+
+    express:
+      description: "High priority compute (3x cost)"
+      limits:
+        max_cpus: 3168
+        min_cpus: 1
+        max_memory: "190GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-480"
+          max_walltime: "24:00:00"
+        - cores: "528-3168"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 6.0
+      constraints:
+        - no_gpu: true
+
+    # Memory queues
+    hugemem:
+      description: "High memory compute"
+      limits:
+        max_cpus: 192
+        min_cpus: 1
+        max_memory: "1470GB"
+        max_local_storage: "1400GB"
+        min_memory: "193GB"  # Auto-trigger threshold
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-48"
+          max_walltime: "48:00:00"
+        - cores: "96"
+          max_walltime: "24:00:00"
+        - cores: "144,192"
+          max_walltime: "5:00:00"
+      default_walltime: "2:00:00"
+      su_rate: 3.0
+      constraints:
+        - no_gpu: true
+
+    megamem:
+      description: "Ultra high memory compute"
+      limits:
+        max_cpus: 96
+        min_cpus: 1
+        max_memory: "2990GB"
+        max_local_storage: "1400GB"
+        min_memory: "1471GB"  # Auto-trigger threshold
+        max_jobs_per_user: 50
+        max_jobs_queued: 300
+      walltime_rules:
+        - cores: "1-48"
+          max_walltime: "48:00:00"
+        - cores: "96"
+          max_walltime: "24:00:00"
+      default_walltime: "2:00:00"
+      su_rate: 5.0
+      constraints:
+        - no_gpu: true
+
+    # GPU queues
+    gpuvolta:
+      description: "V100 GPU compute"
+      limits:
+        max_cpus: 960
+        min_cpus: 12  # NCI requirement for GPU jobs
+        max_memory: "382GB"
+        max_local_storage: "400GB"
+        max_gpus: 4
+        min_gpus: 1
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "12-96"
+          max_walltime: "48:00:00"
+        - cores: "144-192"
+          max_walltime: "24:00:00"
+        - cores: "240-960"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 3.0
+      constraints:
+        - requires_gpu: true
+        - gpu_types: ["V100"]
+      resources:
+        auto_min_cpus: 12
+
+    # Broadwell queues (older architecture)
+    normalbw:
+      description: "Broadwell general purpose compute"
+      limits:
+        max_cpus: 10080
+        min_cpus: 1
+        max_memory: "256GB"  # Two memory options: 128GB, 256GB
+        max_local_storage: "400GB"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-336"
+          max_walltime: "48:00:00"
+        - cores: "364-840"
+          max_walltime: "24:00:00"
+        - cores: "868-1736"
+          max_walltime: "10:00:00"
+        - cores: "1764-10080"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 1.25
+      constraints:
+        - no_gpu: true
+        - architecture: "broadwell"
+
+    expressbw:
+      description: "Broadwell high priority compute"
+      limits:
+        max_cpus: 1848
+        min_cpus: 1
+        max_memory: "256GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-280"
+          max_walltime: "24:00:00"
+        - cores: "308-1848"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 3.75
+      constraints:
+        - no_gpu: true
+        - architecture: "broadwell"
+
+    hugemembw:
+      description: "Broadwell high memory compute"
+      limits:
+        max_cpus: 140
+        min_cpus: 7
+        max_memory: "1020GB"
+        max_local_storage: "390GB"
+        max_jobs_per_user: 100
+        max_jobs_queued: 500
+      walltime_rules:
+        - cores: "7-28"
+          max_walltime: "48:00:00"
+        - cores: "56-140"
+          max_walltime: "12:00:00"
+      default_walltime: "2:00:00"
+      su_rate: 1.25
+      constraints:
+        - no_gpu: true
+        - architecture: "broadwell"
+        - cpu_multiples: [7, 14, 21, 28]  # Must be multiple of 7
+
+    # Skylake queues
+    normalsl:
+      description: "Skylake general purpose compute"
+      limits:
+        max_cpus: 3200
+        min_cpus: 1
+        max_memory: "192GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-288"
+          max_walltime: "48:00:00"
+        - cores: "320-608"
+          max_walltime: "24:00:00"
+        - cores: "640-1984"
+          max_walltime: "10:00:00"
+        - cores: "2016-3200"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 1.5
+      constraints:
+        - no_gpu: true
+        - architecture: "skylake"
+
+    # Special purpose queues
+    copyq:
+      description: "Data transfer and internet access"
+      limits:
+        max_cpus: 1
+        min_cpus: 1
+        max_memory: "190GB"
+        max_local_storage: "200GB"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1"
+          max_walltime: "10:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 2.0
+      internet_connectivity: true
+      constraints:
+        - data_transfer_only: true
+        - single_core_only: true
+
+    dgxa100:
+      description: "DGX A100 GPU system"
+      limits:
+        max_cpus: 256
+        min_cpus: 16
+        max_memory: "2000GB"
+        max_local_storage: "28TB"
+        max_gpus: 8
+        min_gpus: 1
+        max_jobs_per_user: 50
+        max_jobs_queued: 50
+      walltime_rules:
+        - cores: "16-128"
+          max_walltime: "48:00:00"
+        - cores: "144-256"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 4.5
+      constraints:
+        - requires_gpu: true
+        - gpu_types: ["A100"]
+        - cpu_multiples: [16]
+
+    # Sapphire Rapids queues
+    normalsr:
+      description: "Sapphire Rapids general purpose compute"
+      limits:
+        max_cpus: 10400
+        min_cpus: 1
+        max_memory: "500GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-1040"
+          max_walltime: "48:00:00"
+        - cores: "1144-2080"
+          max_walltime: "24:00:00"
+        - cores: "2184-4160"
+          max_walltime: "10:00:00"
+        - cores: "4264-10400"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 2.0
+      constraints:
+        - no_gpu: true
+        - architecture: "sapphire_rapids"
+
+    expresssr:
+      description: "Sapphire Rapids high priority compute"
+      limits:
+        max_cpus: 2080
+        min_cpus: 1
+        max_memory: "500GB"
+        max_local_storage: "400GB"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      walltime_rules:
+        - cores: "1-1040"
+          max_walltime: "24:00:00"
+        - cores: "1144-2080"
+          max_walltime: "5:00:00"
+      default_walltime: "1:00:00"
+      su_rate: 6.0
+      constraints:
+        - no_gpu: true
+        - architecture: "sapphire_rapids"
+
+  # Queue selection rules
+  auto_selection:
+    priority_order: ["normal", "hugemem", "megamem", "gpuvolta", "copyq", "express"]
+
+    rules:
+      # GPU jobs
+      - if: "gpu_requested > 0 AND gpu_requested <= 4"
+        then: "gpuvolta"
+
+      - if: "gpu_requested > 4"
+        then: "dgxa100"
+
+      # High memory jobs
+      - if: "memory > 2990GB"
+        then: "error"  # No queue supports >3TB
+
+      - if: "memory > 1470GB"
+        then: "megamem"
+
+      - if: "memory > 192GB"
+        then: "hugemem"
+
+      # Internet connectivity required
+      - if: "internet_required == true"
+        then: "copyq"
+
+      # Data transfer jobs (single core, long duration)
+      - if: "cpus == 1 AND walltime > 5:00:00"
+        then: "copyq"
+
+      # High priority jobs (if user explicitly requests express)
+      - if: "priority == 'high'"
+        then: "express"
+
+      # Default to normal queue
+      - default: "normal"
+
+  # Resource auto-adjustment policies
+  auto_adjust:
+    min_cpus: auto      # Automatically adjust to queue minimum (esp. GPU jobs)
+    memory: suggest     # Suggest better queue for high memory
+    walltime: suggest   # Suggest appropriate walltime limits
+    internet: auto      # Auto-select copyq if internet needed
+
+# Cost estimation examples:
+# 1 core × 1 hour normal = 2 SU
+# 1 core × 1 hour express = 6 SU
+# 12 cores × 4 hours GPU = 144 SU (12 × 4 × 3.0)
+# 48 cores × 2 hours hugemem = 288 SU (48 × 2 × 3.0)

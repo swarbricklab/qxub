@@ -9,15 +9,15 @@ including defaults and aliases.
 import os
 import subprocess
 from typing import Optional
+
 import click
-from rich.console import Console
-from rich.table import Table
-from rich.syntax import Syntax
 from omegaconf import OmegaConf
+from rich.console import Console
+from rich.syntax import Syntax
+from rich.table import Table
 
 from .config_manager import config_manager
 from .history import history_logger
-
 
 console = Console()
 
