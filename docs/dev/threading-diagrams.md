@@ -146,31 +146,31 @@ Events:  │         │         │ output_ │ job_    │         │ eof_
 ### Scenario 1: Normal Job Completion
 
 ```
-Job Submit → Monitor Start → Spinner Show → Output Start → 
-Clear Spinner → Stream Output → Job Complete → Get Exit Code → 
+Job Submit → Monitor Start → Spinner Show → Output Start →
+Clear Spinner → Stream Output → Job Complete → Get Exit Code →
 Signal Threads → Cleanup → Exit with Job Status
 ```
 
 ### Scenario 2: User Interruption (Ctrl-C)
 
 ```
-Job Submit → Monitor Start → Spinner Show → User Ctrl-C → 
-Signal Handler → signal_shutdown() → All Threads Check → 
+Job Submit → Monitor Start → Spinner Show → User Ctrl-C →
+Signal Handler → signal_shutdown() → All Threads Check →
 Graceful Stop → Attempt Job Cleanup → Exit 130
 ```
 
 ### Scenario 3: Job Failure
 
 ```
-Job Submit → Monitor Start → Spinner Show → Output Start → 
-Clear Spinner → Stream Errors → Job Complete (Failed) → 
+Job Submit → Monitor Start → Spinner Show → Output Start →
+Clear Spinner → Stream Errors → Job Complete (Failed) →
 Get Exit Code (1) → Signal Threads → Cleanup → Exit 1
 ```
 
 ### Scenario 4: Job Never Starts (Queue Wait)
 
 ```
-Job Submit → Monitor Start → Spinner Show → Poll Status (Q) → 
+Job Submit → Monitor Start → Spinner Show → Poll Status (Q) →
 Continue Spinner → Poll Status (Q) → ... → Eventually Starts or Times Out
 ```
 

@@ -4,24 +4,26 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
+import base64
+import difflib
+import logging
 import os
 import sys
 from datetime import datetime
-import logging
 from pathlib import Path
-import difflib
-import base64
+
 import click
-from .config_cli import config_cli
+
 from .alias_cli import alias_cli
-from .history_cli import history
-from .resources_cli import resources
-from .platform_cli import platform_cli, select_queue_cmd, validate_cmd, estimate_cmd
 from .config import setup_logging
+from .config_cli import config_cli
 from .config_manager import config_manager
+from .history_cli import history
 from .history_manager import history_manager
-from .scheduler import qsub, monitor_and_tail, print_status, qdel, get_job_resource_data
+from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resource_tracker import resource_tracker
+from .resources_cli import resources
+from .scheduler import get_job_resource_data, monitor_and_tail, print_status, qdel, qsub
 
 
 class QxubGroup(click.Group):
@@ -585,9 +587,10 @@ def qxub(
     # Auto-select queue if needed
     if params["queue"] == "auto":
         try:
+            from pathlib import Path
+
             from .platform import PlatformLoader
             from .resource_utils import parse_memory_size, parse_walltime
-            from pathlib import Path
 
             # Check for QXUB_PLATFORM_PATHS environment variable
             platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")

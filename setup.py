@@ -8,7 +8,7 @@ various options such as resource requests, project names, and conda environments
 Run 'pip install -e .' to install the package in editable mode for development purposes.
 """
 
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
 with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()

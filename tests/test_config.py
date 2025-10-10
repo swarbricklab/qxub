@@ -5,11 +5,12 @@ Test script for config.py functionality.
 Tests configuration loading, validation, and management.
 """
 
-import sys
 import os
+import sys
 import tempfile
-import yaml
 from pathlib import Path
+
+import yaml
 
 # Add qxub to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -113,7 +114,7 @@ def test_config_validation():
     """Test configuration validation."""
     print("🧪 Testing config validation...")
 
-    from qxub.config import validate_config, QxubConfig
+    from qxub.config import QxubConfig, validate_config
 
     # Test with default config
     config = QxubConfig()
@@ -202,6 +203,7 @@ def test_logging_setup():
     print("🧪 Testing logging setup...")
 
     import logging
+
     from qxub.config import setup_logging
 
     # Test different verbosity levels

@@ -16,7 +16,7 @@ platform:
   name: nci_gadi
   type: pbs_pro
   host: gadi.nci.org.au
-  
+
   # Queue definitions with constraints
   queues:
     normal:
@@ -32,7 +32,7 @@ platform:
         # Complex NCI walltime rules based on core count
         - cores: "1-672"
           max_walltime: "48:00:00"
-        - cores: "720-1440" 
+        - cores: "720-1440"
           max_walltime: "24:00:00"
         - cores: "1488-2976"
           max_walltime: "10:00:00"
@@ -42,7 +42,7 @@ platform:
       su_rate: 2.0               # SU per core-hour
       constraints:
         - no_gpu: true
-      
+
     hugemem:
       description: "High memory compute"
       limits:
@@ -57,14 +57,14 @@ platform:
         - cores: "1-48"
           max_walltime: "48:00:00"
         - cores: "96"
-          max_walltime: "24:00:00"  
+          max_walltime: "24:00:00"
         - cores: "144,192"
           max_walltime: "5:00:00"
       default_walltime: "2:00:00"
       su_rate: 3.0
       constraints:
         - no_gpu: true
-        
+
     gpuvolta:
       description: "V100 GPU compute"
       limits:
@@ -90,7 +90,7 @@ platform:
         - gpu_types: ["V100"]
       resources:
         auto_min_cpus: 12
-        
+
     express:
       description: "High priority compute (6x SU cost)"
       limits:
@@ -109,7 +109,7 @@ platform:
       su_rate: 6.0               # Higher priority = higher cost
       constraints:
         - no_gpu: true
-        
+
     copyq:
       description: "Data transfer queue"
       limits:
@@ -132,23 +132,23 @@ platform:
   # Queue selection rules
   auto_selection:
     priority_order: ["normal", "hugemem", "gpuvolta", "copyq"]
-    
+
     rules:
       - if: "gpu_requested > 0"
         then: "gpuvolta"
-        
+
       - if: "memory > 192GB"
         then: "hugemem"
-        
+
       - if: "walltime <= 10:00:00 AND cpus == 1"
         then: "copyq"
-        
+
       - default: "normal"
 
-  # Resource auto-adjustment policies  
+  # Resource auto-adjustment policies
   auto_adjust:
     min_cpus: auto      # Automatically adjust to queue minimum
-    memory: suggest     # Suggest better queue, don't auto-adjust  
+    memory: suggest     # Suggest better queue, don't auto-adjust
     walltime: user      # Always use user-specified value
 ```
 
@@ -213,7 +213,7 @@ auto_adjust:
 
 **Policy Values:**
 - **`auto`**: Automatically adjust resource to meet queue requirements
-- **`suggest`**: Show suggestions but don't change user's request  
+- **`suggest`**: Show suggestions but don't change user's request
 - **`user`**: Always use user-specified value, no automation
 - **`disabled`**: Don't validate or suggest for this resource
 - **`error`**: Fail if resource conflicts with queue constraints
@@ -224,10 +224,10 @@ auto_adjust:
 # Conservative platform (minimal automation)
 auto_adjust:
   min_cpus: suggest
-  memory: suggest  
+  memory: suggest
   walltime: user
 
-# Aggressive platform (maximum automation)  
+# Aggressive platform (maximum automation)
 auto_adjust:
   min_cpus: auto
   memory: auto
@@ -301,7 +301,7 @@ $ qxub --env analysis -l ncpus=1000 -l walltime=48:00:00
 # Default walltime applied
 $ qxub --env myenv -l ncpus=48
 
-→ Selected queue: normal  
+→ Selected queue: normal
 → Using default walltime: 1:00:00 (normal queue default)
 → Estimated cost: 96 SU (48 cores × 1 hour × 2.0 SU/core-hour)
 ```
@@ -316,7 +316,7 @@ $ qxub --env pytorch -l ngpus=1 -l ncpus=4 -- python train.py
 → Auto-adjusts to 12 CPUs (gpuvolta minimum)
 → Shows: "Adjusted CPUs from 4 to 12 (gpuvolta queue minimum)"
 
-# With min_cpus: suggest  
+# With min_cpus: suggest
 → Keeps 4 CPUs but shows suggestion
 → Shows: "Warning: gpuvolta queue requires minimum 12 CPUs. Consider: -l ncpus=12"
 

@@ -6,7 +6,7 @@ qxub uses a sophisticated multi-threaded architecture to provide real-time job m
 
 The threading system coordinates four key components:
 1. **Job Status Monitor** - Polls PBS for job completion
-2. **STDOUT Tail Thread** - Streams job output to terminal 
+2. **STDOUT Tail Thread** - Streams job output to terminal
 3. **STDERR Tail Thread** - Streams job errors to terminal
 4. **Spinner Thread** - Shows progress indicator until output starts
 
@@ -61,7 +61,7 @@ Waits:    shutdown_requested
 #### 2. STDOUT Tail Thread (`tail`)
 ```
 Lifecycle: Until EOF or job completion
-Purpose:  Stream job output to terminal STDOUT  
+Purpose:  Stream job output to terminal STDOUT
 Signals:  output_started, eof_detected
 Waits:    shutdown_requested
 ```
@@ -75,7 +75,7 @@ Waits:    shutdown_requested
 ```
 Lifecycle: Until EOF or job completion
 Purpose:  Stream job errors to terminal STDERR
-Signals:  output_started, eof_detected  
+Signals:  output_started, eof_detected
 Waits:    shutdown_requested
 ```
 
@@ -102,7 +102,7 @@ Here's the complete sequence from job submission to completion:
 ```
 1. Job Submitted
    ├── monitor_qstat thread starts (polls every 30s)
-   ├── STDOUT tail thread starts (follows out.log)  
+   ├── STDOUT tail thread starts (follows out.log)
    ├── STDERR tail thread starts (follows err.log)
    └── Spinner thread starts (shows "🚀 Job abc123 - Waiting ⠋")
 
@@ -121,7 +121,7 @@ Here's the complete sequence from job submission to completion:
 
 4. Cleanup
    ├── Tail threads reach EOF and signal eof_detected
-   ├── Main thread waits for monitor completion  
+   ├── Main thread waits for monitor completion
    ├── coordinator.job_exit_status returned
    └── qxub exits with job's exit code
 ```
@@ -190,7 +190,7 @@ if coordinator and coordinator.should_shutdown():
 One of the most important features is that qxub returns the actual job's exit code:
 
 1. **Job Completion**: Monitor detects job finished via qstat
-2. **PBS Cleanup**: Waits 5 seconds for PBS to finalize job state  
+2. **PBS Cleanup**: Waits 5 seconds for PBS to finalize job state
 3. **Exit Status Polling**: Queries qstat for Exit_status field every 5 seconds
 4. **Status Storage**: Stores exit code in `coordinator.job_exit_status`
 5. **Propagation**: Main thread returns this exit code via `sys.exit()`
@@ -278,7 +278,7 @@ When adding new coordination events:
 4. **Update should_shutdown()** (if relevant):
    ```python
    def should_shutdown(self):
-       return (self.shutdown_requested.is_set() or 
+       return (self.shutdown_requested.is_set() or
                self.my_new_event.is_set() or
                # ... other conditions)
    ```
@@ -288,7 +288,7 @@ When adding new coordination events:
 **Don't**: Use shared variables between threads
 ```python
 # BAD - race condition
-shared_status = "running"  
+shared_status = "running"
 # Multiple threads modify this
 ```
 
@@ -315,10 +315,10 @@ def test_thread_shutdown():
     # Start thread
     thread = threading.Thread(target=my_function, args=(coordinator,))
     thread.start()
-    
+
     # Signal shutdown
     coordinator.signal_shutdown()
-    
+
     # Verify graceful exit
     thread.join(timeout=5)
     assert not thread.is_alive()
@@ -395,7 +395,7 @@ for thread in threading.enumerate():
 
 The current design is optimized for simplicity and reliability. Any changes should preserve:
 - **Clean shutdown behavior**
-- **Proper exit code propagation** 
+- **Proper exit code propagation**
 - **Real-time output streaming**
 - **Low resource usage**
 

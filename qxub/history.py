@@ -9,9 +9,10 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
-from omegaconf import OmegaConf, DictConfig
+from typing import Any, Dict, List, Optional
+
 import click
+from omegaconf import DictConfig, OmegaConf
 
 
 class CommandHistoryLogger:

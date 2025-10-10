@@ -8,10 +8,10 @@ Provides commands for managing the dual-log history system:
 """
 
 import click
+from omegaconf import OmegaConf
 from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
-from omegaconf import OmegaConf
 
 from .history_manager import history_manager
 

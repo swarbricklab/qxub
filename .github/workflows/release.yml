@@ -19,14 +19,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Get all history for tag checking
-          
+
       - name: Get version from setup.py
         id: get-version
         run: |
           VERSION=$(python setup.py --version)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $VERSION"
-          
+
       - name: Check if tag exists
         id: check-tag
         run: |
@@ -38,7 +38,7 @@ jobs:
             echo "tag-exists=false" >> $GITHUB_OUTPUT
             echo "Tag $TAG does not exist"
           fi
-          
+
       - name: Check if PR contains version bump
         id: version-check
         run: |
@@ -46,7 +46,7 @@ jobs:
           COMMIT_MSG=$(git log --format=%B -n 1 HEAD)
           VERSION="${{ steps.get-version.outputs.version }}"
           TAG_EXISTS="${{ steps.check-tag.outputs.tag-exists }}"
-          
+
           # Release if:
           # 1. Tag doesn't exist AND
           # 2. (Commit message contains version number OR setup.py was modified)
@@ -62,44 +62,44 @@ jobs:
             echo "should-release=false" >> $GITHUB_OUTPUT
             echo "Tag already exists, skipping release"
           fi
-          
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
   release:
     needs: check-version
     if: needs.check-version.outputs.should-release == 'true'
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
           pip install build wheel
-          
+
       - name: Build wheel
         run: |
           python -m build --wheel
           ls -la dist/
-          
+
       - name: Create git tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "v${{ needs.check-version.outputs.version }}" -m "Release v${{ needs.check-version.outputs.version }}"
           git push origin "v${{ needs.check-version.outputs.version }}"
-          
+
       - name: Generate release notes
         id: release-notes
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          
+
           # Try to extract release notes from docs/RELEASE_NOTES_*.md
           RELEASE_NOTES_FILE="docs/RELEASE_NOTES_${VERSION}.md"
           if [ -f "$RELEASE_NOTES_FILE" ]; then
@@ -109,22 +109,22 @@ jobs:
             echo "Generating automatic release notes"
             cat > release_notes.md << EOF
           # qxub $VERSION
-          
+
           ## Changes
-          
+
           $(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD~1)..HEAD | head -20)
-          
+
           ## Installation
-          
+
           \`\`\`bash
           pip install qxub==$VERSION
           # or download the wheel from this release
           \`\`\`
-          
+
           See the documentation for more details.
           EOF
           fi
-          
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -136,7 +136,7 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
+
       - name: Upload wheel to PyPI (optional)
         if: false  # Disabled by default - enable when ready for PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

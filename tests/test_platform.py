@@ -5,24 +5,25 @@ Test script for platform.py functionality.
 Tests platform loading, queue validation, and queue selection.
 """
 
-import sys
 import os
+import sys
 import tempfile
-import yaml
 from pathlib import Path
+
+import yaml
 
 # Add qxub to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qxub.platform import (
-    QueueLimits,
-    WalltimeRule,
-    Queue,
     Platform,
     PlatformLoader,
+    Queue,
+    QueueLimits,
     QueueSelector,
-    select_best_queue,
     ResourceValidationResult,
+    WalltimeRule,
+    select_best_queue,
 )
 
 

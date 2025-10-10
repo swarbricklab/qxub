@@ -9,7 +9,7 @@ Starting with qxub v2.1, the system includes intelligent queue selection and res
 A "platform" in qxub represents a computational environment like NCI Gadi, with its specific queues, resource limits, and scheduling policies. qxub uses platform definitions to:
 
 - **Automatically select the best queue** for your job requirements
-- **Suggest resource adjustments** when your requests don't fit queue constraints  
+- **Suggest resource adjustments** when your requests don't fit queue constraints
 - **Prevent common submission errors** before they reach the scheduler
 
 ## How Queue Selection Works
@@ -21,12 +21,12 @@ When you submit a job, qxub analyzes your resource requirements and automaticall
 $ qxub --env pytorch -l ngpus=1 -- python train.py
 → Selected: gpuvolta queue
 
-# High memory job goes to high-memory queue  
+# High memory job goes to high-memory queue
 $ qxub --env analysis -l mem=300GB -- python big_analysis.py
 → Selected: hugemem queue
 
 # Regular job uses default queue
-$ qxub --env myenv -- python script.py  
+$ qxub --env myenv -- python script.py
 → Selected: normal queue
 ```
 
@@ -46,7 +46,7 @@ $ qxub --env pytorch -l ngpus=1 -l ncpus=4 -- python train.py
 → Job submitted with: -l ncpus=12
 ```
 
-### Memory Suggestions  
+### Memory Suggestions
 For memory-intensive jobs, qxub can suggest better queues:
 
 ```bash
@@ -59,10 +59,10 @@ $ qxub --env analysis -l mem=300GB -- python script.py
 ### System Level
 Your system administrator configures the platform definitions that describe:
 - Available queues and their limits
-- Queue selection rules  
+- Queue selection rules
 - Resource adjustment policies
 
-### User Level  
+### User Level
 You can customize how aggressive qxub is with automation in `~/.config/qxub/config.yaml`:
 
 ```yaml
@@ -70,10 +70,10 @@ You can customize how aggressive qxub is with automation in `~/.config/qxub/conf
 platform:
   auto_adjust:
     min_cpus: suggest    # Show suggestions, don't auto-change
-    memory: suggest      # Suggest better queues  
+    memory: suggest      # Suggest better queues
     walltime: user       # Never change walltime
 
-# Aggressive approach - fix issues automatically  
+# Aggressive approach - fix issues automatically
 platform:
   auto_adjust:
     min_cpus: auto       # Automatically fix CPU requirements
@@ -88,7 +88,7 @@ Each resource type can have different adjustment behavior:
 | Policy | Behavior | Example |
 |--------|----------|---------|
 | `auto` | Automatically fix conflicts | Changes 4 CPUs → 12 CPUs for GPU jobs |
-| `suggest` | Show helpful suggestions | "Consider using hugemem queue for 300GB" |  
+| `suggest` | Show helpful suggestions | "Consider using hugemem queue for 300GB" |
 | `user` | Always use your exact specification | Never changes your request |
 | `error` | Fail if there's a conflict | Stops submission with clear error message |
 
@@ -101,7 +101,7 @@ $ qxub --env pytorch -l ngpus=1 -l ncpus=4
 
 # What qxub does (with auto-adjustment)
 → Detects GPU request
-→ Selects gpuvolta queue  
+→ Selects gpuvolta queue
 → Notices 4 CPUs < 12 minimum
 → Auto-adjusts to 12 CPUs
 → Submits job successfully
@@ -109,7 +109,7 @@ $ qxub --env pytorch -l ngpus=1 -l ncpus=4
 
 ### Memory-Intensive Jobs
 ```bash
-# What you type  
+# What you type
 $ qxub --env analysis -l mem=300GB
 
 # What qxub does
@@ -153,7 +153,7 @@ $ qxub queues
 # Show queue details and limits
 $ qxub queues --details
 
-# Show platform configuration  
+# Show platform configuration
 $ qxub platform info
 ```
 
@@ -173,7 +173,7 @@ $ qxub config show platform.auto_adjust
 
 ### Jobs going to wrong queue
 Review the queue selection rules:
-```bash  
+```bash
 $ qxub platform info --selection-rules
 ```
 
@@ -188,9 +188,9 @@ platforms:
     auto_adjust:
       min_cpus: auto     # NCI has strict GPU→CPU requirements
       memory: suggest    # Just suggest better queues
-      
+
   university_hpc:
-    auto_adjust:  
+    auto_adjust:
       min_cpus: suggest  # More flexible environment
       memory: auto       # Automatically optimize memory
 ```
@@ -210,7 +210,7 @@ platform:
 ## Getting Help
 
 - `qxub --help` - General help
-- `qxub queues --help` - Queue information commands  
+- `qxub queues --help` - Queue information commands
 - `qxub platform --help` - Platform configuration commands
 - Check the [full documentation](README.md) for more details
 

@@ -5,21 +5,21 @@ Test script for resource_utils.py functionality.
 Tests memory parsing, walltime parsing, condition evaluation, and resource comparisons.
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Add qxub to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qxub.resource_utils import (
-    parse_memory_size,
-    format_memory_size,
-    parse_walltime,
-    format_walltime,
     compare_memory,
     compare_walltime,
     evaluate_condition,
+    format_memory_size,
+    format_walltime,
+    parse_memory_size,
+    parse_walltime,
     suggest_resource_adjustment,
 )
 

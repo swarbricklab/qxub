@@ -8,7 +8,7 @@ This directory contains complete platform definitions for various HPC systems. T
 Complete queue definitions for the National Computational Infrastructure Gadi supercomputer, including:
 
 - **Standard queues**: normal, express
-- **Memory queues**: hugemem, megamem  
+- **Memory queues**: hugemem, megamem
 - **GPU queues**: gpuvolta, dgxa100
 - **Architecture-specific**: normalbw, normalsl, normalsr (Broadwell, Skylake, Sapphire Rapids)
 - **Special purpose**: copyq (data transfer with internet)
@@ -33,7 +33,7 @@ qxub platform list
 mkdir -p ~/.config/qxub/platforms
 cp nci_gadi.yaml ~/.config/qxub/platforms/
 
-# Verify installation  
+# Verify installation
 qxub platform list
 ```
 
@@ -53,7 +53,7 @@ Once installed, qxub will automatically:
 # GPU job automatically uses gpuvolta queue
 qxub --env pytorch -l ngpus=1 -l ncpus=12 script.py
 
-# High memory job uses hugemem queue  
+# High memory job uses hugemem queue
 qxub --env analysis -l mem=500GB script.py
 
 # Internet access uses copyq queue
@@ -99,7 +99,7 @@ Use `qxub platform validate <platform>` to check your definitions.
 Platform definitions should be updated when:
 
 - Queue limits change
-- New queues are added/removed  
+- New queues are added/removed
 - Service Unit rates change
 - Scheduling policies are modified
 

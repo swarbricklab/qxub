@@ -5,8 +5,8 @@ Comprehensive test runner for qxub platform system.
 Runs all test modules and provides a summary report.
 """
 
-import sys
 import subprocess
+import sys
 import time
 from pathlib import Path
 

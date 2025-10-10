@@ -21,7 +21,7 @@ This directory contains comprehensive integration tests and testing utilities fo
 
 **Features**:
 - ✅ **Safe**: Uses `--dry-run` mode, no jobs submitted
-- ⚡ **Fast**: Completes in seconds 
+- ⚡ **Fast**: Completes in seconds
 - 🔍 **Comprehensive**: Tests all CLI options and configurations
 - 🎯 **Development-friendly**: Perfect for rapid iteration
 
@@ -76,7 +76,7 @@ defaults:
   ncpus: 1
   project: "a56"
   queue: "normal"
-  
+
 aliases:
   quick:
     subcommand: conda
@@ -84,7 +84,7 @@ aliases:
     name: "quick-{user}"
     time: "00:15:00"
     mem: "2GB"
-    
+
   bigmem:
     subcommand: conda
     env: scipy
@@ -162,7 +162,7 @@ These tests are designed to catch common issues in HPC environments:
 # Add to appropriate test function
 run_dry_test "Test description" \
     "qxub conda --env base your-command-here"
-    
+
 # For error conditions (should fail)
 run_dry_test "Error test description" \
     "qxub conda invalid-command" \
@@ -201,7 +201,7 @@ Failed: 0
 [FAIL] Missing environment (expected exit code 2, got 0)
 ...
 ========================================
-         DRY RUN TEST RESULTS  
+         DRY RUN TEST RESULTS
 ========================================
 Total Tests: 31
 Passed: 30

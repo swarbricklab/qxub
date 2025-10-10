@@ -23,11 +23,11 @@ run_test() {
     local test_name="$1"
     local command="$2"
     local expected_pattern="$3"
-    
+
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     echo -e "${YELLOW}[INFO]${NC} Running test: $test_name"
     echo "Command: $command"
-    
+
     if output=$(eval "$command" 2>&1); then
         if [[ -z "$expected_pattern" ]] || echo "$output" | grep -q -- "$expected_pattern"; then
             echo -e "${GREEN}[PASS]${NC} $test_name"
@@ -94,7 +94,7 @@ aliases:
       mod: "rsync"
     target:
       cmd: "rsync -av {shared_scratch}/ {backup_location}/"
-      
+
   org_python:
     main:
       name: "python_job_{date}"
@@ -150,7 +150,7 @@ aliases:
       env: "personal_env"
     target:
       cmd: "python analysis.py"
-      
+
   # Override organization alias with personal version
   org_python:
     main:
@@ -250,7 +250,7 @@ aliases:
       env: "personal_env"
     target:
       cmd: "python analysis.py"
-      
+
   # Override organization alias with personal version
   org_python:
     main:
@@ -262,7 +262,7 @@ aliases:
       env: "my_python_env"  # Different environment
     target:
       cmd: "python"
-      
+
   template_test:
     main:
       name: "{org_name}_{user_dir}_backup_{timestamp}"

@@ -23,11 +23,11 @@ run_test() {
     local test_name="$1"
     local command="$2"
     local expected_pattern="$3"
-    
+
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     echo -e "${YELLOW}[INFO]${NC} Running test: $test_name"
     echo "Command: $command"
-    
+
     if output=$(eval "$command" 2>&1); then
         if [[ -z "$expected_pattern" ]] || echo "$output" | grep -q "$expected_pattern"; then
             echo -e "${GREEN}[PASS]${NC} $test_name"
@@ -137,7 +137,7 @@ aliases:
       env: "user_env"
     target:
       cmd: "echo 'User alias executed'"
-  
+
   system_alias:  # Override system alias
     main:
       name: "overridden_system_job"
@@ -231,10 +231,10 @@ mkdir -p "$SYSTEM_CONFIG_DIR2"
 cat > "$SYSTEM_CONFIG_DIR2/config.yaml" << 'EOF'
 defaults:
   queue: "secondary_queue"
-  
+
 templates:
   secondary_template: "secondary_value"
-  
+
 aliases:
   secondary_alias:
     main:

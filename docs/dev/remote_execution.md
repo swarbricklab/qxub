@@ -53,7 +53,7 @@ profiles:
         module load python3
         source ~/.bashrc
       sync_files: false          # Whether to sync files (future feature)
-      
+
   aws_batch:
     platform: aws_batch
     defaults:
@@ -109,27 +109,27 @@ class RemoteExecutor:
     def __init__(self, profile: Profile):
         self.profile = profile
         self.ssh_client = None
-        
+
     def execute_remote(self, command_args: List[str]) -> int:
         """Execute qxub command on remote platform"""
-        
+
     def establish_connection(self) -> bool:
         """Establish SSH connection to remote host"""
-        
+
     def stream_output(self, remote_process) -> Generator[str, None, None]:
         """Stream output from remote process"""
 
-# qxub/remote/profile.py  
+# qxub/remote/profile.py
 class Profile:
     def __init__(self, name: str, config: Dict):
         self.name = name
         self.platform = config['platform']
         self.defaults = config.get('defaults', {})
         self.remote = config.get('remote', {})
-        
+
     def get_ssh_config(self) -> SSHConfig:
         """Get SSH connection configuration"""
-        
+
     def get_remote_command(self, local_args: List[str]) -> str:
         """Build remote qxub command from local arguments"""
 ```
@@ -142,13 +142,13 @@ class SSHConnection:
     def __init__(self, config: SSHConfig):
         self.config = config
         self.client = paramiko.SSHClient()
-        
+
     def connect(self) -> bool:
         """Establish SSH connection using system credentials"""
-        
+
     def execute_command(self, command: str, stream_output: bool = True):
         """Execute command and optionally stream output"""
-        
+
     def close(self):
         """Close SSH connection"""
 ```
@@ -159,22 +159,22 @@ class SSHConnection:
 def build_remote_command(profile: Profile, local_args: List[str]) -> str:
     """
     Convert local qxub arguments to remote qxub command
-    
+
     Example:
     Local:  qxub --profile gadi --env pytorch -- python train.py
     Remote: module load python3; qxub --env pytorch -- python train.py
     """
-    
+
     # Remove profile-specific arguments
     remote_args = [arg for arg in local_args if not arg.startswith('--profile')]
-    
+
     # Apply profile defaults
     remote_args = apply_profile_defaults(remote_args, profile.defaults)
-    
+
     # Build remote command
     setup_command = profile.remote.get('env_setup', '')
     qxub_command = profile.remote.get('qxub_command', 'qxub')
-    
+
     return f"{setup_command}; {qxub_command} {' '.join(remote_args)}"
 ```
 
@@ -188,18 +188,18 @@ class OutputStreamer:
         self.session = ssh_session
         self.stdout_thread = None
         self.stderr_thread = None
-        
+
     def start_streaming(self):
         """Start threads to stream stdout and stderr"""
         self.stdout_thread = threading.Thread(
-            target=self._stream_channel, 
+            target=self._stream_channel,
             args=(self.session.stdout, sys.stdout)
         )
         self.stderr_thread = threading.Thread(
             target=self._stream_channel,
-            args=(self.session.stderr, sys.stderr) 
+            args=(self.session.stderr, sys.stderr)
         )
-        
+
     def _stream_channel(self, source, destination):
         """Stream data from source channel to destination"""
         while True:
@@ -224,10 +224,10 @@ local_history:
   remote_command: "module load python3; qxub --env pytorch -- python train.py"
   status: success
   exit_code: 0
-  
+
 # Remote execution log (on gadi)
 remote_history:
-  timestamp: "2025-10-09T14:30:05"  
+  timestamp: "2025-10-09T14:30:05"
   command: "qxub --env pytorch -- python train.py"
   platform: nci_gadi
   queue: gpuvolta
@@ -244,10 +244,10 @@ remote_history:
 
 ```python
 class DistributedHistory:
-    def log_remote_execution(self, profile: Profile, local_command: str, 
+    def log_remote_execution(self, profile: Profile, local_command: str,
                            remote_command: str, result: ExecutionResult):
         """Log execution on both local and remote systems"""
-        
+
         # Log locally
         local_history.log_execution(
             command=local_command,
@@ -255,7 +255,7 @@ class DistributedHistory:
             remote_host=profile.remote.host,
             result=result
         )
-        
+
         # Remote logging handled by remote qxub instance
 ```
 
@@ -269,7 +269,7 @@ class RemoteExecutionError(Exception):
 
 class ConnectionError(RemoteExecutionError):
     pass
-    
+
 class AuthenticationError(RemoteExecutionError):
     pass
 
@@ -331,16 +331,16 @@ profiles:
 class TestRemoteExecution:
     def test_ssh_connection(self):
         """Test SSH connection establishment"""
-        
+
     def test_command_execution(self):
         """Test remote command execution"""
-        
+
     def test_output_streaming(self):
         """Test real-time output streaming"""
-        
+
     def test_exit_code_propagation(self):
         """Test exit code propagation"""
-        
+
     def test_connection_failure_handling(self):
         """Test handling of connection failures"""
 ```
@@ -350,7 +350,7 @@ class TestRemoteExecution:
 ```python
 class MockRemoteExecutor:
     """Mock remote executor for testing without actual SSH connections"""
-    
+
     def execute_remote(self, command_args):
         # Simulate remote execution locally
         return subprocess.run(command_args).returncode
@@ -377,10 +377,10 @@ profiles:
 ```python
 class ConnectionPool:
     """Maintain persistent SSH connections for repeated use"""
-    
+
     def get_connection(self, profile: Profile) -> SSHConnection:
         """Get existing or create new connection"""
-        
+
     def cleanup_idle_connections(self):
         """Close connections idle for too long"""
 ```

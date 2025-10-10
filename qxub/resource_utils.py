@@ -5,9 +5,9 @@ Handles parsing of resource specifications like memory sizes, walltime durations
 and resource requirement expressions for queue selection and validation.
 """
 
-import re
-from typing import Union, Optional
 import logging
+import re
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 

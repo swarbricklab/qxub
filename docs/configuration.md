@@ -99,7 +99,7 @@ defaults:
   queue: "normal"
   project: "a56"
   joblog: "{name}_{date}_{time}.log"
-  resources: 
+  resources:
     - "mem=4GB"
     - "ncpus=1"
   out: "/scratch/{project}/{user}/qt/{timestamp}/out"
@@ -200,7 +200,7 @@ You can create different configurations for different environments:
 qxub config set defaults.queue "express"
 qxub config set defaults.resources '["mem=2GB", "ncpus=1"]'
 
-# Production configuration  
+# Production configuration
 qxub config set defaults.queue "normal"
 qxub config set defaults.resources '["mem=16GB", "ncpus=4"]'
 ```
@@ -251,7 +251,7 @@ defaults:
 ```yaml
 defaults:
   name: "bio_{timestamp}"
-  project: "bio01"  
+  project: "bio01"
   queue: "normal"
   resources: ["mem=16GB", "ncpus=4", "walltime=04:00:00"]
   out: "/scratch/bio01/{user}/analysis/{date}/out"

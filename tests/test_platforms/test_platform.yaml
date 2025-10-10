@@ -11,16 +11,16 @@ queues:
       max_memory: 4GB
       max_cpus: 4
     cost_per_hour: 1.0
-    
+
   - name: normal
     type: compute
-    description: Normal jobs  
+    description: Normal jobs
     limits:
       walltime: 48h
       max_memory: 192GB
       max_cpus: 48
     cost_per_hour: 2.0
-    
+
   - name: hugemem
     type: compute
     description: High memory jobs
@@ -29,7 +29,7 @@ queues:
       max_memory: 1024GB
       max_cpus: 64
     cost_per_hour: 8.0
-    
+
   - name: gpu
     type: gpu
     description: GPU jobs

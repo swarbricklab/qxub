@@ -62,13 +62,13 @@ These add setup and cleanup commands:
 qxub --env myenv -- python script.py
 qxub --conda myenv --queue normal --name myjob -- python script.py
 
-# ✅ Correct: Module execution  
+# ✅ Correct: Module execution
 qxub --mod samtools -- samtools --version
 qxub --mods python3,gcc -l mem=16GB -- python analysis.py
 qxub --mod python3 --mod gcc -- python script.py
 
 # ✅ Correct: Singularity execution
-qxub --sif container.sif -- python script.py  
+qxub --sif container.sif -- python script.py
 qxub --singularity /containers/blast.sif --bind /data --project bio01 -- blastn -query input.fa
 
 # ✅ Correct: Default execution (no environment)
@@ -92,7 +92,7 @@ qxub --name "analysis_$(date +%Y%m%d)" --queue normal -l mem=16GB -l ncpus=4 \
 qxub --project a56 --queue gpuvolta -l ngpus=1 -l ncpus=12 -l mem=32GB \
      --conda pytorch -- python train.py --epochs 100
 
-# ✅ Correct: Container with binds and environment variables  
+# ✅ Correct: Container with binds and environment variables
 qxub --project bio01 --queue express -l mem=32GB -l ncpus=8 \
      --sif /containers/analysis.sif --bind /data:/data -- \
      bash -c 'export DEBUG=1 && python pipeline.py'
@@ -108,7 +108,7 @@ qxub alias myalias
 qxub --dry alias myalias
 qxub --quiet alias myalias
 
-# ✅ Correct: Override options after alias name  
+# ✅ Correct: Override options after alias name
 qxub alias dvc_push --queue normal
 qxub alias analysis --env different_env -l mem=16GB
 qxub alias gpu_job --queue gpuvolta --cmd "python train.py --epochs 100"
@@ -140,7 +140,7 @@ qxub --env myenv -- python script.py --dry
 ```bash
 # ✅ Correct: All qxub options before --
 qxub --env myenv -- python script.py
-qxub --env myenv --queue normal -- python script.py  
+qxub --env myenv --queue normal -- python script.py
 qxub --dry --env myenv -- python script.py
 ```
 
@@ -173,7 +173,7 @@ qxub --modules python3,gcc -- python script.py # Alternative name
 
 # All equivalent Singularity options:
 qxub --sif container.sif -- python script.py
-qxub --sing container.sif -- python script.py  
+qxub --sing container.sif -- python script.py
 qxub --singularity container.sif -- python script.py
 ```
 
@@ -191,7 +191,7 @@ qxub --name data-processing -l mem=32GB -- ./process_data.sh
 
 This is useful for:
 - Running compiled programs that don't need specific environments
-- Simple shell commands and scripts  
+- Simple shell commands and scripts
 - Jobs where you want to use system-installed tools
 - Custom setups that don't fit conda/module/container patterns
 
@@ -202,7 +202,7 @@ This is useful for:
 The `--` separator rules exist because:
 
 1. **Clear separation**: qxub options vs target command options
-2. **Unambiguous parsing**: No confusion about which options belong where  
+2. **Unambiguous parsing**: No confusion about which options belong where
 3. **Consistent behavior**: Same rules apply regardless of execution context
 4. **Prevents conflicts**: Target command options can't interfere with qxub
 
@@ -219,7 +219,7 @@ When options are in the wrong place:
 # Basic analysis
 qxub --name analysis --project ds01 --env datasci -- python analyze.py
 
-# GPU training  
+# GPU training
 qxub --name training --queue gpuvolta -l ngpus=1 -l ncpus=12 -l mem=32GB \
      --conda pytorch -- python train.py --epochs 100 --batch-size 64
 

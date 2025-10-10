@@ -4,18 +4,21 @@ This avoids boilerplate code for loading modules and switching directories, etc.
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
+import base64
+import logging
+
 # pylint: disable=duplicate-code
 import os
-import sys
-import signal
-import logging
-import base64
 import shutil
+import signal
+import sys
 from pathlib import Path
+
 import click
 import pkg_resources
+
 from .cli import qxub
-from .scheduler import qsub, monitor_and_tail, print_status, qdel
+from .scheduler import monitor_and_tail, print_status, qdel, qsub
 
 # Global variable to track current job for signal handling
 _CURRENT_JOB_ID = None  # pylint: disable=invalid-name

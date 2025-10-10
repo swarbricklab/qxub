@@ -8,7 +8,7 @@ platform:
   type: pbs_pro
   host: gadi.nci.org.au
   description: "National Computational Infrastructure Gadi supercomputer"
-  
+
   # Queue definitions with accurate NCI constraints
   queues:
     # Standard compute queues
@@ -24,7 +24,7 @@ platform:
       walltime_rules:
         - cores: "1-672"
           max_walltime: "48:00:00"
-        - cores: "720-1440" 
+        - cores: "720-1440"
           max_walltime: "24:00:00"
         - cores: "1488-2976"
           max_walltime: "10:00:00"
@@ -54,7 +54,7 @@ platform:
       constraints:
         - no_gpu: true
 
-    # Memory queues  
+    # Memory queues
     hugemem:
       description: "High memory compute"
       limits:
@@ -69,7 +69,7 @@ platform:
         - cores: "1-48"
           max_walltime: "48:00:00"
         - cores: "96"
-          max_walltime: "24:00:00"  
+          max_walltime: "24:00:00"
         - cores: "144,192"
           max_walltime: "5:00:00"
       default_walltime: "2:00:00"
@@ -306,41 +306,41 @@ platform:
   # Queue selection rules
   auto_selection:
     priority_order: ["normal", "hugemem", "megamem", "gpuvolta", "copyq", "express"]
-    
+
     rules:
       # GPU jobs
       - if: "gpu_requested > 0 AND gpu_requested <= 4"
         then: "gpuvolta"
-        
+
       - if: "gpu_requested > 4"
         then: "dgxa100"
-        
+
       # High memory jobs
       - if: "memory > 2990GB"
         then: "error"  # No queue supports >3TB
-        
+
       - if: "memory > 1470GB"
         then: "megamem"
-        
+
       - if: "memory > 192GB"
         then: "hugemem"
-        
+
       # Internet connectivity required
       - if: "internet_required == true"
         then: "copyq"
-        
+
       # Data transfer jobs (single core, long duration)
       - if: "cpus == 1 AND walltime > 5:00:00"
         then: "copyq"
-        
+
       # High priority jobs (if user explicitly requests express)
       - if: "priority == 'high'"
         then: "express"
-        
+
       # Default to normal queue
       - default: "normal"
 
-  # Resource auto-adjustment policies  
+  # Resource auto-adjustment policies
   auto_adjust:
     min_cpus: auto      # Automatically adjust to queue minimum (esp. GPU jobs)
     memory: suggest     # Suggest better queue for high memory
@@ -349,6 +349,6 @@ platform:
 
 # Cost estimation examples:
 # 1 core × 1 hour normal = 2 SU
-# 1 core × 1 hour express = 6 SU  
+# 1 core × 1 hour express = 6 SU
 # 12 cores × 4 hours GPU = 144 SU (12 × 4 × 3.0)
 # 48 cores × 2 hours hugemem = 288 SU (48 × 2 × 3.0)

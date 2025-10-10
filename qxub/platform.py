@@ -23,13 +23,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import yaml
 
 from .resource_utils import (
-    parse_memory_size,
-    parse_walltime,
-    format_memory_size,
-    format_walltime,
     compare_memory,
     compare_walltime,
     evaluate_condition,
+    format_memory_size,
+    format_walltime,
+    parse_memory_size,
+    parse_walltime,
     suggest_resource_adjustment,
 )
 

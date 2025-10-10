@@ -1,6 +1,6 @@
 # qsub_tools Documentation
 
-Welcome to the complete documentation for qsub_tools 2.0! 
+Welcome to the complete documentation for qsub_tools 2.0!
 
 ## Quick Navigation
 
@@ -41,7 +41,7 @@ qxub config edit                    # Edit configuration file
 ### Alias System
 Aliases enable ultra-simple workflow execution by combining:
 - PBS job options (queue, resources, name)
-- Environment setup (conda, modules, containers)  
+- Environment setup (conda, modules, containers)
 - Commands to execute
 
 **Key Commands:**
@@ -79,7 +79,7 @@ qxub config alias set variants --sif "/containers/gatk.sif" --cmd "gatk Haplotyp
 
 # Execute analysis
 qxub alias qc reads.fastq.gz
-qxub alias align reads_1.fastq.gz reads_2.fastq.gz  
+qxub alias align reads_1.fastq.gz reads_2.fastq.gz
 qxub alias variants -I aligned.bam -R ref.fa
 ```
 
@@ -128,7 +128,7 @@ qxub config alias set gpu_job \
 ### Error Handling
 All validation errors return exit code 2 for consistent script integration:
 - Missing required parameters
-- Invalid resource formats  
+- Invalid resource formats
 - Non-existent aliases or environments
 - Option placement errors
 

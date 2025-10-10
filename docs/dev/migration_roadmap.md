@@ -9,7 +9,7 @@ qxub 2.0 will eliminate the `conda`, `module`, and `sing` subcommands in favor o
 ### Current (1.1.x)
 ```bash
 qxub conda --env myenv python script.py
-qxub module --mod python3,gcc python script.py  
+qxub module --mod python3,gcc python script.py
 qxub sing --sif container.sif python script.py
 ```
 
@@ -17,13 +17,13 @@ qxub sing --sif container.sif python script.py
 ```bash
 qxub --env myenv -- python script.py          # or --conda myenv
 qxub --mod python3 --mod gcc -- python script.py   # multiple modules
-qxub --mods python3,gcc -- python script.py        # or --modules python3,gcc  
+qxub --mods python3,gcc -- python script.py        # or --modules python3,gcc
 qxub --sif container.sif -- python script.py # or --sing / --singularity
 ```
 
 **Alternative Options**: For better usability, multiple option names are supported:
 - `--env` / `--conda`: Conda environment execution
-- `--mod` (repeatable) / `--mods` / `--modules`: Environment module execution  
+- `--mod` (repeatable) / `--mods` / `--modules`: Environment module execution
 - `--sif` / `--sing` / `--singularity`: Singularity container execution
 
 **Note**: The `--` separator is required to clearly separate qxub options from target command options.
@@ -108,7 +108,7 @@ Since qxub has only three active users, complex migration tools are unnecessary.
 
 #### Documentation Overhaul
 - [x] Rewrite all CLI examples to use new syntax
-- [x] Update alias documentation with new structure  
+- [x] Update alias documentation with new structure
 - [x] ~~Create migration guide for existing users~~ **Not needed - direct communication**
 - [x] Update troubleshooting guides
 
@@ -205,7 +205,7 @@ qxub --mod python3 --mod gcc --resources mem=8GB -- make      # Repeatable singl
 # Before (1.x) - single module
 qxub module --mod python3 python script.py
 
-# After (2.0) 
+# After (2.0)
 qxub --mod python3 -- python script.py                       # Single module
 
 # Before (1.x)
@@ -223,7 +223,7 @@ qxub conda --env dvc3 dvc repro --dry-run
 # After (2.0) - Natural, intuitive syntax
 qxub --conda dvc3 -- dvc repro --dry-run
 
-# Before (1.x) 
+# Before (1.x)
 qxub module --mods python3 python train.py --epochs 100 --lr 0.001
 
 # After (2.0) - Clear, explicit option names
@@ -266,7 +266,7 @@ qxub --singularity /containers/blast.sif -- blastn -query input.fa
 def qxub(env, conda, mod, mods, modules, sif, sing, singularity, bind, command, **kwargs):
     # Consolidate alternative option names
     conda_env = env or conda
-    
+
     # Handle module options: --mod (multiple) vs --mods/--modules (comma-separated)
     module_list = None
     if mod:
@@ -274,14 +274,14 @@ def qxub(env, conda, mod, mods, modules, sif, sing, singularity, bind, command, 
     elif mods or modules:
         module_str = mods or modules
         module_list = [m.strip() for m in module_str.split(',')]
-    
+
     container = sif or sing or singularity
-    
+
     # Validate mutual exclusivity
     execution_contexts = [conda_env, module_list, container]
     if sum(bool(x) for x in execution_contexts) > 1:
         raise click.ClickException("Cannot specify multiple execution contexts")
-    
+
     # Detect execution context and delegate
     if conda_env:
         execute_conda(conda_env, command, **kwargs)
@@ -484,7 +484,7 @@ Click's multiple option names feature handles this elegantly:
 
 ### 🎯 **REMAINING WORK**
 
-#### **Phase 5: Finalization** 
+#### **Phase 5: Finalization**
 - **Release Notes**: Document all changes and migration steps
 - **Final Testing**: User acceptance with the 3 active users
 - **Version Tagging**: Prepare 2.0.0 release
@@ -531,12 +531,12 @@ The qxub 2.0 migration has been **highly successful**, achieving all major goals
 ## Next Steps
 
 ### Q4 2025
-- **Week 1**: 
+- **Week 1**:
   - [ ] **Prepare release notes**
   - [ ] **User acceptance testing** with 3 active users
   - [ ] **Final validation** of all functionality
 
-- **Week 2**: 
+- **Week 2**:
   - [ ] **qxub 2.0.0 Release**
   - [ ] **Direct user support** for any migration issues
   - [ ] **Monitor adoption** and gather feedback

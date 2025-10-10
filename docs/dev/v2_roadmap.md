@@ -15,7 +15,7 @@ Transform qxub from a PBS-specific tool into a universal computational job orche
 
 #### Core Features
 - **Queue constraint validation** against platform definitions
-- **Automatic queue selection** based on resource requirements  
+- **Automatic queue selection** based on resource requirements
 - **Resource auto-adjustment** to meet queue minimums
 - **Enhanced error messages** with suggestions
 - **Platform schema framework** for future extension
@@ -23,7 +23,7 @@ Transform qxub from a PBS-specific tool into a universal computational job orche
 #### Implementation Tasks
 1. **Platform schema parser** (`qxub/platforms/`)
 2. **NCI Gadi platform plugin** with queue definitions
-3. **Queue validation engine** 
+3. **Queue validation engine**
 4. **Auto-selection algorithm**
 5. **Resource adjustment policies**
 6. **Enhanced CLI feedback**
@@ -31,7 +31,7 @@ Transform qxub from a PBS-specific tool into a universal computational job orche
 #### Success Criteria
 - Users can specify `--queue auto` for intelligent selection
 - GPU requests automatically select `gpuvolta` and adjust CPU minimum
-- Memory >192GB requests automatically suggest `hugemem` queue  
+- Memory >192GB requests automatically suggest `hugemem` queue
 - Clear warnings/suggestions for constraint violations
 - 100% backward compatibility with existing commands
 
@@ -49,7 +49,7 @@ Transform qxub from a PBS-specific tool into a universal computational job orche
 - **Distributed logging** (client + server)
 - **Exit code propagation** through the execution chain
 
-#### Implementation Tasks  
+#### Implementation Tasks
 1. **Platform profiles** with remote host configuration
 2. **SSH execution backend**
 3. **Remote qxub invocation** and monitoring
@@ -83,7 +83,7 @@ qxub --profile gadi --env dvc3 -- dvc --version
 
 #### Implementation Strategy
 - **Core resource abstraction** layer
-- **Platform-specific translators** 
+- **Platform-specific translators**
 - **Unified configuration** system
 - **Advanced scheduling** and cost optimization
 
@@ -99,23 +99,23 @@ class Platform(ABC):
     @abstractmethod
     def validate_resources(self, request: ResourceRequest) -> ValidationResult:
         """Validate resource request against platform constraints"""
-        
-    @abstractmethod  
+
+    @abstractmethod
     def suggest_queue(self, request: ResourceRequest) -> Optional[str]:
         """Suggest appropriate queue for resource request"""
-        
+
     @abstractmethod
     def adjust_resources(self, request: ResourceRequest, queue: str) -> ResourceRequest:
         """Auto-adjust resources to meet queue requirements"""
 
-# qxub/platforms/nci_gadi.py  
+# qxub/platforms/nci_gadi.py
 class NCIGadiPlatform(Platform):
     def __init__(self, config_path: Path):
         self.queues = self._load_queue_definitions(config_path)
-        
+
     def validate_resources(self, request):
         # Validate against NCI queue constraints
-        
+
     def suggest_queue(self, request):
         # Apply NCI-specific queue selection rules
 ```
@@ -128,22 +128,22 @@ class NCIGadiPlatform(Platform):
 def process_resource_request(user_args, config):
     # 1. Parse user resource specification
     request = parse_user_resources(user_args)
-    
+
     # 2. Load platform and validate
     platform = load_platform(config.platform)
     validation = platform.validate_resources(request)
-    
+
     # 3. Auto-select queue if needed
     if request.queue == "auto":
         request.queue = platform.suggest_queue(request)
-        
+
     # 4. Auto-adjust resources if configured
     if config.auto_adjust_enabled:
         request = platform.adjust_resources(request, request.queue)
-        
+
     # 5. Final validation and warnings
     final_validation = platform.validate_resources(request)
-    
+
     return request, final_validation
 ```
 
@@ -187,14 +187,14 @@ def qxub_submit(job, **kwargs):
 # v2.0 (current)
 defaults:
   queue: normal
-  
+
 # v2.1 (intelligent)
 defaults:
   queue: auto
 auto_selection:
   enabled: true
-  
-# v2.2 (remote)  
+
+# v2.2 (remote)
 profiles:
   gadi:
     platform: nci_gadi
@@ -224,7 +224,7 @@ profiles:
 - [ ] Zero regression in existing functionality
 - [ ] Positive feedback from 3 active users
 
-### v2.2 Success  
+### v2.2 Success
 - [ ] Remote execution works transparently from laptop
 - [ ] <5 second latency for remote job submission
 - [ ] Exit codes propagated correctly 100% of time
@@ -248,7 +248,7 @@ profiles:
 - **Backward compatibility**: Maintain comprehensive test suite
 - **Learning curve**: Extensive documentation and examples
 
-### Development Risks  
+### Development Risks
 - **Scope creep**: Stick to phased delivery
 - **Resource constraints**: Focus on high-impact features first
 - **Platform changes**: Design for platform evolution
@@ -263,7 +263,7 @@ profiles:
 
 ### Short-term (Month 1)
 1. **Complete v2.1 core features**
-2. **Test with existing users**  
+2. **Test with existing users**
 3. **Refine based on feedback**
 4. **Plan v2.2 detailed design**
 

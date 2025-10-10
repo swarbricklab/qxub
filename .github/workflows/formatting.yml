@@ -13,9 +13,9 @@ jobs:
         with:
           python-version: 3.9
           auto-update-conda: true
-          environment-file: environment.dev.yaml  
+          environment-file: environment.dev.yaml
           activate-environment: test
-          
+
       - name: Check code formatting with Black
         shell: bash -el {0}
         run: |

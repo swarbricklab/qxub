@@ -13,7 +13,7 @@ Add platform-specific environment discovery capabilities to qxub to enable intel
 Add these three properties to platform definitions:
 
 1. **`modulepaths`** - List of paths to search for environment modules
-2. **`condarc`** - List of conda configuration files to source  
+2. **`condarc`** - List of conda configuration files to source
 3. **`simg`** - List of directories containing Singularity images
 
 ## Example Configuration
@@ -25,12 +25,12 @@ platform:
     - "/apps/Modules/modulefiles"
     - "/g/data/hh5/public/modules"
     - "/opt/nci/modulefiles"
-  
+
   condarc:
     - "/g/data/hh5/public/apps/miniconda3/etc/conda/condarc"
     - "/apps/conda/etc/conda/condarc"
     - "~/.condarc"
-  
+
   simg:
     - "/g/data/hh5/public/apps/singularity/containers"
     - "/apps/singularity/containers"
@@ -45,7 +45,7 @@ platform:
 - Generate appropriate `module load` commands
 - Enable `qxub modules list` command
 
-### Conda Environment Discovery (`--env`)  
+### Conda Environment Discovery (`--env`)
 - Source `condarc` files to discover available environments
 - Find environments across different conda installations
 - Validate environments exist before submission
@@ -61,7 +61,7 @@ platform:
 
 1. **Environment Validation**: Check environments exist before submitting jobs
 2. **Tab Completion**: Auto-complete module/environment/container names
-3. **Cross-Platform Discovery**: Find environments across different installations  
+3. **Cross-Platform Discovery**: Find environments across different installations
 4. **User Experience**: No need to remember exact paths or names
 5. **Error Prevention**: Catch missing environments at submission time
 

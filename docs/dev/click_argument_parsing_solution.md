@@ -7,7 +7,7 @@ During the qxub 2.0 migration, we needed to transform the CLI from a subcommand-
 **Before (1.x):**
 ```bash
 qxub conda --env myenv python script.py
-qxub module --mods python3,gcc make  
+qxub module --mods python3,gcc make
 qxub sing --sif container.sif python script.py
 qxub config --help  # Management command
 ```
@@ -16,7 +16,7 @@ qxub config --help  # Management command
 ```bash
 qxub --env myenv -- python script.py
 qxub --mods python3,gcc -- make
-qxub --sif container.sif -- python script.py  
+qxub --sif container.sif -- python script.py
 qxub config --help  # Management command (unchanged)
 ```
 
@@ -39,7 +39,7 @@ qxub --env base -- echo "test"
 
 Click's parsing flow:
 1. Parse options: `--env base` ✅
-2. Encounter `--`: Put remaining in `protected_args: ['echo']` and `args: ['test']` ✅  
+2. Encounter `--`: Put remaining in `protected_args: ['echo']` and `args: ['test']` ✅
 3. Try to resolve `'echo'` as subcommand ❌ **FAILS HERE**
 
 ### The Solution: Custom Click Group
@@ -55,21 +55,21 @@ class QxubGroup(click.Group):
         # Check if we have execution context
         execution_options = ['env', 'mod', 'mods', 'sif']
         has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
-        
+
         if has_execution_context:
             return None  # Don't resolve as subcommand
-        
+
         return super().get_command(ctx, cmd_name)
 
     def invoke(self, ctx):
         """Override invoke to handle execution contexts."""
         execution_options = ['env', 'mod', 'mods', 'sif']
         has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
-        
+
         if has_execution_context and ctx.protected_args:
             # Combine protected_args and args for execution
             combined_args = list(ctx.protected_args) + ctx.args
-            
+
             # Temporarily set ctx.args for the main function
             original_args = ctx.args
             ctx.args = combined_args
@@ -84,7 +84,7 @@ class QxubGroup(click.Group):
                 )
             finally:
                 ctx.args = original_args
-        
+
         return super().invoke(ctx)
 ```
 
@@ -101,7 +101,7 @@ class QxubGroup(click.Group):
 ```
 qxub --env base -- echo "test"
     ↓
-parse_args(): ['--env', 'base', '--', 'echo', 'test'] 
+parse_args(): ['--env', 'base', '--', 'echo', 'test']
     ↓
 Result: ctx.params['env']='base', ctx.protected_args=['echo'], ctx.args=['test']
     ↓
@@ -110,7 +110,7 @@ get_command('echo'): has_execution_context=True → return None
 invoke(): combine args=['echo', 'test'] → call qxub() directly
 ```
 
-### Management Command Flow  
+### Management Command Flow
 ```
 qxub config --help
     ↓
@@ -154,7 +154,7 @@ invoke(): standard Click subcommand handling
 ## Future Considerations
 
 - Monitor Click library updates for potential conflicts
-- Consider this pattern for other complex CLI interfaces  
+- Consider this pattern for other complex CLI interfaces
 - Document any edge cases discovered during usage
 - Possible upstream contribution to Click for better hybrid command support
 

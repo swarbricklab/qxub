@@ -12,7 +12,8 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Dict, List, Optional, Union
+
 import yaml
 
 logger = logging.getLogger(__name__)

@@ -4,20 +4,23 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
+import base64
+import difflib
+import logging
+
 # pylint: disable=duplicate-code
 import os
-import sys
-import signal
-import logging
-import base64
 import shutil
+import signal
+import sys
 from pathlib import Path
-import difflib
+
 import click
 import pkg_resources
+
 from .cli import qxub
-from .scheduler import qsub, monitor_and_tail, print_status, qdel, get_job_resource_data
 from .resource_tracker import resource_tracker
+from .scheduler import get_job_resource_data, monitor_and_tail, print_status, qdel, qsub
 
 
 class QxubCommand(click.Command):

@@ -8,6 +8,5 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 
 __version__ = "2.0.0"
 
+from . import config, scheduler
 from .cli import qxub
-from . import scheduler
-from . import config

@@ -18,27 +18,27 @@ defaults:
   project: a56
   queue: "auto"        # New: was "normal" - enables intelligent queue selection
   walltime: "00:30:00"
-  mem: "4GB" 
+  mem: "4GB"
   ncpus: 1
-  
+
   # New platform-aware defaults
   platform: "nci_gadi"  # Default platform for local execution
-  
+
 # Auto-selection preferences
 auto_selection:
   queue:
     enabled: true
     strategy: "optimal"    # vs "conservative", "aggressive"
-    
+
   resources:
     # How to handle resource conflicts
     cpus:
       policy: "auto_adjust"     # vs "warn", "error"
       prefer: "minimum_viable"  # vs "user_specified"
-      
-    memory: 
+
+    memory:
       policy: "suggest"         # vs "auto_adjust", "error"
-      
+
     walltime:
       policy: "warn"           # vs "auto_adjust", "error"
 
@@ -47,11 +47,11 @@ queue_overrides:
   gpuvolta:
     auto_adjust_cpus: true    # Always adjust to minimum 12
     confirm_gpu_request: false # Don't prompt for GPU requests
-    
+
   hugemem:
     confirm_high_memory: true # Prompt for >500GB requests
     suggest_alternatives: true
-    
+
   copyq:
     max_auto_walltime: "01:00:00"  # Don't auto-select for longer jobs
 
@@ -66,7 +66,7 @@ profiles:
       host: gadi.nci.org.au
       user: jr9959
       qxub_command: "module load python3; qxub"
-      
+
   laptop:
     platform: local
     defaults:
@@ -85,7 +85,7 @@ defaults:
   walltime: duration
   mem: memory_size
   ncpus: integer
-  
+
   # New v2.1 options
   platform: string       # Default platform identifier
   auto_adjust: boolean   # Global auto-adjustment toggle
@@ -101,7 +101,7 @@ auto_selection:
     enabled: boolean       # Enable/disable queue auto-selection
     strategy: string       # Selection strategy
     fallback: string       # Queue to use if auto-selection fails
-    
+
   resources:
     <resource_type>:
       policy: string       # How to handle conflicts
@@ -172,7 +172,7 @@ resource_request:
     memory: memory_size
     gpu: integer
     walltime: duration
-    
+
   # Platform-agnostic core resources
   core_resources:
     compute:
@@ -180,13 +180,13 @@ resource_request:
       memory: memory_size
       gpu: integer
       walltime: duration
-    
-  # Platform-specific resources  
+
+  # Platform-specific resources
   platform_specific:
     queue: string
     project: string
     # ... other PBS-specific options
-    
+
   # Resolution results
   resolved:
     platform: string
@@ -268,14 +268,14 @@ scheduling:
   prefer_idle_queues: boolean
   avoid_peak_hours: boolean
   cost_optimization: boolean
-  
+
 # Team-wide configurations
 team:
   shared_defaults: url
-  resource_budgets: 
+  resource_budgets:
     monthly_cpu_hours: integer
     monthly_gpu_hours: integer
-    
+
 # Workflow integration
 workflows:
   dvc:

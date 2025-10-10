@@ -21,7 +21,7 @@ pip install -e .
 qxub --env myenv -- python script.py
 qxub --conda myenv -- python script.py  # alternative option name
 
-# Run with environment modules  
+# Run with environment modules
 qxub --mod samtools -- samtools --version
 qxub --mods "python3,gcc" -- python analysis.py  # comma-separated
 qxub --mod python3 --mod gcc -- python analysis.py  # repeatable
@@ -109,7 +109,7 @@ Use `--queue auto` to enable intelligent queue selection based on your resource 
 qxub --queue auto -l mem=2GB -l ncpus=2 --env myenv -- python small_job.py
 # → Automatically selects 'small' queue for lightweight jobs
 
-qxub --queue auto -l mem=500GB --env myenv -- python big_memory_job.py  
+qxub --queue auto -l mem=500GB --env myenv -- python big_memory_job.py
 # → Automatically selects 'hugemem' queue for high memory requirements
 
 qxub --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
@@ -121,7 +121,7 @@ qxub --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
 When `--queue auto` is used, qxub intelligently selects the best queue based on:
 
 - **Memory requirements**: Jobs requiring >100GB automatically use high-memory queues
-- **GPU requirements**: Jobs with GPU specifications automatically use GPU queues  
+- **GPU requirements**: Jobs with GPU specifications automatically use GPU queues
 - **CPU requirements**: Small jobs (≤2 CPUs, ≤2GB) use express/small queues when available
 - **Cost optimization**: Among valid queues, selects the most cost-effective option
 - **Fallback**: Uses 'normal' queue if no specific rules match
@@ -291,7 +291,7 @@ qxub sing --sif container.sif -- python script.py    →    qxub --sif container
 
 ### Version 0.3.0
 - Added `module` subcommand for environment module support
-- Added `sing` subcommand for Singularity container support  
+- Added `sing` subcommand for Singularity container support
 - Added `--pre` and `--post` options for command chaining
 - Added Ctrl+C signal handling with automatic job cleanup
 - Improved spinner display and output coordination
