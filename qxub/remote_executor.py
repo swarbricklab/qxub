@@ -161,6 +161,10 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Activate conda environment
         commands.append(f"conda activate {self.config.qxub_env}")
 
+        # Set platform file environment variable
+        # This tells qxub on the remote system which platform file to use
+        commands.append(f"export QXUB_PLATFORM_FILE={self.config.platform_file}")
+
         # Execute the actual command
         commands.append(command)
 

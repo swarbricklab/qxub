@@ -266,6 +266,27 @@ class PlatformLoader:
 
     def _load_platforms(self):
         """Load all platform definitions from search paths."""
+        # Check for specific platform file environment variable first
+        specific_platform_file = os.getenv("QXUB_PLATFORM_FILE")
+        if specific_platform_file:
+            platform_path = Path(specific_platform_file)
+            if platform_path.exists():
+                logger.debug(
+                    f"Loading platform file from QXUB_PLATFORM_FILE: {platform_path}"
+                )
+                try:
+                    self._load_platform_file(platform_path)
+                    return  # Only load the specific file, don't load others
+                except Exception as e:
+                    logger.error(
+                        f"Failed to load platform file from QXUB_PLATFORM_FILE {platform_path}: {e}"
+                    )
+            else:
+                logger.warning(
+                    f"Platform file specified in QXUB_PLATFORM_FILE does not exist: {specific_platform_file}"
+                )
+
+        # Default behavior: load from search paths
         for search_path in self.search_paths:
             if not search_path.exists():
                 logger.debug(f"Platform search path does not exist: {search_path}")

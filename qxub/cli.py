@@ -1078,8 +1078,8 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
         # Create executor
         executor = RemoteExecutorFactory.create(remote_config)
 
-        # Test connection
-        if not executor.test_connection():
+        # Test connection (skip for dry-run)
+        if not params.get("dry", False) and not executor.test_connection():
             click.echo(f"Error: Cannot connect to {remote_config.hostname}", err=True)
             click.echo("Suggestions:", err=True)
             if hasattr(executor, "config") and executor.config.protocol == "ssh":
@@ -1105,11 +1105,17 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             local_cwd, explicit_execdir
         )
 
+        if verbose >= 1:
+            click.echo(f"🌐 Remote execution to: {remote_config.url}")
+            click.echo(f"📁 Remote working directory: {remote_working_dir}")
+            click.echo(f"🐍 Remote conda environment: {remote_config.qxub_env}")
+            click.echo(f"📋 Platform file: {remote_config.platform_file}")
+
         # Build remote qxub command
         remote_args = []
 
-        # Add platform file
-        remote_args.extend(["--platform-file", remote_config.platform_file])
+        # The platform file will be set via environment variable, not CLI argument
+        # This avoids the "--platform-file" invalid option error
 
         # Add execution directory
         remote_args.extend(["--execdir", remote_working_dir])
@@ -1149,11 +1155,19 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             f"'{arg}'" if " " in arg else arg for arg in remote_args
         )
 
+        if verbose >= 2:
+            click.echo(f"🚀 Remote command: {qxub_command}")
+
         # Execute remotely
-        exit_code = executor.execute(
-            qxub_command, remote_working_dir, stream_output=True
-        )
-        ctx.exit(exit_code)
+        is_dry_run = params.get("dry", False)
+        if is_dry_run:
+            click.echo(f"🧪 Dry run - would execute remotely: {qxub_command}")
+            ctx.exit(0)
+        else:
+            exit_code = executor.execute(
+                qxub_command, remote_working_dir, stream_output=True
+            )
+            ctx.exit(exit_code)
 
     except ImportError as e:
         click.echo(f"Remote execution not available: {e}", err=True)
