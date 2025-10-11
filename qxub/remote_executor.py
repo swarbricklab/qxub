@@ -1,12 +1,17 @@
 """
 Remote execution backends for qxub v2.2.
 
-This module provides the execution backends for different protocols,
-starting with SSH-based remote execution.
+This module provides the execution backends for different protocol        # Show SSH command in verbose mode
+        if verbose >= 2:
+            print(f"🔗 SSH connection: ssh {self.config.hostname}", file=sys.stderr)
+            # Show the command with proper quoting for display
+            ssh_display = ssh_command[:-1] + [shlex.quote(ssh_command[-1])]
+            print(f"🔧 SSH command: {' '.join(ssh_display)}", file=sys.stderr)tarting with SSH-based remote execution.
 """
 
 import logging
 import select
+import shlex
 import subprocess
 import sys
 from abc import ABC, abstractmethod
@@ -173,8 +178,9 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Change to working directory
         commands.append(f"cd {working_dir}")
 
-        # Activate conda environment
-        commands.append(f"conda activate {self.config.qxub_env}")
+        # Initialize conda and activate environment
+        # Source bashrc to ensure conda is available in non-interactive SSH
+        commands.append(f"source ~/.bashrc && conda activate {self.config.qxub_env}")
 
         # Set platform file environment variable
         # This tells qxub on the remote system which platform file to use
