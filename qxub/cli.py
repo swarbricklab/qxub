@@ -1105,6 +1105,9 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             local_cwd, explicit_execdir
         )
 
+        # Get verbose level for output
+        verbose = params.get("verbose", 0)
+
         if verbose >= 1:
             click.echo(f"🌐 Remote execution to: {remote_config.url}")
             click.echo(f"📁 Remote working directory: {remote_working_dir}")
