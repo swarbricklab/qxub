@@ -8,7 +8,7 @@ v2.2 adds remote execution capabilities for seamless job submission to remote HP
 
 # __init__.py
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # Import main CLI
 from .cli import qxub
