@@ -1120,15 +1120,22 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
                 continue
 
             # Handle special parameter formatting
-            if key == "resources" and value:
-                for resource in value:
-                    remote_args.extend(["-l", resource])
-            elif key == "mod" and value:
-                for module in value:
-                    remote_args.extend(["--mod", module])
+            if key == "resources":
+                # Only add resources if there are actual resource specifications
+                if value and len(value) > 0:
+                    for resource in value:
+                        remote_args.extend(["-l", resource])
+            elif key == "mod":
+                # Only add modules if there are actual module specifications
+                if value and len(value) > 0:
+                    for module in value:
+                        remote_args.extend(["--mod", module])
             elif isinstance(value, bool):
                 if value:
                     remote_args.append(f'--{key.replace("_", "-")}')
+            elif isinstance(value, (list, tuple)) and len(value) == 0:
+                # Skip empty lists/tuples to avoid adding empty parameters
+                continue
             else:
                 remote_args.extend([f'--{key.replace("_", "-")}', str(value)])
 
