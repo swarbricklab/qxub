@@ -783,6 +783,10 @@ def execute_conda(ctx, command, env, template=None, pre=None, post=None):
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Display job ID to user (unless in quiet mode)
+    if not ctx_obj["quiet"]:
+        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+
     # Log execution to history system
     try:
         history_manager.log_execution(ctx, success=True, job_id=job_id)
@@ -855,6 +859,10 @@ def execute_module(ctx, command, modules, template=None, pre=None, post=None):
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Display job ID to user (unless in quiet mode)
+    if not ctx_obj["quiet"]:
+        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
 
     # Log execution to history system
     try:
@@ -931,6 +939,10 @@ def execute_singularity(
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Display job ID to user (unless in quiet mode)
+    if not ctx_obj["quiet"]:
+        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+
     # Log execution to history system
     try:
         history_manager.log_execution(ctx, success=True, job_id=job_id)
@@ -992,6 +1004,10 @@ def execute_default(ctx, command, template=None, pre=None, post=None):
 
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Display job ID to user (unless in quiet mode)
+    if not ctx_obj["quiet"]:
+        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
 
     # Log execution to history system
     try:
