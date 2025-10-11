@@ -499,7 +499,23 @@ def qxub(
 
     # Handle remote execution early
     if remote:
-        return _handle_remote_execution(ctx, remote, config, execdir, **params)
+        # Gather all parameters for remote execution
+        all_params = dict(params)
+        all_params.update(
+            {
+                "verbose": verbose,
+                "version": version,
+                "env": env,
+                "mod": mod,
+                "mods": mods,
+                "sif": sif,
+                "bind": bind,
+                "template": template,
+                "pre": pre,
+                "post": post,
+            }
+        )
+        return _handle_remote_execution(ctx, remote, config, execdir, **all_params)
 
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
@@ -1075,28 +1091,10 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             click.echo(f"Configuration error: {e}", err=True)
             ctx.exit(1)
 
-        # Create executor
-        executor = RemoteExecutorFactory.create(remote_config)
+        # Get verbose level for output (early, so we can show info even if connection fails)
+        verbose = params.get("verbose", 0)
 
-        # Test connection (skip for dry-run)
-        if not params.get("dry", False) and not executor.test_connection():
-            click.echo(f"Error: Cannot connect to {remote_config.hostname}", err=True)
-            click.echo("Suggestions:", err=True)
-            if hasattr(executor, "config") and executor.config.protocol == "ssh":
-                click.echo(
-                    f"  - Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
-                    err=True,
-                )
-                click.echo(
-                    "  - Verify network connectivity and VPN if required", err=True
-                )
-                click.echo(
-                    f"  - Test connection: ssh {remote_config.hostname} echo 'test'",
-                    err=True,
-                )
-            ctx.exit(1)
-
-        # Determine remote working directory
+        # Determine remote working directory early for verbose output
         local_cwd = Path(execdir).resolve()
         explicit_execdir = (
             params.get("execdir") if params.get("execdir") != os.getcwd() else None
@@ -1105,16 +1103,14 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             local_cwd, explicit_execdir
         )
 
-        # Get verbose level for output
-        verbose = params.get("verbose", 0)
-
+        # Always show some remote execution info if verbose
         if verbose >= 1:
             click.echo(f"🌐 Remote execution to: {remote_config.url}")
             click.echo(f"📁 Remote working directory: {remote_working_dir}")
             click.echo(f"🐍 Remote conda environment: {remote_config.qxub_env}")
             click.echo(f"📋 Platform file: {remote_config.platform_file}")
 
-        # Build remote qxub command
+        # Build remote qxub command early (for verbose output)
         remote_args = []
 
         # The platform file will be set via environment variable, not CLI argument
@@ -1123,9 +1119,10 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
         # Add execution directory
         remote_args.extend(["--execdir", remote_working_dir])
 
-        # Add other parameters (excluding remote and execdir)
+        # Add other parameters (excluding remote-specific and config params)
         for key, value in params.items():
-            if key in ["remote"] or value is None:
+            # Skip parameters that are remote-execution specific or shouldn't be forwarded
+            if key in ["remote", "config", "execdir"] or value is None:
                 continue
 
             # Handle special parameter formatting
@@ -1166,11 +1163,37 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
         if is_dry_run:
             click.echo(f"🧪 Dry run - would execute remotely: {qxub_command}")
             ctx.exit(0)
-        else:
+
+        # Create executor only if not dry-run
+        executor = RemoteExecutorFactory.create(remote_config)
+
+        # Test connection
+        if not executor.test_connection():
+            click.echo(f"Error: Cannot connect to {remote_config.hostname}", err=True)
+            click.echo("Suggestions:", err=True)
+            if hasattr(executor, "config") and executor.config.protocol == "ssh":
+                click.echo(
+                    f"  - Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
+                    err=True,
+                )
+                click.echo(
+                    "  - Verify network connectivity and VPN if required", err=True
+                )
+                click.echo(
+                    f"  - Test connection: ssh {remote_config.hostname} echo 'test'",
+                    err=True,
+                )
+            ctx.exit(1)
+
+        # Execute remotely (not dry-run, so actually execute)
+        try:
             exit_code = executor.execute(
                 qxub_command, remote_working_dir, stream_output=True
             )
             ctx.exit(exit_code)
+        except Exception as e:
+            click.echo(f"Remote execution failed: {e}", err=True)
+            ctx.exit(1)
 
     except ImportError as e:
         click.echo(f"Remote execution not available: {e}", err=True)
@@ -1180,9 +1203,6 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
         click.echo(f"Connection error: {e}", err=True)
         for suggestion in e.suggestions:
             click.echo(f"  - {suggestion}", err=True)
-        ctx.exit(1)
-    except Exception as e:
-        click.echo(f"Remote execution failed: {e}", err=True)
         ctx.exit(1)
 
 
