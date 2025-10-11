@@ -63,6 +63,34 @@ head -50 test_conda_integration.sh
 - Resource allocation verification
 - Error handling and cleanup
 
+### 3. `test_remote_config.sh` - Remote Execution Tests 🌐
+
+**Purpose**: Testing qxub v2.2 remote execution capabilities and `--config` option functionality.
+
+**Usage**:
+```bash
+./test_remote_config.sh
+```
+
+**Features**:
+- ✅ **Safe**: Uses dry-run mode for remote testing
+- 🔧 **Configuration testing**: Validates `--config` option with alternative config files
+- 🌐 **Remote validation**: Tests remote configuration loading and validation
+- 🎯 **Error handling**: Verifies proper error messages for connection failures
+
+**Test Coverage**:
+- `--config` option recognition and parsing
+- Alternative configuration file loading (`tests/test_config.yaml`)
+- Remote configuration validation
+- SSH connection error handling
+- Invalid remote name rejection
+
+**Test Configuration File**: `tests/test_config.yaml` contains example remote configurations:
+- `nci_gadi`: NCI Gadi cluster configuration
+- `localhost`: Local testing configuration
+- `example_cluster`: Generic cluster example
+- `custom_port_host`: Custom port example
+
 ## Test Configuration
 
 Both test scripts create temporary configuration files to ensure consistent testing:
