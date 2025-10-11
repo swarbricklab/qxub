@@ -58,7 +58,7 @@ Transform qxub from a PBS-specific tool into a universal computational job orche
 
 #### Usage Example
 ```bash
-qxub --profile gadi --env dvc3 -- dvc --version
+qxub --remote nci_gadi --env dvc3 -- dvc --version
 ```
 
 #### Success Criteria

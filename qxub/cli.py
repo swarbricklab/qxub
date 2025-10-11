@@ -68,6 +68,8 @@ class QxubGroup(click.Group):
                 )  # Get the unwrapped function
                 return qxub_func(
                     ctx,
+                    ctx.params["remote"],
+                    ctx.params["config"],
                     ctx.params["execdir"],
                     ctx.params["verbose"],
                     ctx.params["version"],
@@ -84,6 +86,8 @@ class QxubGroup(click.Group):
                         for k, v in ctx.params.items()
                         if k
                         not in [
+                            "remote",
+                            "config",
                             "execdir",
                             "verbose",
                             "version",
@@ -384,6 +388,14 @@ def _get_singularity_template():
 
 @click.group(cls=QxubGroup, invoke_without_command=True)
 @click.option(
+    "--remote",
+    help="Execute on remote system (defined in ~/.config/qxub/config.yaml)",
+)
+@click.option(
+    "--config",
+    help="Alternative configuration file (default: ~/.config/qxub/config.yaml)",
+)
+@click.option(
     "--execdir",
     default=os.getcwd(),
     help="Execution directory (default: current directory)",
@@ -445,6 +457,8 @@ def _get_singularity_template():
 @click.pass_context
 def qxub(
     ctx,
+    remote,
+    config,
     execdir,
     verbose,
     version,
@@ -482,6 +496,10 @@ def qxub(
 
         click.echo(f"qxub {__version__}")
         ctx.exit()
+
+    # Handle remote execution early
+    if remote:
+        return _handle_remote_execution(ctx, remote, config, execdir, **params)
 
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
@@ -1035,6 +1053,113 @@ def _get_default_template():
             f"Looked in: {Path(__file__).parent / 'jobscripts' / 'qdefault.pbs'}"
         )
     return template_path
+
+
+def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
+    """Handle remote execution via SSH."""
+    try:
+        from .remote_config_loader import ConfigLoadError, get_remote_config
+        from .remote_executor import ConnectionError as RemoteConnectionError
+        from .remote_executor import RemoteExecutorFactory
+
+        # Get command to execute
+        command = ctx.args if ctx.args else []
+        if not command:
+            click.echo("Error: Command is required for remote execution.", err=True)
+            ctx.exit(2)
+
+        # Load remote configuration
+        try:
+            remote_config = get_remote_config(remote_name, config_file)
+        except ConfigLoadError as e:
+            click.echo(f"Configuration error: {e}", err=True)
+            ctx.exit(1)
+
+        # Create executor
+        executor = RemoteExecutorFactory.create(remote_config)
+
+        # Test connection
+        if not executor.test_connection():
+            click.echo(f"Error: Cannot connect to {remote_config.hostname}", err=True)
+            click.echo("Suggestions:", err=True)
+            if hasattr(executor, "config") and executor.config.protocol == "ssh":
+                click.echo(
+                    f"  - Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
+                    err=True,
+                )
+                click.echo(
+                    "  - Verify network connectivity and VPN if required", err=True
+                )
+                click.echo(
+                    f"  - Test connection: ssh {remote_config.hostname} echo 'test'",
+                    err=True,
+                )
+            ctx.exit(1)
+
+        # Determine remote working directory
+        local_cwd = Path(execdir).resolve()
+        explicit_execdir = (
+            params.get("execdir") if params.get("execdir") != os.getcwd() else None
+        )
+        remote_working_dir = remote_config.determine_remote_working_dir(
+            local_cwd, explicit_execdir
+        )
+
+        # Build remote qxub command
+        remote_args = []
+
+        # Add platform file
+        remote_args.extend(["--platform-file", remote_config.platform_file])
+
+        # Add execution directory
+        remote_args.extend(["--execdir", remote_working_dir])
+
+        # Add other parameters (excluding remote and execdir)
+        for key, value in params.items():
+            if key in ["remote"] or value is None:
+                continue
+
+            # Handle special parameter formatting
+            if key == "resources" and value:
+                for resource in value:
+                    remote_args.extend(["-l", resource])
+            elif key == "mod" and value:
+                for module in value:
+                    remote_args.extend(["--mod", module])
+            elif isinstance(value, bool):
+                if value:
+                    remote_args.append(f'--{key.replace("_", "-")}')
+            else:
+                remote_args.extend([f'--{key.replace("_", "-")}', str(value)])
+
+        # Add the command to execute
+        if command:
+            remote_args.append("--")
+            remote_args.extend(command)
+
+        # Build final qxub command
+        qxub_command = "qxub " + " ".join(
+            f"'{arg}'" if " " in arg else arg for arg in remote_args
+        )
+
+        # Execute remotely
+        exit_code = executor.execute(
+            qxub_command, remote_working_dir, stream_output=True
+        )
+        ctx.exit(exit_code)
+
+    except ImportError as e:
+        click.echo(f"Remote execution not available: {e}", err=True)
+        click.echo("This feature requires additional dependencies.", err=True)
+        ctx.exit(1)
+    except RemoteConnectionError as e:
+        click.echo(f"Connection error: {e}", err=True)
+        for suggestion in e.suggestions:
+            click.echo(f"  - {suggestion}", err=True)
+        ctx.exit(1)
+    except Exception as e:
+        click.echo(f"Remote execution failed: {e}", err=True)
+        ctx.exit(1)
 
 
 # CLI Management Commands (these remain as separate commands)
