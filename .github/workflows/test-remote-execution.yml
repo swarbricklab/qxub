@@ -1,0 +1,116 @@
+name: Test Remote Execution
+
+on:
+  push:
+    branches: [ main, feature/v2.2-development ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-remote-execution:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install pytest
+
+    - name: Set up SSH for NCI Gadi
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.NCI_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        echo "${{ secrets.NCI_SSH_HOST_KEY }}" >> ~/.ssh/known_hosts
+
+        # Create SSH config for Gadi
+        cat >> ~/.ssh/config << EOF
+        Host gadi.nci.org.au
+          HostName gadi.nci.org.au
+          User ${{ secrets.NCI_USERNAME }}
+          IdentityFile ~/.ssh/id_ed25519
+          ServerAliveInterval 60
+          ServerAliveCountMax 3
+          ConnectTimeout 30
+          StrictHostKeyChecking yes
+        EOF
+
+    - name: Create test configuration
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      run: |
+        mkdir -p ~/.config/qxub
+        cat > ~/.config/qxub/config.yaml << EOF
+        remotes:
+          nci_gadi:
+            url: ssh://gadi.nci.org.au
+            qxub_env: ${{ secrets.NCI_QXUB_ENV || 'base' }}
+            platform_file: ${{ secrets.NCI_PLATFORM_FILE || '/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml' }}
+            project_root_dir: /scratch/\${PROJECT}/\${USER}/ci-test
+        EOF
+
+    - name: Test SSH connectivity
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      run: |
+        echo "Testing SSH connection to NCI Gadi..."
+        ssh -o ConnectTimeout=30 gadi.nci.org.au echo "SSH connection successful"
+
+    - name: Test remote qxub installation
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      env:
+        NCI_QXUB_ENV: ${{ secrets.NCI_QXUB_ENV || 'base' }}
+      run: |
+        echo "Testing remote qxub installation..."
+        ssh gadi.nci.org.au "source ~/.bashrc && conda activate $NCI_QXUB_ENV && qxub --version"
+
+    - name: Test platform file access
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      env:
+        NCI_PLATFORM_FILE: ${{ secrets.NCI_PLATFORM_FILE || '/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml' }}
+      run: |
+        echo "Testing platform file access..."
+        ssh gadi.nci.org.au "test -f '$NCI_PLATFORM_FILE' && echo 'Platform file exists' || echo 'Platform file not found'"
+
+    - name: Test remote execution (dry run)
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      env:
+        PROJECT: ${{ secrets.NCI_PROJECT || 'a56' }}
+      run: |
+        echo "Testing remote execution with dry run..."
+        qxub --remote nci_gadi --env base --dry -vv -- echo "Hello from CI"
+
+    - name: Test remote execution (actual)
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
+      env:
+        PROJECT: ${{ secrets.NCI_PROJECT || 'a56' }}
+      run: |
+        echo "Testing actual remote execution..."
+        qxub --remote nci_gadi --env base --queue copyq --walltime 00:01:00 -vv -- echo "Hello from CI remote execution"
+
+    - name: Skip remote tests (no credentials)
+      if: ${{ secrets.NCI_SSH_PRIVATE_KEY == '' }}
+      run: |
+        echo "Skipping remote execution tests - no SSH credentials configured"
+        echo "To enable remote testing, configure these GitHub secrets:"
+        echo "  - NCI_SSH_PRIVATE_KEY: SSH private key for NCI Gadi"
+        echo "  - NCI_SSH_HOST_KEY: Host key for gadi.nci.org.au"
+        echo "  - NCI_USERNAME: Your NCI username"
+        echo "  - NCI_PROJECT: Your NCI project (default: a56)"
+        echo "  - NCI_QXUB_ENV: Conda environment with qxub (default: base)"
+        echo "  - NCI_PLATFORM_FILE: Path to platform file (default: /g/data/a56/...)"
+        echo "  - ENABLE_ACTUAL_REMOTE_TEST: Set to 'true' to run actual jobs (optional)"
+
+    - name: Test local functionality
+      run: |
+        echo "Testing local qxub functionality..."
+        qxub --version
+        qxub --help
+        echo "Local tests completed successfully"
