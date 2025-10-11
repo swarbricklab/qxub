@@ -52,7 +52,11 @@ class RemoteExecutor(ABC):
 
     @abstractmethod
     def execute(
-        self, command: str, working_dir: str, stream_output: bool = True
+        self,
+        command: str,
+        working_dir: str,
+        stream_output: bool = True,
+        verbose: int = 0,
     ) -> int:
         """
         Execute command on remote system.
@@ -61,6 +65,7 @@ class RemoteExecutor(ABC):
             command: Command to execute
             working_dir: Remote working directory
             stream_output: Whether to stream output in real-time
+            verbose: Verbosity level for execution details
 
         Returns:
             Exit code from remote execution
@@ -89,15 +94,25 @@ class SSHRemoteExecutor(RemoteExecutor):
             )
 
     def execute(
-        self, command: str, working_dir: str, stream_output: bool = True
+        self,
+        command: str,
+        working_dir: str,
+        stream_output: bool = True,
+        verbose: int = 0,
     ) -> int:
         """Execute command via SSH."""
         ssh_command = self._build_ssh_command(command, working_dir)
 
+        # Log the command for debugging
         logger.info(
             f"Executing SSH command: {' '.join(ssh_command[:3])} ... (command truncated)"
         )
         logger.debug(f"Full SSH command: {ssh_command}")
+
+        # Show SSH command in verbose mode
+        if verbose >= 2:
+            print(f"� SSH connection: ssh {self.config.hostname}", file=sys.stderr)
+            print(f"�🔧 SSH command: {' '.join(ssh_command)}", file=sys.stderr)
 
         try:
             if stream_output:

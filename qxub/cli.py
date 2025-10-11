@@ -1258,11 +1258,26 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             click.echo(f"✅ SSH connection successful to {remote_config.hostname}")
 
         # Execute remotely (not dry-run, so actually execute)
+        if verbose >= 1:
+            click.echo(f"🚀 Executing remote command...")
+            if verbose >= 2:
+                click.echo(
+                    f"   SSH target: {remote_config.username}@{remote_config.hostname}"
+                    if remote_config.username
+                    else f"   SSH target: {remote_config.hostname}"
+                )
+                click.echo(f"   Working directory: {remote_working_dir}")
+
         try:
             exit_code = executor.execute(
-                qxub_command, remote_working_dir, stream_output=True
+                qxub_command, remote_working_dir, stream_output=True, verbose=verbose
             )
+            if verbose >= 1:
+                click.echo(f"✅ Remote execution completed with exit code: {exit_code}")
             ctx.exit(exit_code)
+        except click.exceptions.Exit:
+            # Re-raise Click's exit exceptions (this is normal behavior)
+            raise
         except Exception as e:
             click.echo(f"Remote execution failed: {e}", err=True)
             ctx.exit(1)
