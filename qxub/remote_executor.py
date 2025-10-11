@@ -178,9 +178,11 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Change to working directory
         commands.append(f"cd {working_dir}")
 
-        # Initialize conda and activate environment
-        # Source bashrc to ensure conda is available in non-interactive SSH
-        commands.append(f"source ~/.bashrc && conda activate {self.config.qxub_env}")
+        # Initialize conda properly for non-interactive shells
+        commands.append('eval "$(conda shell.bash hook)"')
+
+        # Activate conda environment
+        commands.append(f"conda activate {self.config.qxub_env}")
 
         # Set platform file environment variable
         # This tells qxub on the remote system which platform file to use
