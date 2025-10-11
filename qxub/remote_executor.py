@@ -265,21 +265,55 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Simple test command
         test_cmd.append("echo connection_test")
 
+        logger.debug(f"Testing SSH connection with command: {' '.join(test_cmd)}")
+
         try:
             result = subprocess.run(
                 test_cmd, capture_output=True, timeout=15, text=True
             )
-            return result.returncode == 0 and "connection_test" in result.stdout
+
+            if result.returncode == 0 and "connection_test" in result.stdout:
+                logger.debug(
+                    f"SSH connection test successful to {self.config.hostname}"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"SSH connection test failed to {self.config.hostname}: "
+                    f"returncode={result.returncode}, stdout='{result.stdout.strip()}', "
+                    f"stderr='{result.stderr.strip()}'"
+                )
+                # Store error details for better error messages
+                self._last_connection_error = {
+                    "returncode": result.returncode,
+                    "stdout": result.stdout.strip(),
+                    "stderr": result.stderr.strip(),
+                    "command": " ".join(test_cmd),
+                }
+                return False
 
         except subprocess.TimeoutExpired:
             logger.warning(f"SSH connection test timed out for {self.config.hostname}")
+            self._last_connection_error = {
+                "error": "timeout",
+                "message": "Connection timed out after 15 seconds",
+            }
             return False
         except FileNotFoundError:
             logger.error("SSH command not found")
+            self._last_connection_error = {
+                "error": "ssh_not_found",
+                "message": "SSH command not found. Please install OpenSSH client.",
+            }
             return False
         except Exception as e:
             logger.warning(f"SSH connection test failed: {e}")
+            self._last_connection_error = {"error": "exception", "message": str(e)}
             return False
+
+    def get_connection_error_details(self) -> dict:
+        """Get detailed information about the last connection failure."""
+        return getattr(self, "_last_connection_error", {})
 
     def test_remote_qxub(self) -> tuple[bool, str]:
         """

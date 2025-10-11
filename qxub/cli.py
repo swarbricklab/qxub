@@ -1110,6 +1110,21 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
             click.echo(f"🐍 Remote conda environment: {remote_config.qxub_env}")
             click.echo(f"📋 Platform file: {remote_config.platform_file}")
 
+            # Show SSH connection details if verbose >= 2
+            if verbose >= 2:
+                ssh_details = []
+                if remote_config.username:
+                    ssh_details.append(f"user={remote_config.username}")
+                if remote_config.port and remote_config.port != 22:
+                    ssh_details.append(f"port={remote_config.port}")
+                if remote_config.config:
+                    ssh_details.append(f"config={remote_config.config}")
+                else:
+                    ssh_details.append("config=~/.ssh/config (default)")
+
+                if ssh_details:
+                    click.echo(f"🔑 SSH details: {', '.join(ssh_details)}")
+
         # Build remote qxub command early (for verbose output)
         remote_args = []
 
@@ -1167,23 +1182,80 @@ def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
         # Create executor only if not dry-run
         executor = RemoteExecutorFactory.create(remote_config)
 
+        # Show connection attempt info if verbose
+        if verbose >= 1:
+            click.echo(f"🔗 Testing SSH connection to {remote_config.hostname}...")
+            if verbose >= 2:
+                connection_details = []
+                if remote_config.username:
+                    connection_details.append(f"User: {remote_config.username}")
+                if remote_config.port:
+                    connection_details.append(f"Port: {remote_config.port}")
+                if remote_config.config:
+                    connection_details.append(f"Config: {remote_config.config}")
+                if connection_details:
+                    click.echo(
+                        f"   Connection details: {', '.join(connection_details)}"
+                    )
+
         # Test connection
         if not executor.test_connection():
-            click.echo(f"Error: Cannot connect to {remote_config.hostname}", err=True)
-            click.echo("Suggestions:", err=True)
+            click.echo(
+                f"❌ Error: Cannot connect to {remote_config.hostname}", err=True
+            )
+
+            # Show detailed error information if available
+            if hasattr(executor, "get_connection_error_details"):
+                error_details = executor.get_connection_error_details()
+                if error_details:
+                    if "returncode" in error_details:
+                        click.echo(
+                            f"   SSH exit code: {error_details['returncode']}", err=True
+                        )
+                        if error_details["stderr"]:
+                            click.echo(
+                                f"   SSH error: {error_details['stderr']}", err=True
+                            )
+                        if verbose >= 2 and error_details["command"]:
+                            click.echo(
+                                f"   SSH command: {error_details['command']}", err=True
+                            )
+                    elif "error" in error_details:
+                        click.echo(f"   Error type: {error_details['error']}", err=True)
+                        if error_details.get("message"):
+                            click.echo(
+                                f"   Details: {error_details['message']}", err=True
+                            )
+
+            click.echo("💡 Suggestions:", err=True)
             if hasattr(executor, "config") and executor.config.protocol == "ssh":
                 click.echo(
-                    f"  - Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
+                    f"   • Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
                     err=True,
                 )
                 click.echo(
-                    "  - Verify network connectivity and VPN if required", err=True
+                    "   • Verify network connectivity and VPN if required", err=True
                 )
                 click.echo(
-                    f"  - Test connection: ssh {remote_config.hostname} echo 'test'",
+                    f"   • Test connection manually: ssh {remote_config.hostname} echo 'test'",
                     err=True,
+                )
+                if remote_config.username:
+                    click.echo(
+                        f"   • Test with explicit user: ssh {remote_config.username}@{remote_config.hostname} echo 'test'",
+                        err=True,
+                    )
+                click.echo(
+                    "   • Check SSH key permissions: chmod 600 ~/.ssh/id_*", err=True
+                )
+                click.echo(
+                    "   • Add verbose SSH debugging: ssh -vvv hostname", err=True
                 )
             ctx.exit(1)
+
+        # Show successful connection if verbose
+        if verbose >= 1:
+            click.echo(f"✅ SSH connection successful to {remote_config.hostname}")
 
         # Execute remotely (not dry-run, so actually execute)
         try:
