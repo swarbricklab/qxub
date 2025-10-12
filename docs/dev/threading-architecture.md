@@ -152,14 +152,15 @@ Waits:    shutdown_requested
 Lifecycle: Up to 10 seconds max, until output starts or job completes
 Purpose:  Show minimal progress indicator while waiting
 Signals:  spinner_cleared
-Waits:    output_started
+Waits:    output_started, shutdown_requested
 ```
 
+- Runs in its own daemon thread created by JobSpinner context manager
 - Displays minimal spinner animation (no message by default)
-- Runs for maximum 10 seconds in monitor thread context
+- Created when monitor thread enters `with JobSpinner(...)` context
 - Polls for `output_started` every 0.1 seconds
 - When output starts, clears spinner line and signals `spinner_cleared`
-- Automatically stops when job completes or timeout reached
+- Automatically stops when job completes, timeout reached, or context exits
 
 ## Thread Lifecycle
 
@@ -184,20 +185,23 @@ Here's the complete sequence from job submission to completion:
    ├── STDOUT tail thread created (target=tail, daemon=True)
    ├── STDERR tail thread created (target=tail, daemon=True)
    ├── Local signal handler registered for thread coordination
-   └── All threads started immediately
+   └── All threads started immediately (monitor, stdout, stderr)
 
 4. Monitor Activation
    ├── monitor_qstat waits for submission_complete event
    ├── submission_complete triggered by coordinator.signal_submission_complete()
-   ├── Monitor starts 10-second spinner with JobSpinner context manager
-   ├── After spinner timeout, monitor begins main polling loop
-   └── STDOUT/STDERR tail threads start following log files immediately
+   ├── Monitor enters JobSpinner context manager
+   ├── JobSpinner creates 4th thread (spinner daemon thread)
+   ├── Spinner thread animates while monitor sleeps for 10 seconds
+   ├── After timeout or output_started, spinner thread exits
+   ├── Monitor thread continues with main qstat polling loop
+   └── STDOUT/STDERR tail threads follow log files throughout
 
 5. Job Starts Running
    ├── Log files get first content (may happen during or after spinner)
    ├── Tail thread signals output_started on first line
    ├── Progress: "🚀 Job started running" (if job status is R)
-   ├── Spinner automatically clears if still running
+   ├── Spinner thread detects output_started and clears itself
    └── Output streams to terminal in real-time
 
 6. Job Completes
@@ -493,7 +497,7 @@ def test_thread_shutdown():
 
 ### Resource Usage
 
-- **3 threads maximum**: Monitor + 2 tails (spinner runs within monitor thread)
+- **4 threads maximum**: Monitor + 2 tails + spinner (spinner is short-lived daemon thread)
 - **Low CPU**: Threads mostly sleep/wait on I/O
 - **Memory**: Minimal - only line-by-line file reading
 - **Network**: Only qstat calls every 30 seconds
@@ -508,7 +512,7 @@ def test_thread_shutdown():
 ### Scalability
 
 The current design scales well because:
-- Thread count is fixed regardless of job size
+- Thread count is fixed at 4 maximum (3 persistent + 1 short-lived)
 - No thread pools or dynamic thread creation
 - Minimal shared state between threads
 - Clean shutdown prevents resource leaks

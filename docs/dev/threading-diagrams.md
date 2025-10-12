@@ -21,14 +21,15 @@ This document provides visual representations of the qxub threading architecture
                         ┌────────────────┼────────────────┐
                         ▼                ▼                ▼
               ┌─────────────────┐ ┌─────────────┐ ┌─────────────────┐
-              │  Monitor Thread │ │ Tail Threads│ │ Spinner (in     │
-              │                 │ │             │ │ Monitor Thread) │
-              │ Waits for       │ │ Follow logs │ │                 │
-              │ submission_     │ │ stream I/O  │ │ Shows brief     │
-              │ complete, then  │ │ immediately │ │ animation for   │
-              │ shows spinner   │ │             │ │ max 10 seconds  │
-              │ for 10s, then   │ │             │ │                 │
-              │ polls qstat     │ │             │ │                 │
+              │  Monitor Thread │ │ Tail Threads│ │ Monitor enters  │
+              │                 │ │             │ │ JobSpinner      │
+              │ Waits for       │ │ Follow logs │ │ context manager │
+              │ submission_     │ │ stream I/O  │ │                 │
+              │ complete, then  │ │ immediately │ │ Creates 4th     │
+              │ creates spinner │ │             │ │ thread (daemon) │
+              │ thread via      │ │             │ │                 │
+              │ context manager │ │             │ │ Spinner shows   │
+              │ then polls qstat│ │             │ │ for max 10s     │
               └─────────────────┘ └─────────────┘ └─────────────────┘
                         │                │                │
                         │                │                │
@@ -44,10 +45,10 @@ This document provides visual representations of the qxub threading architecture
                │        │                │
                │        │                ▼
                │        │     ┌─────────────────────┐
-               │        │     │ Clear Spinner      │
-               │        │     │                     │
-               │        │     │ Signal output_started
-               │        │     │ Continue streaming  │
+               │        │     │ Spinner Thread     │
+               │        │     │ detects output_    │
+               │        │     │ started, clears    │
+               │        │     │ itself and exits   │
                │        │     └─────────────────────┘
                │        │                │
                ▼        │                ▼
@@ -89,7 +90,7 @@ This document provides visual representations of the qxub threading architecture
 
 ```
 User    execution.py  Monitor    STDOUT     STDERR     Spinner      Coordinator
- │        │             │          │          │        (in Monitor)      │
+ │        │             │          │          │        Thread            │
  │  cmd   │             │          │          │          │               │
  ├────────►             │          │          │          │               │
  │        │ create      │          │          │          │               │
@@ -103,15 +104,20 @@ User    execution.py  Monitor    STDOUT     STDERR     Spinner      Coordinator
  │        │ signal_submission_complete()       │          │               │
  │        ├─────────────┼──────────┼──────────┼──────────┼───────────────►
  │        │             │          │          │          │               │
- │        │             │ wait &   │          │          │ show spinner  │
- │        │             │ spinner  │          │          │ (max 10s)     │
- │        │             ├─ ─ ─ ─ ─ ┤          │          ├─ ─ ─ ─ ─ ─ ─ ┤
- │        │             │ poll     │ follow   │ follow   │               │
- │        │             │ qstat    │ out.log  │ err.log  │               │
- │        │             ├─ ─ ─ ─ ─ ┤─ ─ ─ ─ ─ ┤─ ─ ─ ─ ─ ┤               │
+ │        │             │ enter    │          │          │               │
+ │        │             │ JobSpinner          │          │               │
+ │        │             │ context  │          │          │               │
+ │        │             ├─ ─ ─ ─ ─ ┤          │          │               │
+ │        │             │          │          │          │ create &      │
+ │        │             │          │          │          │ start         │
+ │        │             │          │          │          ├───────────────►
+ │        │             │ sleep    │ follow   │ follow   │ animate       │
+ │        │             │ 10s      │ out.log  │ err.log  │ spinner       │
+ │        │             ├─ ─ ─ ─ ─ ┤─ ─ ─ ─ ─ ┤─ ─ ─ ─ ─ ┤─ ─ ─ ─ ─ ─ ─ ┤
  │        │             │          │          │          │               │
  │        │             │          │ output!  │          │               │
  │        │             │          ├──────────┼──────────┼───────────────►
+ │        │             │          │          │          │ detect &      │
  │        │             │          │          │          │ clear         │
  │        │             │          │          │          ├─ ─ ─ ─ ─ ─ ─ ┤
  │◄───────┼─────────────┼──────────┤          │          │               │
@@ -134,19 +140,20 @@ User    execution.py  Monitor    STDOUT     STDERR     Spinner      Coordinator
 ## Event Timeline
 
 ```
-Time →   0s        30s       60s       90s      120s     150s
-         │         │         │         │         │         │
-         │         │         │         │         │         │
-Monitor: ├─polling─┼─polling─┼─polling─┼─complete┼─cleanup─┼─exit
-         │         │         │         │         │         │
-STDOUT:  ├─waiting─┼─waiting─┼─output──┼─stream──┼─stream──┼─EOF
-         │         │         │         │         │         │
-STDERR:  ├─waiting─┼─waiting─┼─waiting─┼─waiting─┼─errors──┼─EOF
-         │         │         │         │         │         │
-Spinner: ├─active──┼─active──┼─clear───┼─────────┼─────────┼─────
-         │         │         │         │         │         │
-Events:  │         │         │ output_ │ job_    │         │ eof_
-         │         │         │ started │ complete│         │ detected
+Time →   0s        10s       30s       60s       90s      120s     150s
+         │         │         │         │         │         │         │
+         │         │         │         │         │         │         │
+Monitor: ├─wait────┼─sleep───┼─polling─┼─polling─┼─complete┼─cleanup─┼─exit
+         │         │         │         │         │         │         │
+STDOUT:  ├─waiting─┼─waiting─┼─waiting─┼─output──┼─stream──┼─stream──┼─EOF
+         │         │         │         │         │         │         │
+STDERR:  ├─waiting─┼─waiting─┼─waiting─┼─waiting─┼─waiting─┼─errors──┼─EOF
+         │         │         │         │         │         │         │
+Spinner: ├─────────┼─active──┼─clear───┼─────────┼─────────┼─────────┼─────
+         │         │         │         │         │         │         │
+Events:  │         │ submit_ │ timeout │ output_ │ job_    │         │ eof_
+         │         │ complete│ or      │ started │ complete│         │ detected
+         │         │         │ output  │         │         │         │
 ```
 
 ## Control Flow for Different Scenarios
@@ -155,8 +162,9 @@ Events:  │         │         │ output_ │ job_    │         │ eof_
 
 ```
 Job Submit → start_job_monitoring() → Signal submission_complete →
-Monitor waits → Brief Spinner (10s max) → Start qstat polling →
-Output Start → Clear Spinner → Stream Output → Job Complete →
+Monitor waits → Create Spinner Thread → Monitor sleeps 10s →
+Spinner animates → Output starts OR timeout → Spinner exits →
+Monitor starts qstat polling → Stream Output → Job Complete →
 Get Exit Code → wait_for_completion() returns → Exit with Job Status
 ```
 
@@ -179,7 +187,7 @@ Get Exit Code (1) → Signal Threads → Cleanup → Exit 1
 ### Scenario 4: Job Never Starts (Queue Wait)
 
 ```
-Job Submit → start_job_monitoring() → Monitor Start → Brief Spinner (10s) →
+Job Submit → start_job_monitoring() → Monitor Start → Create Spinner Thread →
 Poll Status (Q) → Continue Polling → Poll Status (Q) → ... →
 Eventually Starts or User Interrupts
 ```
@@ -195,7 +203,7 @@ Eventually Starts or User Interrupts
 | STDERR     | output_started           | shutdown_requested     | err.log file         |
 |            | eof_detected             |                        |                      |
 | Spinner    | spinner_cleared          | output_started         | None (just displays) |
-| (in Monitor)| (via JobSpinner)        | shutdown_requested     | (max 10s timeout)    |
+| (daemon)   | (via JobSpinner)         | shutdown_requested     | (created by monitor) |
 
 ## Memory and Resource Usage
 
@@ -207,7 +215,6 @@ Eventually Starts or User Interrupts
 │ └─────────────┘ │
 │ ┌─────────────┐ │ ≈ 8KB each thread
 │ │Monitor Thread│ │ (minimal stack)
-│ │ + Spinner   │ │ (spinner context in same thread)
 │ └─────────────┘ │
 │ ┌─────────────┐ │
 │ │STDOUT Thread│ │
@@ -215,10 +222,14 @@ Eventually Starts or User Interrupts
 │ ┌─────────────┐ │
 │ │STDERR Thread│ │
 │ └─────────────┘ │
+│ ┌─────────────┐ │ ≈ 8KB (short-lived)
+│ │Spinner Thread│ │ (daemon, max 10s)
+│ │  (optional) │ │ (created by monitor)
+│ └─────────────┘ │
 └─────────────────┘
 ```
 
-Total memory overhead: ~24KB for threading system (negligible)
+Total memory overhead: ~32KB for threading system (negligible)
 
 ## Error Propagation Flow
 
