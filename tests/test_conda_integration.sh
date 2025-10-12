@@ -152,50 +152,50 @@ cleanup_test_env() {
 test_basic_conda() {
     log_info "=== Testing Basic Conda Functionality ==="
 
-    # Test 1: Basic conda command with minimal options
-    run_test "Basic conda command" \
-        "qxub conda --env base echo 'Hello World'" \
-        0
+        # Test 1: Basic command
+    run_integration_test "Basic command" \
+        "qxub --env base -- echo 'Hello World'" \
+        1
 
-    # Test 2: Conda with all basic PBS options
-    run_test "Conda with full PBS options" \
-        "qxub --name test-job --resources walltime=00:15:00 --resources mem=2GB --resources ncpus=1 --project a56 --queue normal conda --env base echo 'Full options'" \
-        0
+    # Test 2: All main options
+    run_integration_test "All main options" \
+        "qxub --name test-job --resources walltime=00:15:00 --resources mem=2GB --resources ncpus=1 --project a56 --queue normal --env base -- echo 'Full options'" \
+        1
 
-    # Test 3: Conda with storage option (using resources)
-    run_test "Conda with storage" \
-        "qxub --resources storage='scratch/a56+gdata/a56' conda --env base echo 'Storage test'" \
-        0
+    # Test 3: Storage resources
+    run_integration_test "Storage resources" \
+        "qxub --resources storage='scratch/a56+gdata/a56' --env base -- echo 'Storage test'" \
+        1
 
-    # Test 4: Conda with walltime variations
-    run_test "Conda with hours:minutes format" \
-        "qxub --resources walltime=1:30 conda --env base echo 'Time format test'" \
-        0
+    # Test 4: Time format variations
+    run_integration_test "Time format variations" \
+        "qxub --resources walltime=1:30 --env base -- echo 'Time format test'" \
+        1
 
-    # Test 5: Conda with memory variations
-    run_test "Conda with MB memory" \
-        "qxub --resources mem=2048MB conda --env base echo 'Memory format test'" \
-        0
+    # Test 5: Memory format variations
+    run_integration_test "Memory format variations" \
+        "qxub --resources mem=2048MB --env base -- echo 'Memory format test'" \
+        1
 }
 
 # Test config integration
 test_config_integration() {
     log_info "=== Testing Config Integration ==="
 
-    # Test 6: Using defaults from config
-    run_test "Config defaults" \
-        "qxub conda --env base echo 'Config defaults test'" \
-        0
+        # Test 6: Config defaults only
+    run_integration_test "Config defaults only" \
+        "qxub --env base -- echo 'Config defaults test'" \
+        1
 
-    # Test 7: Overriding config defaults
-    run_test "Override config defaults" \
-        "qxub --name override-test --resources walltime=00:45:00 conda --env base echo 'Override test'" \
-        0
+    # Test 7: Partial config override
+    run_integration_test "Partial config override" \
+        "qxub --name override-test --resources walltime=00:45:00 --env base -- echo 'Override test'" \
+        1
 
-    # Test 8: Partial override (some from config, some from CLI)
-    run_test "Partial config override" \
-        "qxub --resources mem=6GB conda --env base echo 'Partial override test'" \
-        0
+    # Test 8: Multiple config overrides
+    run_integration_test "Multiple config overrides" \
+        "qxub --resources mem=6GB --env base -- echo 'Partial override test'" \
+        1
 }
 
 # Test alias functionality
@@ -239,17 +239,17 @@ test_edge_cases() {
 
     # Test 15: Invalid environment name
     run_test "Invalid environment" \
-        "qxub conda --env nonexistent-env echo 'Invalid env'" \
+        "qxub --env nonexistent-env -- echo 'Invalid env'" \
         0  # Should succeed but might warn
 
     # Test 16: Invalid time format (should fail)
     run_test "Invalid time format" \
-        "qxub --resources walltime=invalid-time conda --env base echo 'Bad time'" \
+        "qxub --resources walltime=invalid-time --env base -- echo 'Bad time'" \
         2
 
     # Test 17: Invalid memory format (should fail)
     run_test "Invalid memory format" \
-        "qxub --resources mem=invalid-mem conda --env base echo 'Bad memory'" \
+        "qxub --resources mem=invalid-mem --env base -- echo 'Bad memory'" \
         2
 
     # Test 18: Non-existent alias (should fail)
@@ -259,7 +259,7 @@ test_edge_cases() {
 
     # Test 19: Empty command (should fail)
     run_test "Empty command" \
-        "qxub conda --env base" \
+        "qxub --env base --" \
         2
 }
 
@@ -269,27 +269,27 @@ test_complex_scenarios() {
 
     # Test 20: Long command with pipes and redirects
     run_test "Complex command with pipes" \
-        "qxub conda --env base 'echo \"test data\" | wc -l > output.txt && cat output.txt'" \
+        "qxub --env base -- 'echo \"test data\" | wc -l > output.txt && cat output.txt'" \
         0
 
     # Test 21: Command with quotes and special characters
     run_test "Command with special characters" \
-        "qxub conda --env base 'python -c \"print(\\\"Hello, World!\\\")\"'" \
+        "qxub --env base -- 'python -c \"print(\\\"Hello, World!\\\")\"'" \
         0
 
     # Test 22: Multi-line command
     run_test "Multi-line command" \
-        "qxub conda --env base 'echo \"Line 1\" && echo \"Line 2\" && echo \"Line 3\"'" \
+        "qxub --env base -- 'echo \"Line 1\" && echo \"Line 2\" && echo \"Line 3\"'" \
         0
 
     # Test 23: Command with environment variables
     run_test "Command with env vars" \
-        "qxub conda --env base 'export TEST_VAR=hello && echo \$TEST_VAR'" \
+        "qxub --env base -- 'export TEST_VAR=hello && echo \$TEST_VAR'" \
         0
 
     # Test 24: Resource-intensive simulation
     run_test "Resource intensive job" \
-        "qxub --resources walltime=00:05:00 --resources mem=1GB --resources ncpus=2 conda --env base 'python -c \"import time; time.sleep(1); print(\\\"Resource test\\\")\"'" \
+        "qxub --resources walltime=00:05:00 --resources mem=1GB --resources ncpus=2 --env base -- 'python -c \"import time; time.sleep(1); print(\\\"Resource test\\\")\"'" \
         0
 }
 

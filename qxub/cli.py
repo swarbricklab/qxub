@@ -459,6 +459,8 @@ def qxub(
             execute_module(ctx, command, module_list, template, pre, post)
         elif context_type == "singularity":
             execute_singularity(ctx, command, container, bind, template, pre, post)
+        elif context_type == "default":
+            execute_default(ctx, command, template, pre, post)
     elif command:
         # No execution context but command provided - use default template
         execute_default(ctx, command, template, pre, post)
