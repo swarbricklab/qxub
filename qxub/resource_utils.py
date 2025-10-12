@@ -7,7 +7,7 @@ and resource requirement expressions for queue selection and validation.
 
 import logging
 import re
-from typing import Optional, Union
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -255,8 +255,6 @@ def evaluate_condition(condition: str, resources: dict) -> bool:
     except Exception as e:
         logger.warning(f"Error evaluating condition '{condition}': {e}")
         return False
-
-    return False
 
 
 def suggest_resource_adjustment(

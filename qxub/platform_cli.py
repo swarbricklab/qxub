@@ -20,12 +20,7 @@ from .platform import (
     list_platforms,
     select_best_queue,
 )
-from .resource_utils import (
-    format_memory_size,
-    format_walltime,
-    parse_memory_size,
-    parse_walltime,
-)
+from .resource_utils import format_walltime, parse_memory_size, parse_walltime
 
 
 @click.group(name="platform")

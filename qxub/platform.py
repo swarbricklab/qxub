@@ -18,15 +18,12 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
 from .resource_utils import (
-    compare_memory,
-    compare_walltime,
     evaluate_condition,
-    format_memory_size,
     format_walltime,
     parse_memory_size,
     parse_walltime,
@@ -232,12 +229,6 @@ class Platform:
         # Fallback to first available queue
         queues = list(self.queues.keys())
         return queues[0] if queues else None
-        for rule in self.auto_selection_rules:
-            if rule.is_default:
-                return rule.queue
-
-        # Fallback to first queue
-        return next(iter(self.queues.keys())) if self.queues else None
 
     def validate_queue_resources(
         self, queue_name: str, resources: Dict[str, Any]

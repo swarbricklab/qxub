@@ -8,7 +8,7 @@ This module provides functions to parse PBS resource formats from qstat -fx outp
 """
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 

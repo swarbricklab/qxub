@@ -16,7 +16,7 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import IO, Any, List, Optional
+from typing import Any, List, Optional
 
 from .remote_config import RemoteConfig
 

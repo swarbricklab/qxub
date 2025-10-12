@@ -69,7 +69,7 @@ if not output_started and coordinator:
 if not output_started and coordinator:
     coordinator.signal_output_started()
     # Clear spinner line immediately
-    print("\r" + " " * 120 + "\r", end="", flush=True)
+    print(" " * 120, end="", flush=True)
     coordinator.signal_spinner_cleared()
     output_started = True
 ```

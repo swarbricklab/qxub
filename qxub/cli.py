@@ -35,7 +35,7 @@ def _signal_handler(signum, frame):
     # pylint: disable=unused-argument
     if _CURRENT_JOB_ID:
         # Clear the current line completely before printing cleanup messages
-        print("\r" + " " * 100 + "\r", end="", flush=True)
+        print(" " * 100, end="", flush=True)
         print("🛑 Interrupted! Cleaning up job...")
         success = qdel(_CURRENT_JOB_ID, quiet=False)
         if success:

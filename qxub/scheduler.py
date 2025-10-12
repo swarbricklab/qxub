@@ -78,10 +78,10 @@ def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
     if final:
         # Final message - print normally and move to next line
-        print(f"\r{message}" + " " * 20)
+        print(f"{message}")
     else:
         # Temporary message - overwrite without newline
-        print(f"\r{message}", end="", flush=True)
+        print(f"{message}", end="", flush=True)
 
 
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
@@ -110,7 +110,7 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
             char = self.spinner_chars[i % len(self.spinner_chars)]
             if self.show_message:
                 line = f"{self.message} {char}"
-                print(f"\r{line}", end="", flush=True)
+                print(f"{line}", end="", flush=True)
                 self.original_line_len = len(line)
             else:
                 print(f" {char}", end="", flush=True)
@@ -120,7 +120,7 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
     def _clear_spinner(self):
         """Clear the spinner line"""
         clear_line = " " * (self.original_line_len + 5)
-        print(f"\r{clear_line}\r", end="", flush=True)
+        print(f"{clear_line}", end="", flush=True)
 
     def __enter__(self):
         if not self.quiet:
