@@ -17,12 +17,13 @@ qxub config --help  # Management command
 qxub --env myenv -- python script.py
 qxub --mods python3,gcc -- make
 qxub --sif container.sif -- python script.py
+qxub --default -- echo "hello world"  # Default execution (no special environment)
 qxub config --help  # Management command (unchanged)
 ```
 
 ## The Challenge
 
-Click's argument parsing was designed for traditional subcommand patterns. When we tried to implement both execution options (`--env`, `--mod`, `--sif`) and management subcommands in the same group, we encountered:
+Click's argument parsing was designed for traditional subcommand patterns. When we tried to implement both execution options (`--env`, `--mod`, `--sif`, `--default`) and management subcommands in the same group, we encountered:
 
 1. **Argument Capture Conflicts**: Using `@click.argument("command", nargs=-1)` captured everything, preventing Click from recognizing subcommands
 2. **Subcommand Resolution Issues**: Click tried to resolve execution commands (like `echo`) as subcommands, causing "No such command" errors
@@ -166,3 +167,23 @@ invoke(): standard Click subcommand handling
 
 ---
 *This solution was developed during the qxub 2.0 migration (October 2024) to resolve Click framework limitations with hybrid command interfaces.*
+
+## v2.2 Enhancement: Explicit Default Execution
+
+In v2.2 (October 2025), the solution was further simplified by requiring an explicit `--default` flag for default execution:
+
+```bash
+# v2.0-2.1 (ambiguous)
+qxub -- echo "hello"  # Could be confusing
+
+# v2.2+ (explicit)
+qxub --default -- echo "hello"  # Clear intent
+```
+
+**Benefits:**
+- **Eliminates ambiguity**: No more protected_args fallback logic needed
+- **Cleaner code**: Simplified `get_command()` and `invoke()` methods
+- **Better UX**: Users must be explicit about execution intent
+- **Consistent syntax**: All execution requires a flag (`--env`, `--mod`, `--sif`, `--default`)
+
+This change makes the CLI more predictable and the codebase more maintainable.
