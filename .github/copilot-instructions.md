@@ -4,6 +4,29 @@
 
 qxub is a sophisticated PBS job submission wrapper for HPC environments that eliminates boilerplate when running jobs in conda environments, with modules, or in containers. The codebase follows a unified CLI architecture with execution contexts, intelligent queue selection, and comprehensive configuration management.
 
+## Documentation Management
+
+### Essential Documentation Practices
+- **Always refer to existing documentation first**: Check `README.md`, `docs/examples.md`, and `docs/configuration.md` before making changes
+- **Keep documentation current**: Update relevant docs when adding features or changing behavior
+- **Avoid documentation bloat**: Keep all documentation concise and user-focused
+- **Maintain the 80/20 rule**: Cover 80% of use cases in 20% of the documentation space
+
+### Documentation Structure (Keep Lean)
+- `README.md` - Quick start guide (keep under 60 lines)
+- `docs/examples.md` - Common usage patterns with code examples
+- `docs/configuration.md` - Config system essentials only
+- `docs/aliases.md` - Alias usage patterns
+- `docs/platform_configuration.md` - HPC platform setup
+- `docs/remote-execution.md` - SSH execution guide
+- `docs/option-placement.md` - CLI reference
+
+### Documentation Update Guidelines
+- **New features**: Add 1-2 examples to `docs/examples.md`, update README if core functionality
+- **Configuration changes**: Update `docs/configuration.md` with essential info only
+- **CLI changes**: Update `docs/option-placement.md` and README options table
+- **Never add**: Implementation details, verbose explanations, or duplicate information
+
 ## Key Architecture Patterns
 
 ### Unified CLI Structure
@@ -82,6 +105,7 @@ cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 - **Virtual environment**: Always activate the qxub virtual environment before development
 - **Environment verification**: Check `qxub --version` to ensure correct installation
 - **Terminal sessions**: Activate environment in each new terminal session
+- **Documentation first**: Always read relevant docs before implementing features
 
 ```bash
 # Activate virtual environment (adjust path as needed)
@@ -91,6 +115,12 @@ source /path/to/qxub-venv/bin/activate
 qxub --version
 which qxub
 ```
+
+### Documentation Workflow
+- **Before coding**: Read `README.md` and relevant `docs/*.md` files to understand existing patterns
+- **During development**: Note any documentation that needs updating
+- **After implementation**: Update affected documentation immediately
+- **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
 
 ### Code Style
 - **Black formatting**: Line length 88, Python 3.10+ target
