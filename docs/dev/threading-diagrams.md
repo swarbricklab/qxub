@@ -143,16 +143,18 @@ User    execution.py  Monitor    STDOUT     STDERR     Spinner      Coordinator
 Time →   0s        10s       30s       60s       90s      120s     150s
          │         │         │         │         │         │         │
          │         │         │         │         │         │         │
-Monitor: ├─wait────┼─sleep───┼─polling─┼─polling─┼─complete┼─cleanup─┼─exit
+Monitor: ├─wait────┼─polling─┼─polling─┼─polling─┼─complete┼─cleanup─┼─exit
          │         │         │         │         │         │         │
 STDOUT:  ├─waiting─┼─waiting─┼─waiting─┼─output──┼─stream──┼─stream──┼─EOF
          │         │         │         │         │         │         │
 STDERR:  ├─waiting─┼─waiting─┼─waiting─┼─waiting─┼─waiting─┼─errors──┼─EOF
          │         │         │         │         │         │         │
-Spinner: ├─────────┼─active──┼─clear───┼─────────┼─────────┼─────────┼─────
-         │         │         │         │         │         │         │
-Events:  │         │ submit_ │ timeout │ output_ │ job_    │         │ eof_
-         │         │ complete│ or      │ started │ complete│         │ detected
+Spinner: ├─────────┼─active──┼─status──┼─────────┼─────────┼─────────┼─────
+         │         │         │ change  │         │         │         │
+         │         │         │ detected│         │         │         │
+Events:  │         │ submit_ │ job_    │ output_ │ job_    │         │ eof_
+         │         │ complete│ running │ started │ complete│         │ detected
+         │         │         │ OR      │         │         │         │
          │         │         │ output  │         │         │         │
 ```
 
@@ -162,10 +164,10 @@ Events:  │         │ submit_ │ timeout │ output_ │ job_    │        
 
 ```
 Job Submit → start_job_monitoring() → Signal submission_complete →
-Monitor waits → Create Spinner Thread → Monitor sleeps 10s →
-Spinner animates → Output starts OR timeout → Spinner exits →
-Monitor starts qstat polling → Stream Output → Job Complete →
-Get Exit Code → wait_for_completion() returns → Exit with Job Status
+Monitor waits → Create Spinner Thread → Monitor starts qstat polling →
+Spinner animates until status change → Job status becomes "R" →
+Monitor signals job_running → Spinner exits → Stream Output →
+Job Complete → Get Exit Code → wait_for_completion() returns → Exit with Job Status
 ```
 
 ### Scenario 2: User Interruption (Ctrl-C)
@@ -188,8 +190,8 @@ Get Exit Code (1) → Signal Threads → Cleanup → Exit 1
 
 ```
 Job Submit → start_job_monitoring() → Monitor Start → Create Spinner Thread →
-Poll Status (Q) → Continue Polling → Poll Status (Q) → ... →
-Eventually Starts or User Interrupts
+Poll Status & Signal Changes → Status becomes "R" → Signal job_running →
+Spinner exits → Continue Polling → Eventually Completes
 ```
 
 ## Thread Communication Matrix
@@ -197,13 +199,17 @@ Eventually Starts or User Interrupts
 | Thread     | Signals                  | Waits For              | Reads From           |
 |------------|--------------------------|------------------------|----------------------|
 | Monitor    | job_completed            | submission_complete    | qstat commands       |
-|            | job_exit_status          | shutdown_requested     |                      |
+|            | job_running              | shutdown_requested     |                      |
+|            | job_finished             |                        |                      |
+|            | job_exit_status          |                        |                      |
 | STDOUT     | output_started           | shutdown_requested     | out.log file         |
 |            | eof_detected             |                        |                      |
 | STDERR     | output_started           | shutdown_requested     | err.log file         |
 |            | eof_detected             |                        |                      |
-| Spinner    | spinner_cleared          | output_started         | None (just displays) |
-| (daemon)   | (via JobSpinner)         | shutdown_requested     | (created by monitor) |
+| Spinner    | spinner_cleared          | job_running            | None (just displays) |
+| (daemon)   | (via JobSpinner)         | job_finished           | (created by monitor) |
+|            |                          | output_started         |                      |
+|            |                          | shutdown_requested     |                      |
 
 ## Memory and Resource Usage
 

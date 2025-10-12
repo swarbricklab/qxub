@@ -149,18 +149,22 @@ Waits:    shutdown_requested
 
 #### 4. Spinner Thread (`JobSpinner._spin`)
 ```
-Lifecycle: Up to 10 seconds max, until output starts or job completes
+Lifecycle: Until job status changes or output starts
 Purpose:  Show minimal progress indicator while waiting
 Signals:  spinner_cleared
-Waits:    output_started, shutdown_requested
+Waits:    output_started, job_running, job_finished, shutdown_requested
 ```
 
 - Runs in its own daemon thread created by JobSpinner context manager
 - Displays minimal spinner animation (no message by default)
 - Created when monitor thread enters `with JobSpinner(...)` context
-- Polls for `output_started` every 0.1 seconds
-- When output starts, clears spinner line and signals `spinner_cleared`
-- Automatically stops when job completes, timeout reached, or context exits
+- Checks for stopping conditions every 0.1 seconds via `should_stop_spinner()`
+- Stops automatically when:
+  - Output starts (tail threads signal `output_started`)
+  - Job starts running (monitor signals `job_running`)
+  - Job finishes/fails (monitor signals `job_finished`)
+  - Shutdown requested (Ctrl-C)
+- Event-driven design eliminates arbitrary timeouts
 
 ## Thread Lifecycle
 
@@ -190,18 +194,20 @@ Here's the complete sequence from job submission to completion:
 4. Monitor Activation
    ├── monitor_qstat waits for submission_complete event
    ├── submission_complete triggered by coordinator.signal_submission_complete()
-   ├── Monitor enters JobSpinner context manager
-   ├── JobSpinner creates 4th thread (spinner daemon thread)
-   ├── Spinner thread animates while monitor sleeps for 10 seconds
-   ├── After timeout or output_started, spinner thread exits
-   ├── Monitor thread continues with main qstat polling loop
+   ├── Monitor creates JobSpinner context (creates 4th thread - spinner daemon)
+   ├── Monitor begins event-driven qstat polling loop
+   ├── Spinner animates until job status change or output detected
+   ├── Monitor signals job_running when status becomes "R"
+   ├── Monitor signals job_finished when status becomes "F" or "H"
    └── STDOUT/STDERR tail threads follow log files throughout
 
 5. Job Starts Running
-   ├── Log files get first content (may happen during or after spinner)
+   ├── Monitor detects status change from qstat polling
+   ├── Monitor signals job_running event to coordinator
+   ├── Spinner thread detects job_running via should_stop_spinner() and exits
+   ├── Log files get first content (around same time or after)
    ├── Tail thread signals output_started on first line
-   ├── Progress: "🚀 Job started running" (if job status is R)
-   ├── Spinner thread detects output_started and clears itself
+   ├── Progress: "🚀 Job started running" displayed by monitor
    └── Output streams to terminal in real-time
 
 6. Job Completes

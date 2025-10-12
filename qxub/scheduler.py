@@ -38,6 +38,9 @@ class OutputCoordinator:
         self.submission_complete = (
             threading.Event()
         )  # New event for submission completion
+        # New events for job status changes
+        self.job_running = threading.Event()  # Job status changed to Running
+        self.job_finished = threading.Event()  # Job status changed to Finished/Held
         self.job_exit_status = None  # Store the job's exit status
 
     def signal_output_started(self):
@@ -84,6 +87,24 @@ class OutputCoordinator:
         """Called by monitor thread to wait for submission to complete."""
         return self.submission_complete.wait(timeout)
 
+    def signal_job_running(self):
+        """Called when job status changes to Running."""
+        self.job_running.set()
+
+    def signal_job_finished(self):
+        """Called when job status changes to Finished or Held."""
+        self.job_finished.set()
+
+    def should_stop_spinner(self):
+        """Check if spinner should stop due to any relevant event."""
+        return (
+            self.output_started.is_set()
+            or self.job_running.is_set()
+            or self.job_finished.is_set()
+            or self.shutdown_requested.is_set()
+            or self.job_completed.is_set()
+        )
+
 
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
@@ -121,8 +142,8 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
         """Run the spinner animation"""
         i = 0
         while self.spinning:
-            # Check if output has started and we need to clear
-            if self.coordinator and self.coordinator.wait_for_output_started(timeout=0):
+            # Check if any event requires stopping the spinner
+            if self.coordinator and self.coordinator.should_stop_spinner():
                 self._clear_spinner()
                 self.coordinator.signal_spinner_cleared()
                 break
@@ -620,71 +641,77 @@ def job_status(job_id):
 
 def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """
-    Monitors for job completion by checking job status periodically
+    Monitors for job completion by checking job status periodically.
+    Now uses event-driven spinner control.
     """
     logging.debug("Starting job monitoring with initial check")
 
-    # Track if we've already notified about job start
+    # Track job state
     job_started_notified = False
+    last_status = None
 
-    # Do an immediate check for job status
-    if not quiet:
-        status = job_status(job_id)
-        if status == "R":
-            from qxub.execution import print_status
-
-            print_status("🚀 Job started running", final=True)
-            job_started_notified = True
-
-    # Wait for job submission to complete before starting spinner
+    # Wait for job submission to complete before starting
     if coordinator:
         coordinator.wait_for_submission_complete()
 
-    # Start spinner immediately once submission is complete
-    logging.debug("Starting spinner and monitoring loop")
+    # Start event-driven spinner - it will stop automatically on status changes
+    logging.debug("Starting event-driven spinner and monitoring loop")
 
-    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
-        time.sleep(10)  # Monitor for 10 seconds
+    # Create spinner thread that responds to events, not timeouts
+    spinner_context = JobSpinner(
+        "", show_message=False, quiet=quiet, coordinator=coordinator
+    )
+    spinner_context.__enter__()
 
-    logging.debug("Entering main job monitoring loop")
-
-    logging.debug("Entering main job monitoring loop")
-
-    while True:
-        # Check if we should shutdown early
-        if coordinator and coordinator.should_shutdown():
-            logging.info("Monitor shutdown requested")
-            return
-
-        status = job_status(job_id)
-
-        # Check for job started (running state)
-        if status == "R" and not job_started_notified and not quiet:
-            from qxub.execution import print_status
-
-            print_status("🚀 Job started running", final=True)
-            job_started_notified = True
-
-        if status in ["F", "H"]:  # Check for job completion
-            logging.info("Job %s completed with status %s", job_id, status)
-            if coordinator:
-                coordinator.signal_job_completed()
-
-            # Wait for PBS cleanup and get exit status
-            logging.info("Waiting for PBS cleanup and getting exit status...")
-            exit_status = wait_for_job_exit_status(job_id)
-            if coordinator:
-                coordinator.job_exit_status = exit_status
-            return exit_status
-
-        logging.debug("Job %s still running", job_id)
-
-        # Sleep in smaller intervals so we can respond to shutdown requests
-        for _ in range(6):  # 6 * 5 = 30 seconds total
+    try:
+        while True:
+            # Check if we should shutdown early
             if coordinator and coordinator.should_shutdown():
-                logging.info("Monitor shutdown during sleep")
-                return 0  # Return success if interrupted
-            time.sleep(5)
+                logging.info("Monitor shutdown requested")
+                return
+
+            status = job_status(job_id)
+
+            # Signal status changes to coordinator for spinner control
+            if status != last_status:
+                logging.debug(f"Job status changed from {last_status} to {status}")
+
+                if status == "R":  # Job started running
+                    if coordinator:
+                        coordinator.signal_job_running()
+                    if not job_started_notified and not quiet:
+                        from qxub.execution import print_status
+
+                        print_status("🚀 Job started running", final=True)
+                        job_started_notified = True
+
+                elif status in ["F", "H"]:  # Job finished or held
+                    if coordinator:
+                        coordinator.signal_job_finished()
+                        coordinator.signal_job_completed()
+
+                    # Wait for PBS cleanup and get exit status
+                    logging.info("Job %s completed with status %s", job_id, status)
+                    logging.info("Waiting for PBS cleanup and getting exit status...")
+                    exit_status = wait_for_job_exit_status(job_id)
+                    if coordinator:
+                        coordinator.job_exit_status = exit_status
+                    return exit_status
+
+                last_status = status
+
+            logging.debug("Job %s status: %s", job_id, status)
+
+            # Sleep in smaller intervals so we can respond to shutdown requests
+            for _ in range(6):  # 6 * 5 = 30 seconds total
+                if coordinator and coordinator.should_shutdown():
+                    logging.info("Monitor shutdown during sleep")
+                    return 0  # Return success if interrupted
+                time.sleep(5)
+
+    finally:
+        # Ensure spinner is properly cleaned up
+        spinner_context.__exit__(None, None, None)
 
 
 def tail(log_file, destination, coordinator=None):
