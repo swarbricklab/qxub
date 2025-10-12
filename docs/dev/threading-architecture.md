@@ -48,18 +48,48 @@ class OutputCoordinator:
 The `start_job_monitoring()` function in `scheduler.py` provides coordinated thread startup:
 
 ```python
-def start_job_monitoring(job_id, out_log, err_log):
-    """Start job monitoring with proper coordination."""
+def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=None):
+    """
+    Start job monitoring threads and return coordinator for external signaling.
+
+    Returns:
+        tuple: (coordinator, monitor_function) where monitor_function() waits for completion
+    """
+    # Create coordinator for thread synchronization
     coordinator = OutputCoordinator()
 
-    # Start threads but monitor waits for submission_complete
-    monitor_thread = start_monitor_thread(job_id, coordinator)
-    stdout_thread = start_stdout_tail(out_log, coordinator)
-    stderr_thread = start_stderr_tail(err_log, coordinator)
-    spinner_thread = start_spinner_thread(job_id, coordinator)
+    # Create threads for job monitoring and log tailing
+    qstat_thread = threading.Thread(
+        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
+    )
+    out_thread = threading.Thread(
+        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
+    )
+
+    # Set up signal handler for Ctrl-C
+    def signal_handler(signum, frame):
+        logging.info("Interrupt received, shutting down threads...")
+        coordinator.signal_shutdown()
+
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
+
+    # Start all threads
+    qstat_thread.start()
+    out_thread.start()
+    err_thread.start()
 
     def wait_for_completion():
-        return monitor_thread.join()
+        """Wait for job monitoring to complete and return exit status"""
+        try:
+            # Wait for job monitoring to complete or shutdown signal
+            qstat_thread.join()
+            return coordinator.job_exit_status or 0
+        finally:
+            # Restore original signal handler
+            signal.signal(signal.SIGINT, original_handler)
 
     return coordinator, wait_for_completion
 ```
@@ -68,10 +98,12 @@ def start_job_monitoring(job_id, out_log, err_log):
 1. **Job Construction**: Progress message "🔧 Job command constructed"
 2. **Submission**: qsub called, job ID returned
 3. **Progress Update**: "✅ Job submitted successfully! Job ID: X"
-4. **Submission Signal**: `coordinator.signal_submission_complete()`
-5. **Monitor Activation**: Monitor thread starts polling qstat
-6. **Output Detection**: Tail threads detect output and signal `output_started`
-7. **Spinner Coordination**: Spinner waits for `output_started`, then clears
+4. **Thread Creation**: `start_job_monitoring()` creates coordinator and threads
+5. **Submission Signal**: `coordinator.signal_submission_complete()`
+6. **Monitor Activation**: Monitor thread starts polling qstat after waiting for submission_complete
+7. **Spinner Start**: Spinner shows for 10 seconds maximum in monitor thread
+8. **Output Detection**: Tail threads detect output and signal `output_started`
+9. **Spinner Coordination**: Spinner waits for `output_started`, then clears
 
 ### Thread Responsibilities
 
@@ -117,16 +149,17 @@ Waits:    shutdown_requested
 
 #### 4. Spinner Thread (`JobSpinner._spin`)
 ```
-Lifecycle: Until output starts or job completes
-Purpose:  Show progress indicator while waiting
+Lifecycle: Up to 10 seconds max, until output starts or job completes
+Purpose:  Show minimal progress indicator while waiting
 Signals:  spinner_cleared
 Waits:    output_started
 ```
 
-- Displays animated spinner: "🚀 Job 1234abcd - Waiting ⠋"
+- Displays minimal spinner animation (no message by default)
+- Runs for maximum 10 seconds in monitor thread context
 - Polls for `output_started` every 0.1 seconds
 - When output starts, clears spinner line and signals `spinner_cleared`
-- Automatically stops when job completes
+- Automatically stops when job completes or timeout reached
 
 ## Thread Lifecycle
 
@@ -141,35 +174,45 @@ Here's the complete sequence from job submission to completion:
 2. Job Submission
    ├── qsub executed, job ID returned
    ├── Progress: "✅ Job submitted successfully! Job ID: X"
-   ├── coordinator.signal_submission_complete() called
-   └── All monitoring threads started but monitor waits
+   ├── Job ID stored in global _CURRENT_JOB_ID for signal handling
+   └── Signal handler registered in execution.py
 
-3. Monitor Activation
+3. Thread Setup
+   ├── start_job_monitoring() called with job_id, out_file, err_file
+   ├── OutputCoordinator created
+   ├── Monitor thread created (target=monitor_qstat)
+   ├── STDOUT tail thread created (target=tail, daemon=True)
+   ├── STDERR tail thread created (target=tail, daemon=True)
+   ├── Local signal handler registered for thread coordination
+   └── All threads started immediately
+
+4. Monitor Activation
    ├── monitor_qstat waits for submission_complete event
-   ├── submission_complete triggered → monitor begins polling
-   ├── STDOUT tail thread starts following out.log
-   ├── STDERR tail thread starts following err.log
-   └── Spinner thread starts: "🚀 Job abc123 - Waiting ⠋"
+   ├── submission_complete triggered by coordinator.signal_submission_complete()
+   ├── Monitor starts 10-second spinner with JobSpinner context manager
+   ├── After spinner timeout, monitor begins main polling loop
+   └── STDOUT/STDERR tail threads start following log files immediately
 
-4. Job Starts Running
-   ├── Log files get first content
-   ├── Tail thread signals output_started
-   ├── Progress: "🚀 Job started running"
-   ├── Spinner clears and signals spinner_cleared
+5. Job Starts Running
+   ├── Log files get first content (may happen during or after spinner)
+   ├── Tail thread signals output_started on first line
+   ├── Progress: "🚀 Job started running" (if job status is R)
+   ├── Spinner automatically clears if still running
    └── Output streams to terminal in real-time
 
-5. Job Completes
-   ├── monitor_qstat detects completion via qstat
+6. Job Completes
+   ├── monitor_qstat detects completion via qstat (status F or H)
    ├── monitor_qstat waits for PBS cleanup (5s)
-   ├── monitor_qstat polls for exit status (5s intervals)
-   ├── monitor_qstat signals job_completed
+   ├── monitor_qstat polls for exit status (5s intervals, max 60s)
+   ├── monitor_qstat signals job_completed and stores exit status
    └── All threads check should_shutdown() and exit
 
-6. Cleanup
+7. Cleanup
    ├── Tail threads reach EOF and signal eof_detected
-   ├── Main thread waits for monitor completion
-   ├── coordinator.job_exit_status returned
-   └── qxub exits with job's exit code
+   ├── qstat thread completes and wait_for_completion() returns
+   ├── coordinator.job_exit_status returned to execution.py
+   ├── _CURRENT_JOB_ID cleared
+   └── qxub exits with job's exit code via sys.exit()
 ```
 
 ## Signal Flow Diagram
@@ -225,24 +268,45 @@ Here's the complete sequence from job submission to completion:
 
 ## Graceful Shutdown (Ctrl-C Handling)
 
-When a user presses Ctrl-C, qxub performs graceful shutdown:
+When a user presses Ctrl-C, qxub performs graceful shutdown through multiple layers:
 
-1. **Signal Handler**: Catches SIGINT and calls `coordinator.signal_shutdown()`
-2. **Thread Notification**: All threads check `should_shutdown()` in their loops
-3. **Monitor Cleanup**: Monitor thread stops polling and attempts job cleanup
-4. **Tail Cleanup**: Tail threads stop following log files
-5. **Spinner Cleanup**: Spinner clears and stops animation
-6. **Exit Code**: Returns 130 (standard SIGINT exit code)
+### Signal Handler in execution.py
+The primary signal handler is installed in `execution.py` and tracks the current job globally:
+
+```python
+# Global variable to track current job for signal handling
+_CURRENT_JOB_ID = None
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) by cleaning up submitted job"""
+    if _CURRENT_JOB_ID:
+        print("🛑 Interrupted! Cleaning up job...")
+        from .scheduler import qdel
+        success = qdel(_CURRENT_JOB_ID, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+        else:
+            print(f"⚠️  Job cleanup failed - you may need to manually run: qdel {_CURRENT_JOB_ID}")
+    print("👋 Goodbye!")
+    sys.exit(130)  # Standard exit code for SIGINT
+```
+
+### Thread Coordination Handler
+Additionally, `start_job_monitoring()` creates a local signal handler that coordinates thread shutdown:
 
 ```python
 def signal_handler(signum, frame):
     logging.info("Interrupt received, shutting down threads...")
     coordinator.signal_shutdown()
-
-# In each thread loop:
-if coordinator and coordinator.should_shutdown():
-    break  # Exit thread gracefully
 ```
+
+### Shutdown Flow
+1. **User presses Ctrl-C**: Both signal handlers may be triggered
+2. **Job Cleanup**: Global handler in execution.py attempts to delete the job via `qdel`
+3. **Thread Notification**: Local handler signals `coordinator.signal_shutdown()`
+4. **Thread Response**: All threads check `should_shutdown()` in their loops
+5. **Graceful Exit**: Threads stop processing and exit cleanly
+6. **Exit Code**: Returns 130 (standard SIGINT exit code)
 
 ## Exit Code Propagation
 
@@ -361,21 +425,42 @@ if coordinator.wait_for_status_change(timeout=1):
 
 ### Critical Coordination Events
 
-The `submission_complete` event is essential for proper timing:
+The `submission_complete` event is essential for proper timing and is now handled through the execution.py interface:
 
 ```python
-# In execution.py after qsub
-job_id = subprocess.run(qsub_cmd, ...)
-print_tty(f"✅ Job submitted successfully! Job ID: {job_id}")
-coordinator.signal_submission_complete()  # Critical: enables monitor
+# In execution.py after qsub and start_job_monitoring
+job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
+print_status(success_msg, final=True)
 
-# In scheduler.py monitor thread
-def monitor_qstat(job_id, coordinator):
-    # Wait for submission to complete before monitoring
-    coordinator.submission_complete.wait()
+# Start job monitoring and get coordinator
+coordinator, wait_for_completion = start_job_monitoring(
+    job_id, out, err, quiet=ctx_obj["quiet"]
+)
 
-    while not coordinator.should_shutdown():
-        # Now safe to start qstat polling
+# Signal that submission messages are complete - enables monitor
+coordinator.signal_submission_complete()
+
+# Wait for job completion
+exit_status = wait_for_completion()
+sys.exit(exit_status)
+```
+
+In the monitor thread, the coordination works like this:
+
+```python
+def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
+    # Wait for job submission to complete before starting spinner
+    if coordinator:
+        coordinator.wait_for_submission_complete()
+
+    # Start spinner for up to 10 seconds
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+        time.sleep(10)
+
+    # Begin main monitoring loop
+    while True:
+        # Check status and handle completion...
 ```
 
 This prevents race conditions where monitoring starts before submission is fully complete.
@@ -408,7 +493,7 @@ def test_thread_shutdown():
 
 ### Resource Usage
 
-- **4 threads maximum**: Monitor + 2 tails + spinner
+- **3 threads maximum**: Monitor + 2 tails (spinner runs within monitor thread)
 - **Low CPU**: Threads mostly sleep/wait on I/O
 - **Memory**: Minimal - only line-by-line file reading
 - **Network**: Only qstat calls every 30 seconds

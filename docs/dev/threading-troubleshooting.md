@@ -12,7 +12,23 @@ qxub conda --env myenv script.py 2>&1 | grep -E "(Thread|Monitor|Tail|Spinner)"
 
 ### Check Thread Status
 ```python
-# Add to any thread function for debugging
+# Add to any thread f### Emergency Procedures
+
+### Kill Hung qxub Process
+
+```bash
+# Find qxub processes
+ps aux | grep qxub
+
+# Gentle termination
+pkill -TERM qxub
+
+# Force kill if needed
+pkill -KILL qxub
+
+# Check for orphaned jobs (global job tracking in execution.py)
+qstat -u $USER
+```ging
 import threading
 logging.debug(f"Thread {threading.current_thread().name} active, "
               f"total threads: {threading.active_count()}")
@@ -51,8 +67,8 @@ if thread.is_alive():
 
 ### 2. Spinner Doesn't Clear
 
-**Symptoms**: Spinner continues after output starts
-**Cause**: `output_started` not signaled or spinner not checking
+**Symptoms**: Spinner continues after output starts or shows for full 10 seconds
+**Cause**: `output_started` not signaled properly or output delayed
 
 **Debug**:
 ```python
@@ -63,13 +79,15 @@ if not output_started and coordinator:
     output_started = True
 ```
 
-**Fix**: Ensure tail threads signal on first output:
+**Fix**: Ensure tail threads signal on first output and spinner has reasonable timeout:
 ```python
+# Monitor thread uses JobSpinner with timeout
+with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+    time.sleep(10)  # Max 10 seconds, clears early on output
+
 # First line of output in tail function:
 if not output_started and coordinator:
     coordinator.signal_output_started()
-    # Clear spinner line immediately
-    print(" " * 120, end="", flush=True)
     coordinator.signal_spinner_cleared()
     output_started = True
 ```
@@ -88,12 +106,12 @@ if coordinator:
     logging.debug(f"Stored in coordinator: {coordinator.job_exit_status}")
 ```
 
-**Fix**: Ensure exit status flows through:
+**Fix**: Ensure exit status flows through the new architecture:
 1. `job_exit_status()` extracts from qstat
 2. `wait_for_job_exit_status()` polls until available
 3. `monitor_qstat()` stores in coordinator
-4. `monitor_and_tail()` returns from coordinator
-5. Executor (conda.py/etc) calls `sys.exit()`
+4. `wait_for_completion()` returns from coordinator
+5. `execution.py` calls `sys.exit(exit_status)`
 
 ### 4. Output Missing or Garbled
 
@@ -108,13 +126,16 @@ ls -la /path/to/logs/
 cat /path/to/out.log  # Should show job output
 ```
 
-**Fix**: Ensure proper file handling:
+**Fix**: Ensure proper file handling in execution.py:
 ```python
-# In executor functions:
+# In submit_and_monitor_job function:
 out.parent.mkdir(parents=True, exist_ok=True)
+err.parent.mkdir(parents=True, exist_ok=True)
 out.touch()  # Create empty file
-# Verify file is writable
+err.touch()  # Create empty file
+# Verify files are accessible before starting monitoring
 assert out.exists() and os.access(out, os.R_OK)
+assert err.exists() and os.access(err, os.R_OK)
 ```
 
 ### 5. Race Conditions
@@ -209,6 +230,8 @@ def test_full_flow():
 
     assert result.returncode == 0
     assert "test" in result.stdout
+    # Verify threading completed properly
+    assert "Job submitted successfully" in result.stderr
 ```
 
 ### Stress Testing
