@@ -8,6 +8,7 @@ import base64
 import difflib
 import logging
 import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,27 @@ from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate
 from .resource_tracker import resource_tracker
 from .resources_cli import resources
 from .scheduler import get_job_resource_data, monitor_and_tail, print_status, qdel, qsub
+
+# Global variable to track current job for signal handling
+_CURRENT_JOB_ID = None  # pylint: disable=invalid-name
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) by cleaning up submitted job"""
+    # pylint: disable=unused-argument
+    if _CURRENT_JOB_ID:
+        # Clear the current line completely before printing cleanup messages
+        print("\r" + " " * 100 + "\r", end="", flush=True)
+        print("🛑 Interrupted! Cleaning up job...")
+        success = qdel(_CURRENT_JOB_ID, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+        else:
+            print(
+                f"⚠️  Job cleanup failed - you may need to manually run: qdel {_CURRENT_JOB_ID}"
+            )
+    print("👋 Goodbye!")
+    sys.exit(130)  # Standard exit code for SIGINT
 
 
 class QxubGroup(click.Group):
@@ -817,9 +839,14 @@ def execute_conda(ctx, command, env, template=None, pre=None, post=None):
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Track job ID globally for signal handler
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+    _CURRENT_JOB_ID = job_id
+
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=False)
 
     # Log execution to history system
     try:
@@ -838,6 +865,34 @@ def execute_conda(ctx, command, env, template=None, pre=None, post=None):
         )
     except Exception as e:
         logging.debug("Failed to log job resources: %s", e)
+
+    # Exit if in quiet mode
+    if ctx_obj["quiet"]:
+        logging.info("Exiting in quiet mode")
+        return
+
+    # Register signal handler for Ctrl+C cleanup
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    # Start concurrent monitoring of job and log files
+    # Stream log files to STDOUT/STDERR as appropriate
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
+    out.touch()
+    err.touch()
+
+    # Pass success message to monitor_and_tail for spinner display
+    success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+
+    try:
+        exit_status = monitor_and_tail(
+            job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
+        )
+        # Exit with the job's exit status
+        sys.exit(exit_status)
+    finally:
+        # Clear job ID when monitoring completes (successfully or via interrupt)
+        _CURRENT_JOB_ID = None
 
 
 def execute_module(ctx, command, modules, template=None, pre=None, post=None):
@@ -894,9 +949,14 @@ def execute_module(ctx, command, modules, template=None, pre=None, post=None):
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Track job ID globally for signal handler
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+    _CURRENT_JOB_ID = job_id
+
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=False)
 
     # Log execution to history system
     try:
@@ -913,6 +973,34 @@ def execute_module(ctx, command, modules, template=None, pre=None, post=None):
         )
     except Exception as e:
         logging.debug("Failed to log job resources: %s", e)
+
+    # Exit if in quiet mode
+    if ctx_obj["quiet"]:
+        logging.info("Exiting in quiet mode")
+        return
+
+    # Register signal handler for Ctrl+C cleanup
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    # Start concurrent monitoring of job and log files
+    # Stream log files to STDOUT/STDERR as appropriate
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
+    out.touch()
+    err.touch()
+
+    # Pass success message to monitor_and_tail for spinner display
+    success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+
+    try:
+        exit_status = monitor_and_tail(
+            job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
+        )
+        # Exit with the job's exit status
+        sys.exit(exit_status)
+    finally:
+        # Clear job ID when monitoring completes (successfully or via interrupt)
+        _CURRENT_JOB_ID = None
 
 
 def execute_singularity(
@@ -973,9 +1061,14 @@ def execute_singularity(
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Track job ID globally for signal handler
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+    _CURRENT_JOB_ID = job_id
+
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=False)
 
     # Log execution to history system
     try:
@@ -992,6 +1085,34 @@ def execute_singularity(
         )
     except Exception as e:
         logging.debug("Failed to log job resources: %s", e)
+
+    # Exit if in quiet mode
+    if ctx_obj["quiet"]:
+        logging.info("Exiting in quiet mode")
+        return
+
+    # Register signal handler for Ctrl+C cleanup
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    # Start concurrent monitoring of job and log files
+    # Stream log files to STDOUT/STDERR as appropriate
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
+    out.touch()
+    err.touch()
+
+    # Pass success message to monitor_and_tail for spinner display
+    success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+
+    try:
+        exit_status = monitor_and_tail(
+            job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
+        )
+        # Exit with the job's exit status
+        sys.exit(exit_status)
+    finally:
+        # Clear job ID when monitoring completes (successfully or via interrupt)
+        _CURRENT_JOB_ID = None
 
 
 def execute_default(ctx, command, template=None, pre=None, post=None):
@@ -1039,9 +1160,14 @@ def execute_default(ctx, command, template=None, pre=None, post=None):
     # Submit job and handle monitoring
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Track job ID globally for signal handler
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+    _CURRENT_JOB_ID = job_id
+
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=False)
 
     # Log execution to history system
     try:
@@ -1058,6 +1184,34 @@ def execute_default(ctx, command, template=None, pre=None, post=None):
         )
     except Exception as e:
         logging.debug("Failed to log job resources: %s", e)
+
+    # Exit if in quiet mode
+    if ctx_obj["quiet"]:
+        logging.info("Exiting in quiet mode")
+        return
+
+    # Register signal handler for Ctrl+C cleanup
+    signal.signal(signal.SIGINT, _signal_handler)
+
+    # Start concurrent monitoring of job and log files
+    # Stream log files to STDOUT/STDERR as appropriate
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
+    out.touch()
+    err.touch()
+
+    # Pass success message to monitor_and_tail for spinner display
+    success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+
+    try:
+        exit_status = monitor_and_tail(
+            job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
+        )
+        # Exit with the job's exit status
+        sys.exit(exit_status)
+    finally:
+        # Clear job ID when monitoring completes (successfully or via interrupt)
+        _CURRENT_JOB_ID = None
 
 
 def _get_default_template():
