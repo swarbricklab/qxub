@@ -35,6 +35,9 @@ class OutputCoordinator:
         self.job_completed = threading.Event()
         self.shutdown_requested = threading.Event()
         self.eof_detected = threading.Event()
+        self.submission_complete = (
+            threading.Event()
+        )  # New event for submission completion
         self.job_exit_status = None  # Store the job's exit status
 
     def signal_output_started(self):
@@ -73,6 +76,14 @@ class OutputCoordinator:
         """Called by tail threads to wait for spinner to clear."""
         return self.spinner_cleared.wait(timeout)
 
+    def signal_submission_complete(self):
+        """Called when job submission messages are complete."""
+        self.submission_complete.set()
+
+    def wait_for_submission_complete(self, timeout=None):
+        """Called by monitor thread to wait for submission to complete."""
+        return self.submission_complete.wait(timeout)
+
 
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
@@ -85,21 +96,21 @@ def print_status(message, final=False):
                 # Temporary message - overwrite without newline
                 print(f"{message}", end="", flush=True, file=tty)
     except (OSError, IOError):
-        # Fallback to stdout if /dev/tty is not available
-        if final:
-            print(f"{message}")
-        else:
-            print(f"{message}", end="", flush=True)
+        # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
+        with open("/dev/null", "w") as devnull:
+            if final:
+                print(f"{message}", file=devnull)
+            else:
+                print(f"{message}", end="", flush=True, file=devnull)
 
 
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
     """Context manager for displaying a spinner during job operations."""
 
-    def __init__(self, message="", quiet=False, show_message=True, coordinator=None):
+    def __init__(self, message="", quiet=False, show_message=False, coordinator=None):
         self.message = message
-        # DISABLED: Force spinner to be quiet to prevent endless "Job submitted successfully" messages
-        self.quiet = True  # Was: self.quiet = quiet
-        self.show_message = show_message
+        self.quiet = quiet  # Re-enable spinner control
+        self.show_message = show_message  # Default to False (no messages)
         self.coordinator = coordinator
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinning = False
@@ -117,19 +128,36 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
                 break
 
             char = self.spinner_chars[i % len(self.spinner_chars)]
-            if self.show_message:
-                line = f"{self.message} {char}"
-                print(f"{line}", end="", flush=True)
-                self.original_line_len = len(line)
-            else:
-                print(f" {char}", end="", flush=True)
+            try:
+                with open("/dev/tty", "w") as tty:
+                    if self.show_message:
+                        line = f"{self.message} {char}"
+                        print(f"\r{line}", end="", flush=True, file=tty)
+                        self.original_line_len = len(line)
+                    else:
+                        print(f"\r{char}", end="", flush=True, file=tty)
+                        self.original_line_len = 1
+            except (OSError, IOError):
+                # Fallback to /dev/null if /dev/tty not available
+                with open("/dev/null", "w") as devnull:
+                    if self.show_message:
+                        line = f"{self.message} {char}"
+                        print(f"\r{line}", end="", flush=True, file=devnull)
+                    else:
+                        print(f"\r{char}", end="", flush=True, file=devnull)
             time.sleep(0.1)
             i += 1
 
     def _clear_spinner(self):
         """Clear the spinner line"""
         clear_line = " " * (self.original_line_len + 5)
-        print(f"{clear_line}", end="", flush=True)
+        try:
+            with open("/dev/tty", "w") as tty:
+                print(f"\r{clear_line}\r", end="", flush=True, file=tty)
+        except (OSError, IOError):
+            # Fallback to /dev/null if /dev/tty not available
+            with open("/dev/null", "w") as devnull:
+                print(f"\r{clear_line}\r", end="", flush=True, file=devnull)
 
     def __enter__(self):
         if not self.quiet:
@@ -608,19 +636,17 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
             print_status("🚀 Job started running", final=True)
             job_started_notified = True
 
-    # Brief wait before entering monitoring loop
-    logging.debug("Waiting 10 seconds before entering monitoring loop")
+    # Wait for job submission to complete before starting spinner
+    if coordinator:
+        coordinator.wait_for_submission_complete()
 
-    # Use the provided success message or create a default one
-    if success_msg:
-        spinner_msg = f"{success_msg} - Waiting"
-    else:
-        spinner_msg = f"Job {job_id[:8]} - Waiting"
+    # Start spinner immediately once submission is complete
+    logging.debug("Starting spinner and monitoring loop")
 
-    with JobSpinner(
-        spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator
-    ):
-        time.sleep(10)  # Reduced from 60 seconds
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+        time.sleep(10)  # Monitor for 10 seconds
+
+    logging.debug("Entering main job monitoring loop")
 
     logging.debug("Entering main job monitoring loop")
 
@@ -701,20 +727,12 @@ def tail(log_file, destination, coordinator=None):
         logging.debug(f"Tail {destination} thread exiting")
 
 
-def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
+def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=None):
     """
-    Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
-    until the job is finished. Stops both tailing and monitoring upon job completion.
-
-    Args:
-        job_id: The PBS job id to monitor.
-        out_file: Path to the STDOUT log file to tail.
-        err_file: Path to the STDERR log file to tail.
-        quiet: Whether to suppress spinner output.
-        success_msg: The success message to display with spinner.
+    Start job monitoring threads and return coordinator for external signaling.
 
     Returns:
-        int: The job's exit status
+        tuple: (coordinator, monitor_function) where monitor_function() waits for completion
     """
     # Create coordinator for thread synchronization
     coordinator = OutputCoordinator()
@@ -737,11 +755,71 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
 
     original_handler = signal.signal(signal.SIGINT, signal_handler)
 
+    # Start all threads
+    qstat_thread.start()
+    out_thread.start()
+    err_thread.start()
+
+    def wait_for_completion():
+        """Wait for job monitoring to complete and return exit status"""
+        try:
+            # Wait for job monitoring to complete or shutdown signal
+            qstat_thread.join()
+            return coordinator.job_exit_status or 0
+        finally:
+            # Restore original signal handler
+            signal.signal(signal.SIGINT, original_handler)
+
+    return coordinator, wait_for_completion
+
+
+def monitor_and_tail(
+    job_id, out_file, err_file, quiet=False, success_msg=None, coordinator=None
+):
+    """
+    Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
+    until the job is finished. Stops both tailing and monitoring upon job completion.
+
+    Args:
+        job_id: The PBS job id to monitor.
+        out_file: Path to the STDOUT log file to tail.
+        err_file: Path to the STDERR log file to tail.
+        quiet: Whether to suppress spinner output.
+        success_msg: The success message to display with spinner.
+        coordinator: Optional existing coordinator, creates new one if None
+
+    Returns:
+        int: The job's exit status
+    """
+    # Create coordinator for thread synchronization if not provided
+    if coordinator is None:
+        coordinator = OutputCoordinator()
+
+    # Create threads for job monitoring and log tailing
+    qstat_thread = threading.Thread(
+        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
+    )
+    out_thread = threading.Thread(
+        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
+    )
+
+    # Set up signal handler for Ctrl-C
+    def signal_handler(signum, frame):
+        logging.info("Interrupt received, shutting down threads...")
+        coordinator.signal_shutdown()
+
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
+
     try:
-        # Start all threads
-        qstat_thread.start()
+        # Start tail threads immediately to capture output
         out_thread.start()
         err_thread.start()
+
+        # Start monitoring thread immediately (it will wait for submission signal)
+        qstat_thread.start()
 
         # Wait for job monitoring to complete or shutdown signal
         qstat_thread.join()

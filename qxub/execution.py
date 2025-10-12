@@ -16,7 +16,7 @@ import click
 
 from .history_manager import history_manager
 from .resource_tracker import resource_tracker
-from .scheduler import monitor_and_tail, print_status, qsub
+from .scheduler import monitor_and_tail, print_status, qsub, start_job_monitoring
 
 # Global variable to track current job for signal handling
 _CURRENT_JOB_ID = None  # pylint: disable=invalid-name
@@ -128,6 +128,9 @@ def submit_and_monitor_job(
     if context_vars is None:
         context_vars = {}
 
+    # Declare global variables
+    global _CURRENT_JOB_ID  # pylint: disable=global-statement
+
     ctx_obj = ctx.obj
     out = Path(ctx_obj["out"])
     err = Path(ctx_obj["err"])
@@ -175,19 +178,12 @@ def submit_and_monitor_job(
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
     # Track job ID globally for signal handler
-    global _CURRENT_JOB_ID  # pylint: disable=global-statement
     _CURRENT_JOB_ID = job_id
 
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        success_msg = f"� Job submitted successfully! Job ID: {job_id}"
+        success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
         print_status(success_msg, final=True)
-        # Add extra newline after job ID to /dev/tty
-        try:
-            with open("/dev/tty", "w") as tty:
-                print(file=tty)
-        except (OSError, IOError):
-            print()  # Fallback to stdout
 
     # Log execution to history system
     try:
@@ -211,6 +207,11 @@ def submit_and_monitor_job(
         logging.info("Exiting in quiet mode")
         return
 
+    # Display job ID to user (unless in quiet mode)
+    if not ctx_obj["quiet"]:
+        success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=True)
+
     # Register signal handler for Ctrl+C cleanup
     signal.signal(signal.SIGINT, _signal_handler)
 
@@ -221,13 +222,16 @@ def submit_and_monitor_job(
     out.touch()
     err.touch()
 
-    # Pass success message to monitor_and_tail for spinner display
-    success_message = f"🚀 Job submitted successfully! Job ID: {job_id}"
+    # Start job monitoring and get coordinator for signaling
+    coordinator, wait_for_completion = start_job_monitoring(
+        job_id, out, err, quiet=ctx_obj["quiet"]
+    )
+
+    # Signal that submission messages are complete - spinner can start now
+    coordinator.signal_submission_complete()
 
     try:
-        exit_status = monitor_and_tail(
-            job_id, out, err, quiet=ctx_obj["quiet"], success_msg=success_message
-        )
+        exit_status = wait_for_completion()
         # Exit with the job's exit status
         sys.exit(exit_status)
     finally:
