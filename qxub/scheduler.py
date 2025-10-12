@@ -76,12 +76,20 @@ class OutputCoordinator:
 
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
-    if final:
-        # Final message - print normally and move to next line
-        print(f"{message}")
-    else:
-        # Temporary message - overwrite without newline
-        print(f"{message}", end="", flush=True)
+    try:
+        with open("/dev/tty", "w") as tty:
+            if final:
+                # Final message - print normally and move to next line
+                print(f"{message}", file=tty)
+            else:
+                # Temporary message - overwrite without newline
+                print(f"{message}", end="", flush=True, file=tty)
+    except (OSError, IOError):
+        # Fallback to stdout if /dev/tty is not available
+        if final:
+            print(f"{message}")
+        else:
+            print(f"{message}", end="", flush=True)
 
 
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
@@ -89,7 +97,8 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
 
     def __init__(self, message="", quiet=False, show_message=True, coordinator=None):
         self.message = message
-        self.quiet = quiet
+        # DISABLED: Force spinner to be quiet to prevent endless "Job submitted successfully" messages
+        self.quiet = True  # Was: self.quiet = quiet
         self.show_message = show_message
         self.coordinator = coordinator
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -585,7 +594,22 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """
     Monitors for job completion by checking job status periodically
     """
-    logging.debug("Waiting 60 seconds before checking job status")
+    logging.debug("Starting job monitoring with initial check")
+
+    # Track if we've already notified about job start
+    job_started_notified = False
+
+    # Do an immediate check for job status
+    if not quiet:
+        status = job_status(job_id)
+        if status == "R":
+            from qxub.execution import print_status
+
+            print_status("🚀 Job started running", final=True)
+            job_started_notified = True
+
+    # Brief wait before entering monitoring loop
+    logging.debug("Waiting 10 seconds before entering monitoring loop")
 
     # Use the provided success message or create a default one
     if success_msg:
@@ -596,9 +620,9 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     with JobSpinner(
         spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator
     ):
-        time.sleep(60)
+        time.sleep(10)  # Reduced from 60 seconds
 
-    logging.debug("Starting job monitoring")
+    logging.debug("Entering main job monitoring loop")
 
     while True:
         # Check if we should shutdown early
@@ -607,6 +631,14 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
             return
 
         status = job_status(job_id)
+
+        # Check for job started (running state)
+        if status == "R" and not job_started_notified and not quiet:
+            from qxub.execution import print_status
+
+            print_status("🚀 Job started running", final=True)
+            job_started_notified = True
+
         if status in ["F", "H"]:  # Check for job completion
             logging.info("Job %s completed with status %s", job_id, status)
             if coordinator:
@@ -651,8 +683,8 @@ def tail(log_file, destination, coordinator=None):
                 # Signal that output has started on first line
                 if not output_started and coordinator:
                     coordinator.signal_output_started()
-                    # Clear the waiting line completely - use longer clear for safety
-                    print("\r" + " " * 120 + "\r", end="", flush=True)
+                    # DISABLED: Don't clear lines since spinner is disabled
+                    # print("\r" + " " * 120 + "\r", end="", flush=True)
                     coordinator.signal_spinner_cleared()
                     output_started = True
 

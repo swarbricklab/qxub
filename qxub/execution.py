@@ -157,6 +157,10 @@ def submit_and_monitor_job(
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
     logging.info("Submission command: %s", submission_command)
 
+    # Progress message: Job command constructed
+    if not ctx_obj["quiet"]:
+        print_status("🔧 Job command constructed", final=True)
+
     # Handle dry run
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
@@ -176,8 +180,14 @@ def submit_and_monitor_job(
 
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        success_msg = f"🚀 Job submitted successfully! Job ID: {job_id}"
-        print_status(success_msg, final=False)
+        success_msg = f"� Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=True)
+        # Add extra newline after job ID to /dev/tty
+        try:
+            with open("/dev/tty", "w") as tty:
+                print(file=tty)
+        except (OSError, IOError):
+            print()  # Fallback to stdout
 
     # Log execution to history system
     try:
