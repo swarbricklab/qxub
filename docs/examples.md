@@ -44,6 +44,29 @@ qxub --env myenv -- python script.py
 
 For commands with special characters, quotes, or variables, use `--cmd`:
 
+### Smart Quote Processing (Recommended)
+
+Use double quotes around `--cmd` for automatic quote handling:
+
+```bash
+# Clean, readable syntax with smart quotes
+qxub --env base --cmd "find /data -name \"*.txt\" -exec echo \"Found: {}\" \;"
+
+# Complex shell commands with nested quotes
+qxub --env base --cmd "sh -c \"echo \\\"Processing file: \$1\\\"\" arg"
+
+# Mixed variables: submission-time and execution-time
+qxub --env base --cmd "echo \"User ${USER} running job ${{PBS_JOBID}}\""
+
+# AWK commands with field references preserved
+qxub --env base --cmd "awk \"{print \\\$1, \\\$2}\" data.txt"
+
+# JSON-like output with complex escaping
+qxub --env base --cmd "echo \"{\\\"user\\\": \\\"${USER}\\\", \\\"cost\\\": \\\"\$50\\\"}\""
+```
+
+### Traditional Syntax (Backward Compatible)
+
 ```bash
 # Submission-time variables (expanded when you submit)
 qxub --env base --cmd "python script.py --input ${HOME}/data.txt --user ${USER}"
@@ -66,6 +89,22 @@ qxub --env base --cmd 'awk "{print \$1, \$2}" data.txt | head -10'
 - `${var}` → Expanded at submission time (your environment)
 - `${{var}}` → Converted to `${var}` for execution time (job environment)
 - `$other` → Preserved unchanged (literal usage)
+
+### Smart Quote Processing Rules
+
+When using double quotes around `--cmd "..."`:
+
+- `\"` → Literal `"` inside the command
+- `\$` → Literal `$` (prevents variable expansion)
+- `${var}` → Still expands at submission time
+- `${{var}}` → Still converts for execution time
+- `'text'` → Single quotes preserved literally
+
+**Example transformations:**
+```bash
+Input:  --cmd "echo \"Cost: \$100, User: ${USER}\""
+Output: echo "Cost: $100, User: jr9959"
+```
 
 ## Aliases
 

@@ -29,6 +29,9 @@ def expand_submission_variables(cmd_str: str) -> str:
     Expand ${var} at submission time, convert ${{var}} to ${var} for execution.
     All other $ usage is preserved unchanged.
 
+    Enhanced with smart quote processing: if command starts and ends with double quotes,
+    applies automatic escaping for better readability.
+
     Args:
         cmd_str: Command string with potential variables
 
@@ -36,11 +39,49 @@ def expand_submission_variables(cmd_str: str) -> str:
         Command string with submission variables expanded and execution variables prepared
 
     Examples:
+        # Traditional processing (backward compatible)
         expand_submission_variables('echo "${USER} on ${{HOSTNAME}}"')
         # Returns: 'echo "jr9959 on ${HOSTNAME}"'
 
-        expand_submission_variables('python -c "print($PATH)"')
-        # Returns: 'python -c "print($PATH)"' (unchanged)
+        # Smart quote processing (enhanced)
+        expand_submission_variables('"find /path -exec echo \\"User: ${USER}\\" \\;"')
+        # Returns: 'find /path -exec echo "User: jr9959" \;'
+
+        # Literal dollar preservation
+        expand_submission_variables('"awk \\"{print \\\$1}\\" file"')
+        # Returns: 'awk "{print $1}" file'
+    """
+    import logging
+    import os
+    import re
+
+    # Check for smart quote processing (double-quote wrapped commands)
+    if cmd_str.startswith('"') and cmd_str.endswith('"') and len(cmd_str) > 1:
+        # Remove outer double quotes
+        inner_cmd = cmd_str[1:-1]
+
+        # Process escaped characters first
+        inner_cmd = inner_cmd.replace('\\"', '"')  # \" -> "
+
+        # Handle literal dollars: \$ -> temporary placeholder
+        inner_cmd = inner_cmd.replace("\\$", "__QXUB_LITERAL_DOLLAR__")
+
+        # Apply variable expansion to the processed command
+        processed = _apply_variable_expansion(inner_cmd)
+
+        # Restore literal dollars
+        processed = processed.replace("__QXUB_LITERAL_DOLLAR__", "$")
+
+        return processed
+
+    # No smart quotes - use standard processing
+    return _apply_variable_expansion(cmd_str)
+
+
+def _apply_variable_expansion(cmd_str: str) -> str:
+    """
+    Internal function to apply variable expansion rules.
+    Separated for use by both smart quote and standard processing.
     """
     import logging
     import os

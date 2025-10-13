@@ -26,6 +26,10 @@ qxub --env myenv --queue normal -l mem=16GB -- python script.py
 qxub --env myenv --cmd "python script.py --input ${HOME}/data.txt"
 qxub --env myenv --cmd 'echo "Job ${{PBS_JOBID}} on ${{HOSTNAME}}"'
 
+# ✅ Smart quotes - clean handling of nested quotes
+qxub --env myenv --cmd "find /data -exec echo \"Found: {}\" \;"
+qxub --env myenv --cmd "sh -c \"echo \\\"User: ${USER}\\\"\""
+
 # ✅ Execution context options
 qxub --env pytorch -- python train.py
 qxub --mod python3 -- python analysis.py
