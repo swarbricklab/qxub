@@ -133,26 +133,26 @@ test_execution_contexts() {
         "Singularity with --singularity" \
         "qxub --singularity container.sif -- echo 'Hello singularity'"
 
-    # Default execution tests (no environment context)
+    # Default execution tests (explicit --default flag)
     run_dry_test \
         "Default execution basic command" \
-        "qxub -- echo 'Hello default'"
+        "qxub --default -- echo 'Hello default'"
 
     run_dry_test \
         "Default execution with pre command" \
-        "qxub --pre 'echo Starting' -- echo 'Hello default'"
+        "qxub --default --pre 'echo Starting' -- echo 'Hello default'"
 
     run_dry_test \
         "Default execution with post command" \
-        "qxub --post 'echo Done' -- echo 'Hello default'"
+        "qxub --default --post 'echo Done' -- echo 'Hello default'"
 
     run_dry_test \
         "Default execution with pre and post" \
-        "qxub --pre 'echo Starting' --post 'echo Done' -- echo 'Hello default'"
+        "qxub --default --pre 'echo Starting' --post 'echo Done' -- echo 'Hello default'"
 
     run_dry_test \
         "Default execution with PBS resources" \
-        "qxub -l walltime=01:00:00 -l mem=8GB -- echo 'Hello default'"
+        "qxub --default -l walltime=01:00:00 -l mem=8GB -- echo 'Hello default'"
 }
 
 # Test mutual exclusivity
@@ -206,8 +206,9 @@ test_error_conditions() {
     log_info "Testing error conditions..."
 
     run_dry_test \
-        "No execution context (uses default execution)" \
-        "qxub -- echo 'No context'"
+        "No execution context (should fail)" \
+        "qxub -- echo 'No context'" \
+        2
 
     run_dry_test \
         "Execution context without command (should fail)" \

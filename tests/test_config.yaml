@@ -1,0 +1,34 @@
+# Test configuration for qxub v2.2 remote execution
+# Usage: qxub --config tests/test_config.yaml --remote <remote_name> --dry-run -- echo "test"
+#
+# This file contains example remote configurations for testing the --config option
+# and remote execution functionality.
+
+remotes:
+  # NCI Gadi configuration
+  nci_gadi:
+    url: ssh://gadi.nci.org.au
+    qxub_env: qxub-prod
+    platform_file: /g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml
+    project_root_dir: /scratch/${PROJECT}/${USER}/projects
+
+  # Local test configuration (useful for testing SSH connectivity)
+  localhost:
+    url: ssh://localhost
+    qxub_env: base  # or whatever conda env exists locally
+    platform_file: /g/data/a56/software/qsub_tools/tests/test_platforms/localhost.yaml
+    project_root_dir: /tmp/qxub-test-projects
+
+  # Example remote cluster configuration
+  example_cluster:
+    url: ssh://cluster.example.edu
+    qxub_env: /opt/miniconda/envs/qxub
+    platform_file: /shared/configs/cluster.yaml
+    project_root_dir: /home/${USER}/scratch
+
+  # Example with custom port
+  custom_port_host:
+    url: ssh://myhost.example.com:2222
+    qxub_env: qxub-env
+    platform_file: /etc/qxub/platform.yaml
+    project_root_dir: /scratch/${PROJECT}/${USER}

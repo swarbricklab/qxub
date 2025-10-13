@@ -68,15 +68,11 @@ profiles:
 ### Profile Selection
 
 ```bash
-# Execute on specified profile
-qxub --profile gadi --env pytorch -- python train.py
+# Execute on specified remote system
+qxub --remote nci_gadi --env pytorch -- python train.py
 
-# Use profile as default
-qxub config set defaults.profile gadi
-qxub --env pytorch -- python train.py  # Uses gadi profile
-
-# Override profile settings
-qxub --profile gadi --project a99 --env pytorch -- python train.py
+# Override remote working directory
+qxub --remote nci_gadi --execdir /scratch/a99/user/project --env pytorch -- python train.py
 ```
 
 ### Profile Management
@@ -161,15 +157,15 @@ def build_remote_command(profile: Profile, local_args: List[str]) -> str:
     Convert local qxub arguments to remote qxub command
 
     Example:
-    Local:  qxub --profile gadi --env pytorch -- python train.py
-    Remote: module load python3; qxub --env pytorch -- python train.py
+    Local:  qxub --remote nci_gadi --env pytorch -- python train.py
+    Remote: conda activate qxub-env; qxub --platform-file /path/to/platform.yaml --env pytorch -- python train.py
     """
 
-    # Remove profile-specific arguments
-    remote_args = [arg for arg in local_args if not arg.startswith('--profile')]
+    # Remove remote-specific arguments
+    remote_args = [arg for arg in local_args if not arg.startswith('--remote')]
 
-    # Apply profile defaults
-    remote_args = apply_profile_defaults(remote_args, profile.defaults)
+    # Add platform file specification
+    remote_args = ['--platform-file', remote_config.platform_file] + remote_args
 
     # Build remote command
     setup_command = profile.remote.get('env_setup', '')
@@ -221,14 +217,14 @@ local_history:
   command: "qxub --profile gadi --env pytorch -- python train.py"
   profile: gadi
   remote_host: gadi.nci.org.au
-  remote_command: "module load python3; qxub --env pytorch -- python train.py"
+  remote_command: "conda activate qxub-env; qxub --platform-file /path/to/platform.yaml --env pytorch -- python train.py"
   status: success
   exit_code: 0
 
 # Remote execution log (on gadi)
 remote_history:
   timestamp: "2025-10-09T14:30:05"
-  command: "qxub --env pytorch -- python train.py"
+  command: "qxub --platform-file /g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml --env pytorch -- python train.py"
   platform: nci_gadi
   queue: gpuvolta
   job_id: "47291842.gadi-pbs"
@@ -291,13 +287,15 @@ def handle_connection_errors(func):
 
 ```bash
 # If remote connection fails, offer alternatives
-$ qxub --profile gadi --env pytorch -- python train.py
+```bash
+$ qxub --remote nci_gadi --env pytorch -- python train.py
 Error: Cannot connect to gadi.nci.org.au
 Suggestions:
   1. Check VPN connection to NCI
   2. Verify SSH key authentication: ssh gadi.nci.org.au
   3. Run locally: qxub --env pytorch -- python train.py
-  4. Use different profile: qxub --profile local --env pytorch -- python train.py
+  4. Check remote configuration in ~/.config/qxub/config.yaml
+```
 ```
 
 ## Security Considerations

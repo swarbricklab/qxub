@@ -35,6 +35,12 @@ class OutputCoordinator:
         self.job_completed = threading.Event()
         self.shutdown_requested = threading.Event()
         self.eof_detected = threading.Event()
+        self.submission_complete = (
+            threading.Event()
+        )  # New event for submission completion
+        # New events for job status changes
+        self.job_running = threading.Event()  # Job status changed to Running
+        self.job_finished = threading.Event()  # Job status changed to Finished/Held
         self.job_exit_status = None  # Store the job's exit status
 
     def signal_output_started(self):
@@ -73,24 +79,59 @@ class OutputCoordinator:
         """Called by tail threads to wait for spinner to clear."""
         return self.spinner_cleared.wait(timeout)
 
+    def signal_submission_complete(self):
+        """Called when job submission messages are complete."""
+        self.submission_complete.set()
+
+    def wait_for_submission_complete(self, timeout=None):
+        """Called by monitor thread to wait for submission to complete."""
+        return self.submission_complete.wait(timeout)
+
+    def signal_job_running(self):
+        """Called when job status changes to Running."""
+        self.job_running.set()
+
+    def signal_job_finished(self):
+        """Called when job status changes to Finished or Held."""
+        self.job_finished.set()
+
+    def should_stop_spinner(self):
+        """Check if spinner should stop due to any relevant event."""
+        return (
+            self.output_started.is_set()
+            or self.job_running.is_set()
+            or self.job_finished.is_set()
+            or self.shutdown_requested.is_set()
+            or self.job_completed.is_set()
+        )
+
 
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
-    if final:
-        # Final message - print normally and move to next line
-        print(f"\r{message}" + " " * 20)
-    else:
-        # Temporary message - overwrite without newline
-        print(f"\r{message}", end="", flush=True)
+    try:
+        with open("/dev/tty", "w") as tty:
+            if final:
+                # Final message - print normally and move to next line
+                print(f"{message}", file=tty)
+            else:
+                # Temporary message - overwrite without newline
+                print(f"{message}", end="", flush=True, file=tty)
+    except (OSError, IOError):
+        # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
+        with open("/dev/null", "w") as devnull:
+            if final:
+                print(f"{message}", file=devnull)
+            else:
+                print(f"{message}", end="", flush=True, file=devnull)
 
 
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
     """Context manager for displaying a spinner during job operations."""
 
-    def __init__(self, message="", quiet=False, show_message=True, coordinator=None):
+    def __init__(self, message="", quiet=False, show_message=False, coordinator=None):
         self.message = message
-        self.quiet = quiet
-        self.show_message = show_message
+        self.quiet = quiet  # Re-enable spinner control
+        self.show_message = show_message  # Default to False (no messages)
         self.coordinator = coordinator
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinning = False
@@ -101,26 +142,43 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
         """Run the spinner animation"""
         i = 0
         while self.spinning:
-            # Check if output has started and we need to clear
-            if self.coordinator and self.coordinator.wait_for_output_started(timeout=0):
+            # Check if any event requires stopping the spinner
+            if self.coordinator and self.coordinator.should_stop_spinner():
                 self._clear_spinner()
                 self.coordinator.signal_spinner_cleared()
                 break
 
             char = self.spinner_chars[i % len(self.spinner_chars)]
-            if self.show_message:
-                line = f"{self.message} {char}"
-                print(f"\r{line}", end="", flush=True)
-                self.original_line_len = len(line)
-            else:
-                print(f" {char}", end="", flush=True)
+            try:
+                with open("/dev/tty", "w") as tty:
+                    if self.show_message:
+                        line = f"{self.message} {char}"
+                        print(f"\r{line}", end="", flush=True, file=tty)
+                        self.original_line_len = len(line)
+                    else:
+                        print(f"\r{char}", end="", flush=True, file=tty)
+                        self.original_line_len = 1
+            except (OSError, IOError):
+                # Fallback to /dev/null if /dev/tty not available
+                with open("/dev/null", "w") as devnull:
+                    if self.show_message:
+                        line = f"{self.message} {char}"
+                        print(f"\r{line}", end="", flush=True, file=devnull)
+                    else:
+                        print(f"\r{char}", end="", flush=True, file=devnull)
             time.sleep(0.1)
             i += 1
 
     def _clear_spinner(self):
         """Clear the spinner line"""
         clear_line = " " * (self.original_line_len + 5)
-        print(f"\r{clear_line}\r", end="", flush=True)
+        try:
+            with open("/dev/tty", "w") as tty:
+                print(f"\r{clear_line}\r", end="", flush=True, file=tty)
+        except (OSError, IOError):
+            # Fallback to /dev/null if /dev/tty not available
+            with open("/dev/null", "w") as devnull:
+                print(f"\r{clear_line}\r", end="", flush=True, file=devnull)
 
     def __enter__(self):
         if not self.quiet:
@@ -157,23 +215,23 @@ def qsub(cmd, quiet=False):
         click.echo("Expected qsub comment. Exiting")
         sys.exit(1)
 
-    with JobSpinner(show_message=False, quiet=quiet):
-        # pylint: disable=W1510
-        result = subprocess.run(
-            shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        if result.returncode != 0:
-            logging.debug("Job submission failed")
-            click.echo(result.stderr)
+    # Submit job directly without spinner (spinner is handled in monitor)
+    # pylint: disable=W1510
+    result = subprocess.run(
+        shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if result.returncode != 0:
+        logging.debug("Job submission failed")
+        click.echo(result.stderr)
 
-            # Map PBS validation errors to exit code 2 for consistency
-            if result.returncode == 166:  # PBS validation error
-                sys.exit(2)
-            else:
-                sys.exit(result.returncode)
+        # Map PBS validation errors to exit code 2 for consistency
+        if result.returncode == 166:  # PBS validation error
+            sys.exit(2)
         else:
-            logging.debug("Job submitted successfully")
-            return result.stdout.rstrip("\n")
+            sys.exit(result.returncode)
+    else:
+        logging.debug("Job submitted successfully")
+        return result.stdout.rstrip("\n")
 
 
 def qdel(job_id, quiet=False):
@@ -583,50 +641,68 @@ def job_status(job_id):
 
 def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     """
-    Monitors for job completion by checking job status periodically
+    Monitors for job completion by checking job status periodically.
+    Now uses event-driven spinner control.
     """
-    logging.debug("Waiting 60 seconds before checking job status")
+    logging.debug("Starting job monitoring with initial check")
 
-    # Use the provided success message or create a default one
-    if success_msg:
-        spinner_msg = f"{success_msg} - Waiting"
-    else:
-        spinner_msg = f"Job {job_id[:8]} - Waiting"
+    # Track job state
+    job_started_notified = False
+    last_status = None
 
-    with JobSpinner(
-        spinner_msg, show_message=True, quiet=quiet, coordinator=coordinator
-    ):
-        time.sleep(60)
+    # Wait for job submission to complete before starting
+    if coordinator:
+        coordinator.wait_for_submission_complete()
 
-    logging.debug("Starting job monitoring")
+    # Start event-driven spinner - it will stop automatically on status changes
+    logging.debug("Starting event-driven spinner and monitoring loop")
 
-    while True:
-        # Check if we should shutdown early
-        if coordinator and coordinator.should_shutdown():
-            logging.info("Monitor shutdown requested")
-            return
-
-        status = job_status(job_id)
-        if status in ["F", "H"]:  # Check for job completion
-            logging.info("Job %s completed with status %s", job_id, status)
-            if coordinator:
-                coordinator.signal_job_completed()
-
-            # Wait for PBS cleanup and get exit status
-            logging.info("Waiting for PBS cleanup and getting exit status...")
-            exit_status = wait_for_job_exit_status(job_id)
-            if coordinator:
-                coordinator.job_exit_status = exit_status
-            return exit_status
-
-        logging.debug("Job %s still running", job_id)
-
-        # Sleep in smaller intervals so we can respond to shutdown requests
-        for _ in range(6):  # 6 * 5 = 30 seconds total
+    # Use proper context manager for spinner
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+        while True:
+            # Check if we should shutdown early
             if coordinator and coordinator.should_shutdown():
-                logging.info("Monitor shutdown during sleep")
-                return 0  # Return success if interrupted
-            time.sleep(5)
+                logging.info("Monitor shutdown requested")
+                return
+
+            status = job_status(job_id)
+
+            # Signal status changes to coordinator for spinner control
+            if status != last_status:
+                logging.debug(f"Job status changed from {last_status} to {status}")
+
+                if status == "R":  # Job started running
+                    if coordinator:
+                        coordinator.signal_job_running()
+                    if not job_started_notified and not quiet:
+                        from qxub.execution import print_status
+
+                        print_status("\r🚀 Job started running", final=True)
+                        job_started_notified = True
+
+                elif status in ["F", "H"]:  # Job finished or held
+                    if coordinator:
+                        coordinator.signal_job_finished()
+                        coordinator.signal_job_completed()
+
+                    # Wait for PBS cleanup and get exit status
+                    logging.info("Job %s completed with status %s", job_id, status)
+                    logging.info("Waiting for PBS cleanup and getting exit status...")
+                    exit_status = wait_for_job_exit_status(job_id)
+                    if coordinator:
+                        coordinator.job_exit_status = exit_status
+                    return exit_status
+
+                last_status = status
+
+            logging.debug("Job %s status: %s", job_id, status)
+
+            # Sleep in smaller intervals so we can respond to shutdown requests
+            for _ in range(6):  # 6 * 5 = 30 seconds total
+                if coordinator and coordinator.should_shutdown():
+                    logging.info("Monitor shutdown during sleep")
+                    return 0  # Return success if interrupted
+                time.sleep(5)
 
 
 def tail(log_file, destination, coordinator=None):
@@ -651,8 +727,12 @@ def tail(log_file, destination, coordinator=None):
                 # Signal that output has started on first line
                 if not output_started and coordinator:
                     coordinator.signal_output_started()
-                    # Clear the waiting line completely - use longer clear for safety
-                    print("\r" + " " * 120 + "\r", end="", flush=True)
+                    # Clear any leftover spinner characters before streaming output
+                    try:
+                        with open("/dev/tty", "w") as tty:
+                            print("\r", end="", flush=True, file=tty)
+                    except (OSError, IOError):
+                        pass  # Ignore if /dev/tty is not available
                     coordinator.signal_spinner_cleared()
                     output_started = True
 
@@ -669,20 +749,12 @@ def tail(log_file, destination, coordinator=None):
         logging.debug(f"Tail {destination} thread exiting")
 
 
-def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
+def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=None):
     """
-    Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
-    until the job is finished. Stops both tailing and monitoring upon job completion.
-
-    Args:
-        job_id: The PBS job id to monitor.
-        out_file: Path to the STDOUT log file to tail.
-        err_file: Path to the STDERR log file to tail.
-        quiet: Whether to suppress spinner output.
-        success_msg: The success message to display with spinner.
+    Start job monitoring threads and return coordinator for external signaling.
 
     Returns:
-        int: The job's exit status
+        tuple: (coordinator, monitor_function) where monitor_function() waits for completion
     """
     # Create coordinator for thread synchronization
     coordinator = OutputCoordinator()
@@ -705,11 +777,71 @@ def monitor_and_tail(job_id, out_file, err_file, quiet=False, success_msg=None):
 
     original_handler = signal.signal(signal.SIGINT, signal_handler)
 
+    # Start all threads
+    qstat_thread.start()
+    out_thread.start()
+    err_thread.start()
+
+    def wait_for_completion():
+        """Wait for job monitoring to complete and return exit status"""
+        try:
+            # Wait for job monitoring to complete or shutdown signal
+            qstat_thread.join()
+            return coordinator.job_exit_status or 0
+        finally:
+            # Restore original signal handler
+            signal.signal(signal.SIGINT, original_handler)
+
+    return coordinator, wait_for_completion
+
+
+def monitor_and_tail(
+    job_id, out_file, err_file, quiet=False, success_msg=None, coordinator=None
+):
+    """
+    Monitors the job status using qstat and tails the output (STDOUT and STDERR) logs
+    until the job is finished. Stops both tailing and monitoring upon job completion.
+
+    Args:
+        job_id: The PBS job id to monitor.
+        out_file: Path to the STDOUT log file to tail.
+        err_file: Path to the STDERR log file to tail.
+        quiet: Whether to suppress spinner output.
+        success_msg: The success message to display with spinner.
+        coordinator: Optional existing coordinator, creates new one if None
+
+    Returns:
+        int: The job's exit status
+    """
+    # Create coordinator for thread synchronization if not provided
+    if coordinator is None:
+        coordinator = OutputCoordinator()
+
+    # Create threads for job monitoring and log tailing
+    qstat_thread = threading.Thread(
+        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
+    )
+    out_thread = threading.Thread(
+        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
+    )
+    err_thread = threading.Thread(
+        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
+    )
+
+    # Set up signal handler for Ctrl-C
+    def signal_handler(signum, frame):
+        logging.info("Interrupt received, shutting down threads...")
+        coordinator.signal_shutdown()
+
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
+
     try:
-        # Start all threads
-        qstat_thread.start()
+        # Start tail threads immediately to capture output
         out_thread.start()
         err_thread.start()
+
+        # Start monitoring thread immediately (it will wait for submission signal)
+        qstat_thread.start()
 
         # Wait for job monitoring to complete or shutdown signal
         qstat_thread.join()

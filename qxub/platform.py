@@ -18,15 +18,12 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
 from .resource_utils import (
-    compare_memory,
-    compare_walltime,
     evaluate_condition,
-    format_memory_size,
     format_walltime,
     parse_memory_size,
     parse_walltime,
@@ -232,12 +229,6 @@ class Platform:
         # Fallback to first available queue
         queues = list(self.queues.keys())
         return queues[0] if queues else None
-        for rule in self.auto_selection_rules:
-            if rule.is_default:
-                return rule.queue
-
-        # Fallback to first queue
-        return next(iter(self.queues.keys())) if self.queues else None
 
     def validate_queue_resources(
         self, queue_name: str, resources: Dict[str, Any]
@@ -266,6 +257,27 @@ class PlatformLoader:
 
     def _load_platforms(self):
         """Load all platform definitions from search paths."""
+        # Check for specific platform file environment variable first
+        specific_platform_file = os.getenv("QXUB_PLATFORM_FILE")
+        if specific_platform_file:
+            platform_path = Path(specific_platform_file)
+            if platform_path.exists():
+                logger.debug(
+                    f"Loading platform file from QXUB_PLATFORM_FILE: {platform_path}"
+                )
+                try:
+                    self._load_platform_file(platform_path)
+                    return  # Only load the specific file, don't load others
+                except Exception as e:
+                    logger.error(
+                        f"Failed to load platform file from QXUB_PLATFORM_FILE {platform_path}: {e}"
+                    )
+            else:
+                logger.warning(
+                    f"Platform file specified in QXUB_PLATFORM_FILE does not exist: {specific_platform_file}"
+                )
+
+        # Default behavior: load from search paths
         for search_path in self.search_paths:
             if not search_path.exists():
                 logger.debug(f"Platform search path does not exist: {search_path}")

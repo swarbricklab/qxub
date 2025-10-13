@@ -8,6 +8,7 @@ import base64
 import difflib
 import logging
 import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +19,18 @@ from .alias_cli import alias_cli
 from .config import setup_logging
 from .config_cli import config_cli
 from .config_manager import config_manager
+
+# Import signal handler from execution module
+from .execution import _signal_handler, validate_execution_context
+from .executors import (
+    execute_conda,
+    execute_default,
+    execute_module,
+    execute_singularity,
+)
 from .history_cli import history
 from .history_manager import history_manager
+from .parameters import build_qsub_options, process_parameters
 from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resource_tracker import resource_tracker
 from .resources_cli import resources
@@ -31,16 +42,12 @@ class QxubGroup(click.Group):
 
     def get_command(self, ctx, cmd_name):
         """Override get_command to handle execution context."""
-        # Check if we have execution context
-        execution_options = ["env", "mod", "mods", "sif"]
+        # Check if we have execution context FIRST
+        execution_options = ["default", "env", "mod", "mods", "sif"]
         has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
 
+        # If we have execution context, don't resolve as subcommand
         if has_execution_context:
-            return None
-
-        # Check if we have protected args (commands after --) without execution context
-        # This indicates default execution should be used
-        if hasattr(ctx, "protected_args") and ctx.protected_args:
             return None
 
         return super().get_command(ctx, cmd_name)
@@ -48,12 +55,10 @@ class QxubGroup(click.Group):
     def invoke(self, ctx):
         """Override invoke to handle execution contexts."""
         # Check if we have execution context
-        execution_options = ["env", "mod", "mods", "sif"]
+        execution_options = ["default", "env", "mod", "mods", "sif"]
         has_execution_context = any(ctx.params.get(opt) for opt in execution_options)
 
-        if (
-            has_execution_context or hasattr(ctx, "protected_args")
-        ) and ctx.protected_args:
+        if has_execution_context and ctx.protected_args:
             # We have execution context and protected args (the command)
             # Combine args for the command and invoke the main function directly
             combined_args = list(ctx.protected_args) + ctx.args
@@ -68,9 +73,12 @@ class QxubGroup(click.Group):
                 )  # Get the unwrapped function
                 return qxub_func(
                     ctx,
+                    ctx.params["remote"],
+                    ctx.params["config"],
                     ctx.params["execdir"],
                     ctx.params["verbose"],
                     ctx.params["version"],
+                    ctx.params["default"],
                     ctx.params["env"],
                     ctx.params["mod"],
                     ctx.params["mods"],
@@ -79,14 +87,18 @@ class QxubGroup(click.Group):
                     ctx.params["template"],
                     ctx.params["pre"],
                     ctx.params["post"],
+                    ctx.params["cmd"],
                     **{
                         k: v
                         for k, v in ctx.params.items()
                         if k
                         not in [
+                            "remote",
+                            "config",
                             "execdir",
                             "verbose",
                             "version",
+                            "default",
                             "env",
                             "mod",
                             "mods",
@@ -95,6 +107,7 @@ class QxubGroup(click.Group):
                             "template",
                             "pre",
                             "post",
+                            "cmd",
                         ]
                     },
                 )
@@ -234,155 +247,15 @@ class QxubGroup(click.Group):
         return False
 
 
-def _get_default_output_dir():
-    """Get appropriate output directory that works across login and compute nodes."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Prefer shared scratch space over TMPDIR to avoid cross-node access issues
-    project = os.getenv("PROJECT", "a56")
-    user = os.getenv("USER", "unknown")
-
-    # Try shared scratch first
-    scratch_path = Path("/scratch", project, user, "qt", timestamp)
-    if scratch_path.parent.parent.exists():  # /scratch/PROJECT/USER exists
-        return scratch_path
-
-    # Fallback to current directory
-    return Path(os.getcwd(), "qt", timestamp)
-
-
-def _get_config_default(key: str, fallback=None):
-    """Get default value from config or fallback."""
-    defaults = config_manager.get_defaults()
-    return defaults.get(key, fallback)
-
-
-def _sanitize_job_name(name: str) -> str:
-    """Sanitize job name for PBS compliance.
-
-    PBS job names cannot contain certain characters like /, :, @, etc.
-    Replace problematic characters with safe alternatives.
-    """
-    if not name:
-        return name
-
-    # Replace problematic characters with safe alternatives
-    sanitized = name.replace("/", "_")  # Paths to underscores
-    sanitized = sanitized.replace(":", "_")  # Colons to underscores
-    sanitized = sanitized.replace(" ", "_")  # Spaces to underscores
-    sanitized = sanitized.replace("@", "_")  # At symbols to underscores
-
-    # Remove any remaining non-alphanumeric characters except hyphens and underscores
-    sanitized = "".join(c for c in sanitized if c.isalnum() or c in "-_")
-
-    # Ensure it starts with a letter or number (not special character)
-    if sanitized and not sanitized[0].isalnum():
-        sanitized = "job_" + sanitized
-
-    # Limit length (PBS has limits on job name length)
-    if len(sanitized) > 50:
-        sanitized = sanitized[:47] + "..."
-
-    return sanitized or "job"  # Fallback if sanitization results in empty string
-
-
-def _get_config_default_callable(key: str, fallback_callable):
-    """Get default value from config or call fallback function."""
-
-    def _default():
-        defaults = config_manager.get_defaults()
-        value = defaults.get(key)
-        if value is not None:
-            # Resolve templates if it's a string with placeholders
-            if isinstance(value, str) and "{" in value:
-                template_vars = config_manager.get_template_variables()
-                return config_manager.resolve_templates(value, template_vars)
-            return value
-        return fallback_callable()
-
-    return _default
-
-
-def _get_conda_template():
-    """Get default conda template path."""
-    import pkg_resources
-
-    # Try pkg_resources first
-    try:
-        template_path = pkg_resources.resource_filename(
-            __name__, "jobscripts/qconda.pbs"
-        )
-        if os.path.exists(template_path):
-            return template_path
-    except (ImportError, AttributeError, FileNotFoundError):
-        pass
-
-    # Fallback to relative path from this module
-    current_dir = Path(__file__).parent
-    template_path = current_dir / "jobscripts" / "qconda.pbs"
-    if template_path.exists():
-        return str(template_path)
-
-    # Last resort - raise an informative error
-    raise FileNotFoundError(
-        f"Could not locate qconda.pbs template file. "
-        f"Looked in: {current_dir / 'jobscripts' / 'qconda.pbs'}"
-    )
-
-
-def _get_module_template():
-    """Get default module template path."""
-    import pkg_resources
-
-    # Try pkg_resources first
-    try:
-        template_path = pkg_resources.resource_filename(__name__, "jobscripts/qmod.pbs")
-        if os.path.exists(template_path):
-            return template_path
-    except (ImportError, AttributeError, FileNotFoundError):
-        pass
-
-    # Fallback to relative path from this module
-    current_dir = Path(__file__).parent
-    template_path = current_dir / "jobscripts" / "qmod.pbs"
-    if template_path.exists():
-        return str(template_path)
-
-    # Last resort - raise an informative error
-    raise FileNotFoundError(
-        f"Could not locate qmod.pbs template file. "
-        f"Looked in: {current_dir / 'jobscripts' / 'qmod.pbs'}"
-    )
-
-
-def _get_singularity_template():
-    """Get default singularity template path."""
-    import pkg_resources
-
-    # Try pkg_resources first
-    try:
-        template_path = pkg_resources.resource_filename(
-            __name__, "jobscripts/qsing.pbs"
-        )
-        if os.path.exists(template_path):
-            return template_path
-    except (ImportError, AttributeError, FileNotFoundError):
-        pass
-
-    # Fallback to relative path from this module
-    current_dir = Path(__file__).parent
-    template_path = current_dir / "jobscripts" / "qsing.pbs"
-    if template_path.exists():
-        return str(template_path)
-
-    # Last resort - raise an informative error
-    raise FileNotFoundError(
-        f"Could not locate qsing.pbs template file. "
-        f"Looked in: {current_dir / 'jobscripts' / 'qsing.pbs'}"
-    )
-
-
 @click.group(cls=QxubGroup, invoke_without_command=True)
+@click.option(
+    "--remote",
+    help="Execute on remote system (defined in ~/.config/qxub/config.yaml)",
+)
+@click.option(
+    "--config",
+    help="Alternative configuration file (default: ~/.config/qxub/config.yaml)",
+)
 @click.option(
     "--execdir",
     default=os.getcwd(),
@@ -431,6 +304,9 @@ def _get_singularity_template():
     help="Show version and exit",
 )
 # Execution context options (mutually exclusive)
+@click.option(
+    "--default", is_flag=True, help="Default execution (no special environment)"
+)
 @click.option("--env", "--conda", help="Conda environment for execution")
 @click.option("--mod", multiple=True, help="Environment module to load (repeatable)")
 @click.option("--mods", "--modules", help="Comma-separated list of environment modules")
@@ -442,12 +318,19 @@ def _get_singularity_template():
 )
 @click.option("--pre", help="Command to run before the main command")
 @click.option("--post", help="Command to run after the main command")
+@click.option(
+    "--cmd",
+    help="Command to execute (supports ${var} for submission-time and ${{var}} for execution-time variables)",
+)
 @click.pass_context
 def qxub(
     ctx,
+    remote,
+    config,
     execdir,
     verbose,
     version,
+    default,
     env,
     mod,
     mods,
@@ -456,6 +339,7 @@ def qxub(
     template,
     pre,
     post,
+    cmd,
     **params,
 ):
     """
@@ -468,13 +352,19 @@ def qxub(
         qxub resources --help
 
     For job execution, use the execution options directly:
+        qxub --default -- echo "hello world"
         qxub --env myenv -- python script.py
         qxub --mod python3 --mod gcc -- make
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
 
+    For complex commands with variables, use --cmd:
+        qxub --env myenv --cmd "python script.py --input ${HOME}/data.txt"
+        qxub --env myenv --cmd "echo 'Job ${{PBS_JOBID}} on node ${{HOSTNAME}}'"
+
     Use --queue auto for intelligent queue selection:
         qxub --queue auto -l mem=500GB --env myenv -- python big_job.py
+        qxub --queue auto -l mem=500GB --default -- my_binary
     """
     # Handle version flag first
     if version:
@@ -483,6 +373,26 @@ def qxub(
         click.echo(f"qxub {__version__}")
         ctx.exit()
 
+    # Handle remote execution early
+    if remote:
+        # Gather all parameters for remote execution
+        all_params = dict(params)
+        all_params.update(
+            {
+                "verbose": verbose,
+                "version": version,
+                "env": env,
+                "mod": mod,
+                "mods": mods,
+                "sif": sif,
+                "bind": bind,
+                "template": template,
+                "pre": pre,
+                "post": post,
+            }
+        )
+        return _handle_remote_execution(ctx, remote, config, execdir, **all_params)
+
     setup_logging(verbose)
     logging.debug("Execution directory: %s", execdir)
     logging.debug("Remaining args: %s", ctx.args)
@@ -490,6 +400,19 @@ def qxub(
 
     # Get remaining arguments (these would be the command to execute)
     command = tuple(ctx.args) if ctx.args else tuple()
+
+    # Handle --cmd vs traditional -- syntax
+    if cmd and command:
+        click.echo(
+            "Error: Cannot specify both --cmd and command after --. Use either:\n"
+            '  qxub --env base --cmd "command with ${vars}"\n'
+            "  qxub --env base -- command args",
+            err=True,
+        )
+        ctx.exit(2)
+    elif cmd:
+        # Convert --cmd string to tuple for compatibility
+        command = (cmd,)
 
     # Consolidate alternative option names
     conda_env = env  # --env and --conda both map to 'env' parameter
@@ -504,8 +427,10 @@ def qxub(
     container = sif  # --sif, --sing, and --singularity all map to 'sif' parameter
 
     # Check if any execution context is specified
-    execution_contexts = [conda_env, module_list, container]
-    has_execution_context = any(execution_contexts)
+    execution_contexts = [default, conda_env, module_list, container]
+    has_execution_context, context_type = validate_execution_context(
+        default, conda_env, module_list, container
+    )
 
     # If a subcommand is being invoked, just set up context and let Click handle it
     if ctx.invoked_subcommand is not None:
@@ -513,10 +438,6 @@ def qxub(
         # Fall through to context setup and let Click handle the subcommand
     elif has_execution_context:
         # We have execution context - this is direct execution
-        # Validate mutual exclusivity
-        if sum(bool(x) for x in execution_contexts) > 1:
-            raise click.ClickException("Cannot specify multiple execution contexts")
-
         # Validate that a command is provided
         if not command:
             click.echo(
@@ -536,168 +457,11 @@ def qxub(
             click.echo(ctx.get_help())
             ctx.exit(0)
 
-    # Apply config defaults for any unset parameters
-    defaults = config_manager.get_defaults()
+    # Process parameters using the new parameter module
+    params = process_parameters(params)
 
-    # Apply defaults if not explicitly set by CLI
-    if params["out"] is None:
-        params["out"] = defaults.get("out", _get_default_output_dir() / "out")
-    if params["err"] is None:
-        params["err"] = defaults.get("err", _get_default_output_dir() / "err")
-    if params["joblog"] is None:
-        params["joblog"] = defaults.get("joblog")
-    if params["queue"] is None:
-        params["queue"] = defaults.get("queue", "normal")
-    if params["name"] is None:
-        params["name"] = defaults.get("name", "qt")
-    if params["project"] is None:
-        params["project"] = defaults.get("project", os.getenv("PROJECT"))
-    if not params["resources"]:  # Empty tuple means no resources provided
-        params["resources"] = defaults.get("resources", [])
-
-    for key, value in params.items():
-        logging.debug("qsub option: %s = %s", key, value)
-    ctx.ensure_object(dict)
-
-    # Resolve template variables for any config-provided values
-    template_vars = config_manager.get_template_variables(
-        name=params["name"], project=params["project"], queue=params["queue"]
-    )
-
-    # Resolve template strings
-    resolved_params = {}
-    for key, value in params.items():
-        if isinstance(value, str) and "{" in value:
-            resolved_params[key] = config_manager.resolve_templates(
-                value, template_vars
-            )
-        else:
-            resolved_params[key] = value
-    params.update(resolved_params)
-
-    # Sanitize job name for PBS compliance
-    if params["name"]:
-        params["name"] = _sanitize_job_name(params["name"])
-
-    # Handle joblog default
-    joblog = params["joblog"] or f"{params['name']}.log"
-    if isinstance(joblog, str) and "{" in joblog:
-        joblog = config_manager.resolve_templates(joblog, template_vars)
-
-    # Auto-select queue if needed
-    if params["queue"] == "auto":
-        try:
-            from pathlib import Path
-
-            from .platform import PlatformLoader
-            from .resource_utils import parse_memory_size, parse_walltime
-
-            # Check for QXUB_PLATFORM_PATHS environment variable
-            platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
-            if platform_paths_env:
-                search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
-                loader = PlatformLoader(search_paths=search_paths)
-            else:
-                loader = PlatformLoader()
-
-            platform_names = loader.list_platforms()
-
-            if not platform_names:
-                logging.warning(
-                    "No platforms available for auto queue selection, using 'normal'"
-                )
-                params["queue"] = "normal"
-            else:
-                # Build requirements from resources
-                requirements = {}
-                if params.get("resources"):
-                    for resource in params["resources"]:
-                        if "=" in resource:
-                            key, value = resource.split("=", 1)
-                            if key == "mem":
-                                requirements["memory"] = (
-                                    value  # Keep as string for condition parsing
-                                )
-                            elif key == "walltime":
-                                requirements["walltime"] = (
-                                    value  # Keep as string for condition parsing
-                                )
-                            elif key == "ncpus":
-                                requirements["cpus"] = int(
-                                    value
-                                )  # Use "cpus" not "ncpus"
-                            elif key in ["ngpus", "gpu"]:
-                                gpu_count = int(value) if value.isdigit() else 1
-                                requirements["gpu_requested"] = (
-                                    gpu_count  # Use "gpu_requested" for conditions
-                                )
-                                requirements["gpus"] = (
-                                    gpu_count  # Keep "gpus" for validation
-                                )
-
-                # Try to find best queue from any platform
-                best_queue = None
-                best_cost = float("inf")
-
-                for platform_name in platform_names:
-                    platform = loader.get_platform(platform_name)
-                    if not platform:
-                        continue
-
-                    try:
-                        selected_queue = platform.select_queue(requirements)
-                        if selected_queue:
-                            # Get estimated cost for comparison
-                            queue = platform.get_queue(selected_queue)
-                            if queue:
-                                # Estimate cost based on cores and walltime
-                                cores = requirements.get("cpus", 1)
-                                walltime_hours = requirements.get("walltime", 3600)
-                                # Convert walltime to hours if it's a string
-                                if isinstance(walltime_hours, str):
-                                    from .resource_utils import parse_walltime
-
-                                    walltime_hours = (
-                                        parse_walltime(walltime_hours) or 1.0
-                                    )
-                                elif isinstance(walltime_hours, (int, float)):
-                                    walltime_hours = (
-                                        walltime_hours / 3600.0
-                                    )  # Convert seconds to hours
-
-                                cost = queue.estimate_su_cost(cores, walltime_hours)
-                                if cost < best_cost:
-                                    best_cost = cost
-                                    best_queue = selected_queue
-                    except Exception as e:
-                        logging.debug(
-                            f"Failed to select queue from platform {platform.name}: {e}"
-                        )
-                        continue
-
-                if best_queue:
-                    params["queue"] = best_queue
-                    logging.info(f"Auto-selected queue: {best_queue}")
-                else:
-                    logging.warning(
-                        "No suitable queue found for requirements, using 'normal'"
-                    )
-                    params["queue"] = "normal"
-
-        except ImportError:
-            logging.warning(
-                "Platform system not available for auto queue selection, using 'normal'"
-            )
-            params["queue"] = "normal"
-        except Exception as e:
-            logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
-            params["queue"] = "normal"
-
-    # Construct the qsub options
-    options = "-N {name} -q {queue} -P {project} ".format_map(params)
-    if params.get("resources"):
-        options += " ".join([f"-l {resource}" for resource in params["resources"]])
-    options += f" -o {joblog}"
+    # Build qsub options
+    options = build_qsub_options(params)
     logging.info("Options: %s", options)
 
     # Load qsub options into context
@@ -710,15 +474,18 @@ def qxub(
     ctx.obj["err"] = params["err"]
     ctx.obj["dry"] = params["dry"]
     ctx.obj["quiet"] = params["quiet"]
+    ctx.obj["verbose"] = verbose
 
     # If we reach here and have an execution context, execute the job
     if has_execution_context:
-        if conda_env:
+        if context_type == "conda":
             execute_conda(ctx, command, conda_env, template, pre, post)
-        elif module_list:
+        elif context_type == "module":
             execute_module(ctx, command, module_list, template, pre, post)
-        elif container:
+        elif context_type == "singularity":
             execute_singularity(ctx, command, container, bind, template, pre, post)
+        elif context_type == "default":
+            execute_default(ctx, command, template, pre, post)
     elif command:
         # No execution context but command provided - use default template
         execute_default(ctx, command, template, pre, post)
@@ -727,298 +494,226 @@ def qxub(
         pass
 
 
-def execute_conda(ctx, command, env, template=None, pre=None, post=None):
-    """Execute command in conda environment."""
-    if not env:
-        click.echo(
-            "Error: No conda environment available. Either activate a conda environment or use --env to specify one.",
-            err=True,
-        )
-        ctx.exit(2)
+def _handle_remote_execution(ctx, remote_name, config_file, execdir, **params):
+    """Handle remote execution via SSH."""
+    try:
+        from .remote_config_loader import ConfigLoadError, get_remote_config
+        from .remote_executor import ConnectionError as RemoteConnectionError
+        from .remote_executor import RemoteExecutorFactory
 
-    # Use default template if not provided
-    if not template:
-        template = _get_conda_template()
+        # Get command to execute
+        command = ctx.args if ctx.args else []
+        if not command:
+            click.echo("Error: Command is required for remote execution.", err=True)
+            ctx.exit(2)
 
-    ctx_obj = ctx.obj
-    out = Path(ctx_obj["out"])
-    err = Path(ctx_obj["err"])
-
-    # Log parameters and context
-    for key, value in ctx_obj.items():
-        logging.debug("Context: %s = %s", key, value)
-    logging.debug("Conda environment: %s", env)
-    logging.debug("Jobscript template: %s", template)
-    logging.debug("Command: %s", command)
-    logging.debug("Pre-commands: %s", pre)
-    logging.debug("Post-commands: %s", post)
-
-    # Construct qsub command
-    cmd_str = " ".join(command)
-    # Base64 encode the command to avoid escaping issues
-    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
-    submission_vars = (
-        f'env={env},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
-        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
-    )
-    if pre:
-        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
-        submission_vars += f',pre_cmd_b64="{pre_b64}"'
-    if post:
-        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
-        submission_vars += f',post_cmd_b64="{post_b64}"'
-
-    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
-
-    if ctx_obj["dry"]:
-        print(f"Dry run - would execute: {submission_command}")
-        # Log history even for dry runs
+        # Load remote configuration
         try:
-            history_manager.log_execution(ctx, success=True)
-        except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
-        return
+            remote_config = get_remote_config(remote_name, config_file)
+        except ConfigLoadError as e:
+            click.echo(f"Configuration error: {e}", err=True)
+            ctx.exit(1)
 
-    # Submit job and handle monitoring
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+        # Get verbose level for output (early, so we can show info even if connection fails)
+        verbose = params.get("verbose", 0)
 
-    # Log execution to history system
-    try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
-    except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
-
-    # Log job execution for resource tracking
-    # Note: ResourceTracker expects resource_data which is available after job completion
-    # For now, just log the basic command info
-    try:
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
+        # Determine remote working directory early for verbose output
+        local_cwd = Path(execdir).resolve()
+        explicit_execdir = (
+            params.get("execdir") if params.get("execdir") != os.getcwd() else None
         )
-    except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
+        remote_working_dir = remote_config.determine_remote_working_dir(
+            local_cwd, explicit_execdir
+        )
 
+        # Always show some remote execution info if verbose
+        if verbose >= 1:
+            click.echo(f"🌐 Remote execution to: {remote_config.url}")
+            click.echo(f"📁 Remote working directory: {remote_working_dir}")
+            click.echo(f"🐍 Remote conda environment: {remote_config.qxub_env}")
+            click.echo(f"📋 Platform file: {remote_config.platform_file}")
 
-def execute_module(ctx, command, modules, template=None, pre=None, post=None):
-    """Execute command with environment modules."""
-    if not modules:
-        click.echo("Error: No environment modules specified.", err=True)
-        ctx.exit(2)
+            # Show SSH connection details if verbose >= 2
+            if verbose >= 2:
+                ssh_details = []
+                if remote_config.username:
+                    ssh_details.append(f"user={remote_config.username}")
+                if remote_config.port and remote_config.port != 22:
+                    ssh_details.append(f"port={remote_config.port}")
+                if remote_config.config:
+                    ssh_details.append(f"config={remote_config.config}")
+                else:
+                    ssh_details.append("config=~/.ssh/config (default)")
 
-    # Use default template if not provided
-    if not template:
-        template = _get_module_template()
+                if ssh_details:
+                    click.echo(f"🔑 SSH details: {', '.join(ssh_details)}")
 
-    ctx_obj = ctx.obj
-    out = Path(ctx_obj["out"])
-    err = Path(ctx_obj["err"])
+        # Build remote qxub command early (for verbose output)
+        remote_args = []
 
-    # Log parameters and context
-    for key, value in ctx_obj.items():
-        logging.debug("Context: %s = %s", key, value)
-    logging.debug("Environment modules: %s", modules)
-    logging.debug("Jobscript template: %s", template)
-    logging.debug("Command: %s", command)
-    logging.debug("Pre-commands: %s", pre)
-    logging.debug("Post-commands: %s", post)
+        # The platform file will be set via environment variable, not CLI argument
+        # This avoids the "--platform-file" invalid option error
 
-    # Construct qsub command
-    cmd_str = " ".join(command)
-    mods_str = " ".join(modules)
-    # Base64 encode the command to avoid escaping issues
-    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
-    submission_vars = (
-        f'mods="{mods_str}",cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
-        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
-    )
-    if pre:
-        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
-        submission_vars += f',pre_cmd_b64="{pre_b64}"'
-    if post:
-        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
-        submission_vars += f',post_cmd_b64="{post_b64}"'
+        # Add execution directory
+        remote_args.extend(["--execdir", remote_working_dir])
 
-    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
+        # Add other parameters (excluding remote-specific and config params)
+        for key, value in params.items():
+            # Skip parameters that are remote-execution specific or shouldn't be forwarded
+            if key in ["remote", "config", "execdir"] or value is None:
+                continue
 
-    if ctx_obj["dry"]:
-        print(f"Dry run - would execute: {submission_command}")
-        # Log history even for dry runs
+            # Handle special parameter formatting
+            if key == "resources":
+                # Only add resources if there are actual resource specifications
+                if value and len(value) > 0:
+                    for resource in value:
+                        remote_args.extend(["-l", resource])
+            elif key == "mod":
+                # Only add modules if there are actual module specifications
+                if value and len(value) > 0:
+                    for module in value:
+                        remote_args.extend(["--mod", module])
+            elif isinstance(value, bool):
+                if value:
+                    remote_args.append(f'--{key.replace("_", "-")}')
+            elif isinstance(value, (list, tuple)) and len(value) == 0:
+                # Skip empty lists/tuples to avoid adding empty parameters
+                continue
+            else:
+                remote_args.extend([f'--{key.replace("_", "-")}', str(value)])
+
+        # Add the command to execute
+        if command:
+            remote_args.append("--")
+            remote_args.extend(command)
+
+        # Build final qxub command
+        qxub_command = "qxub " + " ".join(
+            f"'{arg}'" if " " in arg else arg for arg in remote_args
+        )
+
+        if verbose >= 2:
+            click.echo(f"🚀 Remote command: {qxub_command}")
+
+        # Execute remotely
+        is_dry_run = params.get("dry", False)
+        if is_dry_run:
+            click.echo(f"🧪 Dry run - would execute remotely: {qxub_command}")
+            ctx.exit(0)
+
+        # Create executor only if not dry-run
+        executor = RemoteExecutorFactory.create(remote_config)
+
+        # Show connection attempt info if verbose
+        if verbose >= 1:
+            click.echo(f"🔗 Testing SSH connection to {remote_config.hostname}...")
+            if verbose >= 2:
+                connection_details = []
+                if remote_config.username:
+                    connection_details.append(f"User: {remote_config.username}")
+                if remote_config.port:
+                    connection_details.append(f"Port: {remote_config.port}")
+                if remote_config.config:
+                    connection_details.append(f"Config: {remote_config.config}")
+                if connection_details:
+                    click.echo(
+                        f"   Connection details: {', '.join(connection_details)}"
+                    )
+
+        # Test connection
+        if not executor.test_connection():
+            click.echo(
+                f"❌ Error: Cannot connect to {remote_config.hostname}", err=True
+            )
+
+            # Show detailed error information if available
+            if hasattr(executor, "get_connection_error_details"):
+                error_details = executor.get_connection_error_details()
+                if error_details:
+                    if "returncode" in error_details:
+                        click.echo(
+                            f"   SSH exit code: {error_details['returncode']}", err=True
+                        )
+                        if error_details["stderr"]:
+                            click.echo(
+                                f"   SSH error: {error_details['stderr']}", err=True
+                            )
+                        if verbose >= 2 and error_details["command"]:
+                            click.echo(
+                                f"   SSH command: {error_details['command']}", err=True
+                            )
+                    elif "error" in error_details:
+                        click.echo(f"   Error type: {error_details['error']}", err=True)
+                        if error_details.get("message"):
+                            click.echo(
+                                f"   Details: {error_details['message']}", err=True
+                            )
+
+            click.echo("💡 Suggestions:", err=True)
+            if hasattr(executor, "config") and executor.config.protocol == "ssh":
+                click.echo(
+                    f"   • Check SSH configuration in {remote_config.config or '~/.ssh/config'}",
+                    err=True,
+                )
+                click.echo(
+                    "   • Verify network connectivity and VPN if required", err=True
+                )
+                click.echo(
+                    f"   • Test connection manually: ssh {remote_config.hostname} echo 'test'",
+                    err=True,
+                )
+                if remote_config.username:
+                    click.echo(
+                        f"   • Test with explicit user: ssh {remote_config.username}@{remote_config.hostname} echo 'test'",
+                        err=True,
+                    )
+                click.echo(
+                    "   • Check SSH key permissions: chmod 600 ~/.ssh/id_*", err=True
+                )
+                click.echo(
+                    "   • Add verbose SSH debugging: ssh -vvv hostname", err=True
+                )
+            ctx.exit(1)
+
+        # Show successful connection if verbose
+        if verbose >= 1:
+            click.echo(f"✅ SSH connection successful to {remote_config.hostname}")
+
+        # Execute remotely (not dry-run, so actually execute)
+        if verbose >= 1:
+            click.echo(f"🚀 Executing remote command...")
+            if verbose >= 2:
+                click.echo(
+                    f"   SSH target: {remote_config.username}@{remote_config.hostname}"
+                    if remote_config.username
+                    else f"   SSH target: {remote_config.hostname}"
+                )
+                click.echo(f"   Working directory: {remote_working_dir}")
+
         try:
-            history_manager.log_execution(ctx, success=True)
+            exit_code = executor.execute(
+                qxub_command, remote_working_dir, stream_output=True, verbose=verbose
+            )
+            if verbose >= 1:
+                click.echo(f"✅ Remote execution completed with exit code: {exit_code}")
+            ctx.exit(exit_code)
+        except click.exceptions.Exit:
+            # Re-raise Click's exit exceptions (this is normal behavior)
+            raise
         except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
-        return
+            click.echo(f"Remote execution failed: {e}", err=True)
+            ctx.exit(1)
 
-    # Submit job and handle monitoring
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
-
-    # Log execution to history system
-    try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
-    except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
-
-    # Log job execution for resource tracking
-    try:
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
-        )
-    except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
-
-
-def execute_singularity(
-    ctx, command, container, bind=None, template=None, pre=None, post=None
-):
-    """Execute command in Singularity container."""
-    if not container:
-        click.echo("Error: Singularity container path is required.", err=True)
-        ctx.exit(2)
-
-    # Use default template if not provided
-    if not template:
-        template = _get_singularity_template()
-
-    ctx_obj = ctx.obj
-    out = Path(ctx_obj["out"])
-    err = Path(ctx_obj["err"])
-
-    # Log parameters and context
-    for key, value in ctx_obj.items():
-        logging.debug("Context: %s = %s", key, value)
-    logging.debug("Singularity container: %s", container)
-    logging.debug("Bind mounts: %s", bind)
-    logging.debug("Jobscript template: %s", template)
-    logging.debug("Command: %s", command)
-    logging.debug("Pre-commands: %s", pre)
-    logging.debug("Post-commands: %s", post)
-
-    # Construct qsub command
-    cmd_str = " ".join(command)
-    # Base64 encode the command to avoid escaping issues
-    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
-    submission_vars = (
-        f'sif={container},cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
-        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
-    )
-    if bind:
-        submission_vars += f',bind="{bind}"'
-    if pre:
-        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
-        submission_vars += f',pre_cmd_b64="{pre_b64}"'
-    if post:
-        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
-        submission_vars += f',post_cmd_b64="{post_b64}"'
-
-    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
-
-    if ctx_obj["dry"]:
-        print(f"Dry run - would execute: {submission_command}")
-        # Log history even for dry runs
-        try:
-            history_manager.log_execution(ctx, success=True)
-        except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
-        return
-
-    # Submit job and handle monitoring
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
-
-    # Log execution to history system
-    try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
-    except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
-
-    # Log job execution for resource tracking
-    try:
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
-        )
-    except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
-
-
-def execute_default(ctx, command, template=None, pre=None, post=None):
-    """Execute command using default template (no environment activation)."""
-    # Use default template if not provided
-    if not template:
-        template = _get_default_template()
-
-    ctx_obj = ctx.obj
-    out = Path(ctx_obj["out"])
-    err = Path(ctx_obj["err"])
-
-    # Generate command string
-    cmd_str = " ".join(command)
-
-    # Base64 encode the command to safely pass it to the job script
-    cmd_b64 = base64.b64encode(cmd_str.encode()).decode()
-
-    # Encode pre and post commands if provided
-    pre_cmd_b64 = base64.b64encode(pre.encode()).decode() if pre else ""
-    post_cmd_b64 = base64.b64encode(post.encode()).decode() if post else ""
-
-    # Build qsub command
-    submission_vars = (
-        f'cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},'
-        f'out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
-    )
-    if pre:
-        submission_vars += f',pre_cmd_b64="{pre_cmd_b64}"'
-    if post:
-        submission_vars += f',post_cmd_b64="{post_cmd_b64}"'
-
-    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
-
-    if ctx_obj["dry"]:
-        click.echo(f"Dry run - would execute: {submission_command}")
-        # Log history even for dry runs
-        try:
-            history_manager.log_execution(ctx, success=True)
-        except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
-        return
-
-    # Submit job and handle monitoring
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
-
-    # Log execution to history system
-    try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
-    except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
-
-    # Log job execution for resource tracking
-    try:
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
-        )
-    except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
-
-
-def _get_default_template():
-    """Get the default job script template."""
-    template_path = Path(__file__).parent / "jobscripts" / "qdefault.pbs"
-    if not template_path.exists():
-        raise FileNotFoundError(
-            f"Default template not found: {template_path}. "
-            f"Looked in: {Path(__file__).parent / 'jobscripts' / 'qdefault.pbs'}"
-        )
-    return template_path
+    except ImportError as e:
+        click.echo(f"Remote execution not available: {e}", err=True)
+        click.echo("This feature requires additional dependencies.", err=True)
+        ctx.exit(1)
+    except RemoteConnectionError as e:
+        click.echo(f"Connection error: {e}", err=True)
+        for suggestion in e.suggestions:
+            click.echo(f"  - {suggestion}", err=True)
+        ctx.exit(1)
 
 
 # CLI Management Commands (these remain as separate commands)

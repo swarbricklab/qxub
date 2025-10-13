@@ -209,10 +209,10 @@ Existing v2.0 configuration files work unchanged:
 
 ### v2.1 → v2.2 Migration
 
-Adds platform profiles without breaking existing configuration:
+Adds remote execution without breaking existing configuration:
 - Local execution behavior unchanged
-- New `--profile` option for remote execution
-- Profile-specific defaults override global defaults
+- New `--remote` option for remote execution
+- Remote-specific settings in user config
 
 ## Configuration Commands
 
@@ -248,7 +248,7 @@ qxub config profile set gadi.remote.host gadi.nci.org.au
 
 1. **Auto-selection**: Only active when `queue: "auto"` or config enabled
 2. **Auto-adjustment**: Only active when policies configured
-3. **Platform profiles**: Only active when `--profile` specified
+3. **Remote execution**: Only active when `--remote` specified
 
 ## Validation Rules
 
@@ -256,7 +256,7 @@ qxub config profile set gadi.remote.host gadi.nci.org.au
 2. **Queue overrides** must reference valid queues for the platform
 3. **Resource policies** must be valid policy names
 4. **Auto-selection strategies** must be recognized strategy names
-5. **Profile names** must be unique and valid identifiers
+5. **Remote names** must be unique and valid identifiers
 
 ## Future Extensions
 
