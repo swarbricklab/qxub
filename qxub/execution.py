@@ -207,11 +207,6 @@ def submit_and_monitor_job(
         logging.info("Exiting in quiet mode")
         return
 
-    # Display job ID to user (unless in quiet mode)
-    if not ctx_obj["quiet"]:
-        success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
-        print_status(success_msg, final=True)
-
     # Register signal handler for Ctrl+C cleanup
     signal.signal(signal.SIGINT, _signal_handler)
 

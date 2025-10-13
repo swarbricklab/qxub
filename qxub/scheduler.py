@@ -215,23 +215,23 @@ def qsub(cmd, quiet=False):
         click.echo("Expected qsub comment. Exiting")
         sys.exit(1)
 
-    with JobSpinner(show_message=False, quiet=quiet):
-        # pylint: disable=W1510
-        result = subprocess.run(
-            shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        if result.returncode != 0:
-            logging.debug("Job submission failed")
-            click.echo(result.stderr)
+    # Submit job directly without spinner (spinner is handled in monitor)
+    # pylint: disable=W1510
+    result = subprocess.run(
+        shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if result.returncode != 0:
+        logging.debug("Job submission failed")
+        click.echo(result.stderr)
 
-            # Map PBS validation errors to exit code 2 for consistency
-            if result.returncode == 166:  # PBS validation error
-                sys.exit(2)
-            else:
-                sys.exit(result.returncode)
+        # Map PBS validation errors to exit code 2 for consistency
+        if result.returncode == 166:  # PBS validation error
+            sys.exit(2)
         else:
-            logging.debug("Job submitted successfully")
-            return result.stdout.rstrip("\n")
+            sys.exit(result.returncode)
+    else:
+        logging.debug("Job submitted successfully")
+        return result.stdout.rstrip("\n")
 
 
 def qdel(job_id, quiet=False):
@@ -657,13 +657,8 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
     # Start event-driven spinner - it will stop automatically on status changes
     logging.debug("Starting event-driven spinner and monitoring loop")
 
-    # Create spinner thread that responds to events, not timeouts
-    spinner_context = JobSpinner(
-        "", show_message=False, quiet=quiet, coordinator=coordinator
-    )
-    spinner_context.__enter__()
-
-    try:
+    # Use proper context manager for spinner
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
         while True:
             # Check if we should shutdown early
             if coordinator and coordinator.should_shutdown():
@@ -682,7 +677,7 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
                     if not job_started_notified and not quiet:
                         from qxub.execution import print_status
 
-                        print_status("🚀 Job started running", final=True)
+                        print_status("\r🚀 Job started running", final=True)
                         job_started_notified = True
 
                 elif status in ["F", "H"]:  # Job finished or held
@@ -709,10 +704,6 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
                     return 0  # Return success if interrupted
                 time.sleep(5)
 
-    finally:
-        # Ensure spinner is properly cleaned up
-        spinner_context.__exit__(None, None, None)
-
 
 def tail(log_file, destination, coordinator=None):
     """
@@ -736,8 +727,12 @@ def tail(log_file, destination, coordinator=None):
                 # Signal that output has started on first line
                 if not output_started and coordinator:
                     coordinator.signal_output_started()
-                    # DISABLED: Don't clear lines since spinner is disabled
-                    # print("\r" + " " * 120 + "\r", end="", flush=True)
+                    # Clear any leftover spinner characters before streaming output
+                    try:
+                        with open("/dev/tty", "w") as tty:
+                            print("\r", end="", flush=True, file=tty)
+                    except (OSError, IOError):
+                        pass  # Ignore if /dev/tty is not available
                     coordinator.signal_spinner_cleared()
                     output_started = True
 
