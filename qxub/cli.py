@@ -87,6 +87,7 @@ class QxubGroup(click.Group):
                     ctx.params["template"],
                     ctx.params["pre"],
                     ctx.params["post"],
+                    ctx.params["cmd"],
                     **{
                         k: v
                         for k, v in ctx.params.items()
@@ -106,6 +107,7 @@ class QxubGroup(click.Group):
                             "template",
                             "pre",
                             "post",
+                            "cmd",
                         ]
                     },
                 )
@@ -316,6 +318,10 @@ class QxubGroup(click.Group):
 )
 @click.option("--pre", help="Command to run before the main command")
 @click.option("--post", help="Command to run after the main command")
+@click.option(
+    "--cmd",
+    help="Command to execute (supports ${var} for submission-time and ${{var}} for execution-time variables)",
+)
 @click.pass_context
 def qxub(
     ctx,
@@ -333,6 +339,7 @@ def qxub(
     template,
     pre,
     post,
+    cmd,
     **params,
 ):
     """
@@ -350,6 +357,10 @@ def qxub(
         qxub --mod python3 --mod gcc -- make
         qxub --mods python3,gcc -- python script.py
         qxub --sif container.sif -- python script.py
+
+    For complex commands with variables, use --cmd:
+        qxub --env myenv --cmd "python script.py --input ${HOME}/data.txt"
+        qxub --env myenv --cmd "echo 'Job ${{PBS_JOBID}} on node ${{HOSTNAME}}'"
 
     Use --queue auto for intelligent queue selection:
         qxub --queue auto -l mem=500GB --env myenv -- python big_job.py
@@ -389,6 +400,19 @@ def qxub(
 
     # Get remaining arguments (these would be the command to execute)
     command = tuple(ctx.args) if ctx.args else tuple()
+
+    # Handle --cmd vs traditional -- syntax
+    if cmd and command:
+        click.echo(
+            "Error: Cannot specify both --cmd and command after --. Use either:\n"
+            '  qxub --env base --cmd "command with ${vars}"\n'
+            "  qxub --env base -- command args",
+            err=True,
+        )
+        ctx.exit(2)
+    elif cmd:
+        # Convert --cmd string to tuple for compatibility
+        command = (cmd,)
 
     # Consolidate alternative option names
     conda_env = env  # --env and --conda both map to 'env' parameter
@@ -450,6 +474,7 @@ def qxub(
     ctx.obj["err"] = params["err"]
     ctx.obj["dry"] = params["dry"]
     ctx.obj["quiet"] = params["quiet"]
+    ctx.obj["verbose"] = verbose
 
     # If we reach here and have an execution context, execute the job
     if has_execution_context:

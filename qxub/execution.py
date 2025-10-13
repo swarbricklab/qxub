@@ -7,6 +7,8 @@ that was previously duplicated across multiple execution functions.
 
 import base64
 import logging
+import os
+import re
 import signal
 import sys
 from pathlib import Path
@@ -20,6 +22,114 @@ from .scheduler import monitor_and_tail, print_status, qsub, start_job_monitorin
 
 # Global variable to track current job for signal handling
 _CURRENT_JOB_ID = None  # pylint: disable=invalid-name
+
+
+def expand_submission_variables(cmd_str: str) -> str:
+    """
+    Expand ${var} at submission time, convert ${{var}} to ${var} for execution.
+    All other $ usage is preserved unchanged.
+
+    Args:
+        cmd_str: Command string with potential variables
+
+    Returns:
+        Command string with submission variables expanded and execution variables prepared
+
+    Examples:
+        expand_submission_variables('echo "${USER} on ${{HOSTNAME}}"')
+        # Returns: 'echo "jr9959 on ${HOSTNAME}"'
+
+        expand_submission_variables('python -c "print($PATH)"')
+        # Returns: 'python -c "print($PATH)"' (unchanged)
+    """
+    import logging
+    import os
+    import re
+
+    def replace_submission_var(match):
+        """Replace ${var} with environment value."""
+        var_name = match.group(1)
+        value = os.environ.get(var_name)
+        if value is not None:
+            return value
+        else:
+            logging.warning(
+                f"Submission variable ${{{var_name}}} not found in environment"
+            )
+            return match.group(0)  # Keep original ${var}
+
+    def replace_execution_var(match):
+        """Convert ${{var}} to ${var} for execution-time expansion."""
+        var_name = match.group(1)
+        return f"${{{var_name}}}"
+
+    # Process execution variables first to avoid conflicts
+    result = re.sub(r"\$\{\{([^}]+)\}\}", replace_execution_var, cmd_str)
+
+    # Then process submission variables
+    result = re.sub(r"\$\{([^}]+)\}", replace_submission_var, result)
+
+    return result
+
+
+def expand_variables_preserving_quotes(cmd_str: str, is_list: bool = False) -> str:
+    """
+    Expand shell variables while preserving quote structure.
+
+    This function expands variables like $USER and ${HOME} at submission time
+    while preserving the exact quoting structure the user intended.
+    It does not use shell evaluation to avoid quote mangling.
+
+    Args:
+        cmd_str: Command string potentially containing variables
+
+    Returns:
+        Command string with variables expanded but quotes preserved
+
+    Examples:
+        expand_variables_preserving_quotes('echo "Hello $USER"')
+        # Returns: 'echo "Hello jr9959"'
+
+        expand_variables_preserving_quotes('python -c "print(\'$USER\')"')
+        # Returns: 'python -c "print(\'jr9959\')"'
+
+        expand_variables_preserving_quotes('echo "Job: \\$PBS_JOBID"')
+        # Returns: 'echo "Job: $PBS_JOBID"' (escaped variable preserved)
+    """
+    # Handle escaped variables first: \$VAR should become $VAR (literal)
+    # We need to do this before expanding other variables
+    result = cmd_str
+
+    # Replace \$VAR with a temporary placeholder to protect it from expansion
+    escaped_vars = []
+    escaped_pattern = r"\\(\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*)"
+
+    def save_escaped_var(match):
+        escaped_vars.append(match.group(1))  # Save the $VAR part
+        return f"__ESCAPED_VAR_{len(escaped_vars)-1}__"
+
+    result = re.sub(escaped_pattern, save_escaped_var, result)
+
+    # Now expand unescaped variables
+    def replace_var(match):
+        var_name = match.group(1) or match.group(2)  # Handle both ${VAR} and $VAR
+        value = os.environ.get(var_name)
+
+        if value is not None:
+            return value
+        else:
+            # Variable not found - keep as-is for potential execution-time expansion
+            return match.group(0)
+
+    # Match ${VAR} and $VAR patterns
+    pattern = r"\$\{([^}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)"
+    result = re.sub(pattern, replace_var, result)
+
+    # Restore escaped variables (without the escape backslash)
+    for i, escaped_var in enumerate(escaped_vars):
+        result = result.replace(f"__ESCAPED_VAR_{i}__", escaped_var)
+
+    return result
 
 
 def _signal_handler(signum, frame):
@@ -68,9 +178,12 @@ def build_submission_variables(
     Returns:
         Formatted submission variables string
     """
-    # Base64 encode the command to avoid escaping issues
+    # Join command and expand variables while preserving quotes
     cmd_str = " ".join(command)
-    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
+    cmd_expanded = expand_submission_variables(cmd_str)
+
+    # Base64 encode the expanded command
+    cmd_b64 = base64.b64encode(cmd_expanded.encode("utf-8")).decode("ascii")
 
     # Build base submission variables
     submission_vars = (
@@ -94,10 +207,12 @@ def build_submission_variables(
 
     # Add pre and post commands if provided
     if pre:
-        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
+        pre_expanded = expand_submission_variables(pre)
+        pre_b64 = base64.b64encode(pre_expanded.encode("utf-8")).decode("ascii")
         submission_vars += f',pre_cmd_b64="{pre_b64}"'
     if post:
-        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
+        post_expanded = expand_submission_variables(post)
+        post_b64 = base64.b64encode(post_expanded.encode("utf-8")).decode("ascii")
         submission_vars += f',post_cmd_b64="{post_b64}"'
 
     return submission_vars
@@ -166,7 +281,25 @@ def submit_and_monitor_job(
 
     # Handle dry run
     if ctx_obj["dry"]:
-        print(f"Dry run - would execute: {submission_command}")
+        # Show expanded commands for user verification
+        cmd_str = " ".join(command)
+        cmd_expanded = expand_submission_variables(cmd_str)
+        print(f"📝 Command to execute: {cmd_expanded}")
+
+        if pre:
+            pre_expanded = expand_submission_variables(pre)
+            print(f"📋 Pre-command: {pre_expanded}")
+        if post:
+            post_expanded = expand_submission_variables(post)
+            print(f"📋 Post-command: {post_expanded}")
+
+        # Show full qsub command only if verbose
+        verbose_level = ctx_obj.get("verbose", 0)
+        if verbose_level > 0:
+            print(f"🔧 Full qsub command: {submission_command}")
+        else:
+            print("Dry run - job would be submitted (use -v to see full qsub command)")
+
         # Log history even for dry runs
         try:
             history_manager.log_execution(ctx, success=True)

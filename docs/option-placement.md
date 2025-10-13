@@ -1,18 +1,30 @@
 # Option Placement
 
-qxub uses `--` to separate qxub options from your command.
+qxub supports two command specification methods:
 
-## The Rule
+## Method 1: Traditional `--` Separator
 
 ```bash
 qxub [QXUB_OPTIONS] -- [YOUR_COMMAND]
 ```
 
+## Method 2: `--cmd` Option
+
+```bash
+qxub [QXUB_OPTIONS] --cmd "YOUR_COMMAND"
+```
+
+Use `--cmd` for complex commands with variables, quotes, or special characters.
+
 ## Correct Examples
 
 ```bash
-# ✅ All qxub options before --
+# ✅ Traditional separator - simple commands
 qxub --env myenv --queue normal -l mem=16GB -- python script.py
+
+# ✅ --cmd option - complex commands with variables
+qxub --env myenv --cmd "python script.py --input ${HOME}/data.txt"
+qxub --env myenv --cmd 'echo "Job ${{PBS_JOBID}} on ${{HOSTNAME}}"'
 
 # ✅ Execution context options
 qxub --env pytorch -- python train.py
@@ -28,6 +40,9 @@ qxub -l mem=32GB -l ncpus=8 --queue gpu -- python script.py
 ```bash
 # ❌ qxub options after --
 qxub -- python script.py --env myenv
+
+# ❌ Both --cmd and -- together
+qxub --env myenv --cmd "echo hello" -- echo world
 
 # ❌ Missing --
 qxub --env myenv python script.py

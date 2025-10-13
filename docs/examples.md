@@ -40,6 +40,33 @@ qxub config set defaults.queue "normal"
 qxub --env myenv -- python script.py
 ```
 
+## Complex Commands with Variables
+
+For commands with special characters, quotes, or variables, use `--cmd`:
+
+```bash
+# Submission-time variables (expanded when you submit)
+qxub --env base --cmd "python script.py --input ${HOME}/data.txt --user ${USER}"
+
+# Execution-time variables (expanded when job runs)
+qxub --env base --cmd 'echo "Job ${{PBS_JOBID}} running on node ${{HOSTNAME}}"'
+
+# Mixed variables
+qxub --env base --cmd 'python analyze.py --input ${HOME}/data --output ${{TMPDIR}}/results-${USER}/'
+
+# Complex Python commands with quotes
+qxub --env base --cmd 'python -c "import sys; print(f\"Args: {sys.argv[1:]}\"); print(\"Job: ${{PBS_JOBID}}\")"'
+
+# AWK/shell commands (literal $ preserved)
+qxub --env base --cmd 'awk "{print \$1, \$2}" data.txt | head -10'
+```
+
+### Variable Substitution Rules
+
+- `${var}` → Expanded at submission time (your environment)
+- `${{var}}` → Converted to `${var}` for execution time (job environment)
+- `$other` → Preserved unchanged (literal usage)
+
 ## Aliases
 
 ```bash
@@ -57,4 +84,7 @@ qxub alias analyze -- python analysis.py
 ```bash
 # Preview what qxub would do
 qxub --dry --env myenv -- python script.py
+
+# See variable expansion
+qxub --dry --env myenv --cmd 'echo "User ${USER} job ${{PBS_JOBID}}"'
 ```
