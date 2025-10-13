@@ -5,7 +5,31 @@ qxub uses a sophisticated multi-threaded architecture to provide real-time job m
 ## Overview
 
 The threading system coordinates four key components:
-1. **Job Status Monitor** - Polls PBS for job completion
+1. **Job Stat### Thread Safety Considerations
+
+### Race Conditions Avoided
+
+1. **Spinner vs Output**: Spinner waits for `output_started` before clearing
+2. **Multiple Outputs**: Both STDOUT/STDERR can signal `output_started` safely
+3. **Shutdown Coordination**: All threads check the same shutdown conditions
+4. **Exit Status**: Only monitor thread writes `job_exit_status`
+5. **Duplicate Messages**: Fixed by removing redundant print statements
+6. **Spinner Contamination**: Prevented by only using spinner in monitoring phase
+
+### Event-Based Synchronization
+
+Using `threading.Event` objects prevents race conditions:
+- Events are thread-safe and atomic
+- Multiple threads can wait on the same event
+- Setting an event is immediate and visible to all waiters
+- **Enhanced**: New job status events (`job_running`, `job_finished`) provide immediate feedback
+
+### Clean Display Transitions
+
+Carriage returns (`\r`) are strategically used to ensure clean display:
+- **Job start message**: `"\r🚀 Job started running"` overwrites spinner
+- **Output streaming**: Tail threads send `\r` to clear leftover spinner chars
+- **Spinner cleanup**: Context manager clears spinner line on exitPolls PBS for job completion
 2. **STDOUT Tail Thread** - Streams job output to terminal
 3. **STDERR Tail Thread** - Streams job errors to terminal
 4. **Spinner Thread** - Shows progress indicator until output starts
@@ -35,8 +59,15 @@ class OutputCoordinator:
         self.shutdown_requested = threading.Event()  # Ctrl-C pressed
         self.eof_detected = threading.Event()        # Log files reached EOF
         self.submission_complete = threading.Event() # Job submission phase complete
+        self.job_running = threading.Event()         # Job status became "R"
+        self.job_finished = threading.Event()        # Job status became "F" or "H"
         self.job_exit_status = None                   # Final job exit code
 ```
+
+**New Event-Driven Events**:
+- `job_running` - Signaled when job status changes to "R" (Running)
+- `job_finished` - Signaled when job status changes to "F" (Finished) or "H" (Held)
+- These events trigger immediate spinner shutdown instead of arbitrary timeouts
 
 **Events are boolean flags that threads can wait for or signal**:
 - `wait()` - Block until the event is set
@@ -127,12 +158,13 @@ Waits:    submission_complete, shutdown_requested
 ```
 Lifecycle: Until EOF or job completion
 Purpose:  Stream job output to terminal STDOUT
-Signals:  output_started, eof_detected
+Signals:  output_started, eof_detected, spinner_cleared
 Waits:    shutdown_requested
 ```
 
 - Uses `tailer.follow()` to stream log file in real-time
 - On first output line, signals `output_started` to clear spinner
+- **Enhancement**: Sends carriage return (`\r`) to `/dev/tty` before streaming to clear leftover spinner chars
 - Continues until EOF, job completion, or shutdown
 - Signals `eof_detected` when log file ends
 
@@ -140,12 +172,13 @@ Waits:    shutdown_requested
 ```
 Lifecycle: Until EOF or job completion
 Purpose:  Stream job errors to terminal STDERR
-Signals:  output_started, eof_detected
+Signals:  output_started, eof_detected, spinner_cleared
 Waits:    shutdown_requested
 ```
 
 - Identical to STDOUT thread but writes to `sys.stderr`
 - Both tail threads can signal `output_started` (whichever outputs first)
+- **Enhancement**: Also sends carriage return (`\r`) to clear spinner artifacts
 
 #### 4. Spinner Thread (`JobSpinner._spin`)
 ```
@@ -165,6 +198,7 @@ Waits:    output_started, job_running, job_finished, shutdown_requested
   - Job finishes/fails (monitor signals `job_finished`)
   - Shutdown requested (Ctrl-C)
 - Event-driven design eliminates arbitrary timeouts
+- **Key Change**: Spinner is NOT used during job submission - only during monitoring phase
 
 ## Thread Lifecycle
 
@@ -177,8 +211,8 @@ Here's the complete sequence from job submission to completion:
    └── qsub command prepared
 
 2. Job Submission
-   ├── qsub executed, job ID returned
-   ├── Progress: "✅ Job submitted successfully! Job ID: X"
+   ├── qsub executed directly (NO spinner during submission)
+   ├── Progress: "✅ Job submitted successfully! Job ID: X" (single message)
    ├── Job ID stored in global _CURRENT_JOB_ID for signal handling
    └── Signal handler registered in execution.py
 
@@ -205,9 +239,10 @@ Here's the complete sequence from job submission to completion:
    ├── Monitor detects status change from qstat polling
    ├── Monitor signals job_running event to coordinator
    ├── Spinner thread detects job_running via should_stop_spinner() and exits
+   ├── Monitor displays "\r🚀 Job started running" (carriage return clears spinner)
    ├── Log files get first content (around same time or after)
    ├── Tail thread signals output_started on first line
-   ├── Progress: "🚀 Job started running" displayed by monitor
+   ├── Tail thread sends "\r" to /dev/tty to clear any leftover spinner chars
    └── Output streams to terminal in real-time
 
 6. Job Completes
@@ -233,11 +268,13 @@ Here's the complete sequence from job submission to completion:
    │                 │    │                 │    │                 │
    │ Waits for:      │    │ Signals:        │    │ Signals:        │
    │ • output_started│◄───┤ • output_started│    │ • output_started│───┐
-   │                 │    │ • eof_detected  │    │ • eof_detected  │   │
-   │ Signals:        │    │                 │    │                 │   │
-   │ • spinner_cleared   │    │ Waits for:      │    │ Waits for:      │   │
-   └─────────────────┘    │ • shutdown      │    │ • shutdown      │   │
-            │              └─────────────────┘    └─────────────────┘   │
+   │ • job_running   │    │ • eof_detected  │    │ • eof_detected  │   │
+   │ • job_finished  │    │ • spinner_cleared│    │ • spinner_cleared│   │
+   │ • shutdown      │    │                 │    │                 │   │
+   │                 │    │ Waits for:      │    │ Waits for:      │   │
+   │ Signals:        │    │ • shutdown      │    │ • shutdown      │   │
+   │ • spinner_cleared│    │                 │    │                 │   │
+   └─────────────────┘    └─────────────────┘    └─────────────────┘   │
             │                       │                       │           │
             │                       │                       │           │
             ▼                       ▼                       ▼           │
@@ -246,21 +283,24 @@ Here's the complete sequence from job submission to completion:
    │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐     │  │
    │  │ output_started  │  │ spinner_cleared │  │ job_completed   │     │  │
    │  │ eof_detected    │  │ shutdown_req    │  │ submission_comp │     │  │
-   │  │ job_exit_status │  │                 │  │                 │     │  │
+   │  │ job_running ⭐ │  │ job_finished ⭐│  │ job_exit_status │     │  │
    │  └─────────────────┘  └─────────────────┘  └─────────────────┘     │  │
    └─────────────────────────────────────────────────────────────────────┘  │
                                       ▲                                      │
                                       │ submission_complete                  │
-                                      │                                      │
+                                      │ job_running ⭐                     │
+                                      │ job_finished ⭐                    │
                               ┌─────────────────┐                           │
                               │ Monitor Thread  │                           │
                               │                 │                           │
                               │ Signals:        │                           │
                               │ • job_completed │                           │
-                              │ • job_exit_status                           │
+                              │ • job_running ⭐│                           │
+                              │ • job_finished ⭐│                           │
+                              │ • job_exit_status│                           │
                               │                 │                           │
                               │ Waits for:      │                           │
-                              │ • submission_comp │◄─────────────────────────┘
+                              │ • submission_comp│◄─────────────────────────┘
                               │ • shutdown      │
                               └─────────────────┘
                                       ▲
@@ -270,10 +310,13 @@ Here's the complete sequence from job submission to completion:
                           │                      │
                           │ 1. Constructs job    │
                           │ 2. Submits via qsub  │
+                          │    (NO spinner)      │
                           │ 3. Signals submission│
                           │    _complete         │
                           │ 4. Waits for monitor │
                           └──────────────────────┘
+
+⭐ = New event-driven enhancements in v2.2
 ```
 
 ## Graceful Shutdown (Ctrl-C Handling)
@@ -384,6 +427,45 @@ Tail threads handle missing/inaccessible log files:
 - Create parent directories if needed
 - Touch files to ensure they exist
 - Use proper file encoding (UTF-8)
+
+## Recent Improvements (v2.2)
+
+### Event-Driven Spinner Control
+
+The spinner system was enhanced from timeout-based to event-driven control:
+
+**Before**: Spinner ran for fixed 10-second timeout regardless of job status
+**After**: Spinner responds immediately to job status changes via events
+
+**New Events**:
+- `job_running` - Job status became "R" (Running)
+- `job_finished` - Job status became "F" (Finished) or "H" (Held)
+- `should_stop_spinner()` - Checks all stopping conditions in one call
+
+**Benefits**:
+- Immediate spinner shutdown when job starts or finishes
+- No arbitrary delays waiting for timeouts
+- More responsive user experience
+- Cleaner event coordination
+
+### Message Display Cleanup
+
+Fixed multiple display issues for cleaner user experience:
+
+**Duplicate Message Fix**:
+- Removed redundant "Job submitted successfully" print statement
+- Single clean submission message displayed
+
+**Spinner Contamination Fix**:
+- Removed `JobSpinner` from `qsub()` function during submission phase
+- Spinner only runs during monitoring phase, not submission
+
+**Clean Transitions**:
+- Added carriage return (`\r`) to "🚀 Job started running" message
+- Tail threads send `\r` before streaming output to clear spinner artifacts
+- Proper spinner line clearing in context manager
+
+**Result**: Clean, professional display without visual artifacts or duplicate messages
 
 ## Development Guidelines
 

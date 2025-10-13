@@ -13,6 +13,7 @@ This document provides visual representations of the qxub threading architecture
                               │                     │
                               │ 1. Create job command
                               │ 2. Submit via qsub  │
+                              │    (NO SPINNER)     │
                               │ 3. Call start_job_  │
                               │    monitoring()     │
                               │ 4. Start 3 threads  │
@@ -28,8 +29,9 @@ This document provides visual representations of the qxub threading architecture
               │ complete, then  │ │ immediately │ │ Creates 4th     │
               │ creates spinner │ │             │ │ thread (daemon) │
               │ thread via      │ │             │ │                 │
-              │ context manager │ │             │ │ Spinner shows   │
-              │ then polls qstat│ │             │ │ for max 10s     │
+              │ context manager │ │             │ │ Event-driven    │
+              │ then polls qstat│ │             │ │ spinner waits   │
+              │                 │ │             │ │ for events      │
               └─────────────────┘ └─────────────┘ └─────────────────┘
                         │                │                │
                         │                │                │
@@ -137,17 +139,63 @@ User    execution.py  Monitor    STDOUT     STDERR     Spinner      Coordinator
  │◄───────┤             │          │          │          │               │
 ```
 
+## Event-Driven Flow (v2.2 Enhancement)
+
+```
+Event Timeline - Enhanced with Immediate Status Response:
+
+Monitor Thread            Spinner Thread           Tail Threads
+      │                        │                        │
+      │ qstat polling           │ waiting for            │ following logs
+      │ status: Q               │ stop events            │ (empty)
+      ▼                        ▼                        ▼
+      │ status: R               │ detects job_running    │ first output
+      ├─signal_job_running()────►─immediate stop──────────► signal_output_started()
+      │                        │ clear & exit           │
+      │ "\r🚀 Job started"      │                        │ "\r" clear spinner
+      │                        │                        │ stream output
+      ▼                        ▼                        ▼
+      │ status: F               │ (exited)               │ continuing...
+      ├─signal_job_finished()   │                        │
+      │ wait for exit status    │                        │ EOF
+      ▼                        ▼                        ▼
+      │ job_exit_status         │                        │ signal_eof()
+      │ signal_job_completed()  │                        │ thread exit
+      │ thread exit             │                        │
+      ▼                        ▼                        ▼
+   [DONE]                   [DONE]                   [DONE]
+```
+
+**Key Improvements**:
+- **Immediate Response**: Spinner stops as soon as job status changes, not after timeout
+- **Clean Transitions**: Carriage returns (`\r`) overwrite spinner characters cleanly
+- **Event Coordination**: All threads respond to the same events through OutputCoordinator
+- **No Contamination**: Spinner only runs during monitoring, never during submission
+
 ## Event Timeline
 
 ```
-Time →   0s        10s       30s       60s       90s      120s     150s
+Time →   0s        5s        15s       30s       45s      60s      75s
          │         │         │         │         │         │         │
+Monitor: ├─wait────┼─polling─┼─R_detected─signal─┼─polling─┼─F_detected─cleanup─
          │         │         │         │         │         │         │
-Monitor: ├─wait────┼─polling─┼─polling─┼─polling─┼─complete┼─cleanup─┼─exit
+STDOUT:  ├─waiting─┼─waiting─┼─output──┼─stream──┼─stream──┼─stream──┼─EOF
          │         │         │         │         │         │         │
-STDOUT:  ├─waiting─┼─waiting─┼─waiting─┼─output──┼─stream──┼─stream──┼─EOF
+STDERR:  ├─waiting─┼─waiting─┼─waiting─┼─waiting─┼─errors──┼─stream──┼─EOF
          │         │         │         │         │         │         │
-STDERR:  ├─waiting─┼─waiting─┼─waiting─┼─waiting─┼─waiting─┼─errors──┼─EOF
+Spinner: ├─animate─┼─animate─┼─STOP────┼─(exit)──┼─────────┼─────────┼──────
+         │         │         │ ↑       │         │         │         │
+         │         │         │ └─event-driven stop    │         │         │
+
+Legend:
+- R_detected: Monitor detects job status "R" (Running)
+- F_detected: Monitor detects job status "F" (Finished)
+- signal: Monitor signals job_running event to stop spinner immediately
+- STOP: Spinner detects event and stops (no timeout needed)
+```
+
+**Before v2.2**: Spinner ran for fixed 10s timeout regardless of job status
+**After v2.2**: Spinner stops immediately when job status changes or output starts
          │         │         │         │         │         │         │
 Spinner: ├─────────┼─active──┼─status──┼─────────┼─────────┼─────────┼─────
          │         │         │ change  │         │         │         │
