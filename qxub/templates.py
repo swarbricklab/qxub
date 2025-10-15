@@ -43,16 +43,21 @@ def get_template(template_type: str, custom_template: str = None) -> str:
 
     template_filename = template_files[template_type]
 
-    # Try pkg_resources first
+    # Try importlib.resources first (modern approach)
     try:
-        import pkg_resources
+        from importlib import resources
 
-        template_path = pkg_resources.resource_filename(
-            "qxub", f"jobscripts/{template_filename}"
-        )
-        if os.path.exists(template_path):
-            return template_path
-    except (ImportError, AttributeError, FileNotFoundError):
+        # For Python 3.9+, use the new API
+        if hasattr(resources, "files"):
+            jobscripts_path = resources.files("qxub") / "jobscripts" / template_filename
+            if jobscripts_path.is_file():
+                return str(jobscripts_path)
+        else:
+            # Fallback for Python 3.8 (deprecated but still works)
+            with resources.path("qxub.jobscripts", template_filename) as template_path:
+                if template_path.exists():
+                    return str(template_path)
+    except (ImportError, AttributeError, FileNotFoundError, ModuleNotFoundError):
         pass
 
     # Fallback to relative path from this module

@@ -1,62 +1,78 @@
-# qxub v2.2 Development Branch
+# qxub v2.3 Development Branch
 
-## 🚀 Welcome to v2.2 Development!
+## 🚀 Welcome to v2.3 Development!
 
-This branch is for developing **Phase 2.2: Remote Execution** features as outlined in the [v2 roadmap](docs/dev/v2_roadmap.md).
+This branch is for developing **Phase 2.3: Enhanced Configuration & Pipeline Support** features.
 
-### 🎯 Phase 2.2 Goals: Remote Execution
+### 🎯 Phase 2.3 Goals: Project Configuration & Pipeline Integration
 
-The goal of v2.2 is to enable executing jobs on remote platforms from local machines, transforming qxub into a distributed job submission system.
+The goal of v2.3 is to enhance qxub with project-level configuration management and improved pipeline integration capabilities.
 
-### 🌐 Core Features Planned
+### � Core Features Implemented
 
-- **✅ Client-server architecture** for remote job submission
-- **✅ SSH-based remote execution** with credential delegation
-- **✅ Remote configurations** combining connection details and preferences
-- **✅ Conda environment setup** for simplified remote qxub activation
-- **✅ Real-time output streaming** from remote to local terminal
+- **✅ Project-level configuration** with `.qx/` directory structure
+- **✅ Multi-tier config hierarchy** (system → user → project → local → test)
+- **✅ Git integration** for portable team configurations
+- **✅ Terse output mode** for pipeline-friendly job submission
+- **✅ Enhanced monitoring** with rich terminal UI and emoji status indicators
+- **✅ Origin tracking** for configuration debugging
 
-### 📋 Key Tasks for v2.2
+### 📋 Key Features in v2.3
 
-1. **Remote user configuration** in `~/.config/qxub/config.yaml`
-2. **SSH execution backend** for secure remote job submission
-3. **Conda environment activation** for remote qxub setup
-4. **Output streaming** from remote to local terminal
-5. **Smart working directory resolution** based on project structure
+1. **Project Configuration System**
+   - **`.qx/` directory structure** for project-specific settings
+   - **Three config types**: project (git-tracked), local (git-ignored), test (CI)
+   - **Intelligent discovery** using git/dvc markers and project roots
+   - **Configuration precedence**: CLI args > test > local > project > user > system
 
-### 💡 Usage Vision
+2. **Pipeline Integration**
+   - **`--terse` flag** for machine-readable job ID output
+   - **`qxub monitor` command** with rich terminal UI
+   - **Parallel job submission** workflows
+   - **Exit code propagation** for proper error handling
+
+3. **Enhanced Configuration Management**
+   - **Origin tracking** with `--show-origin` flag
+   - **Multi-level set commands** (`--project`, `--local`, `--test`)
+   - **Project initialization** with `qxub config init-project`
+   - **Git integration** for portable team configurations
+
+### 💡 Usage Examples
 
 ```bash
-# Execute jobs on NCI from local laptop
-qxub --remote nci_gadi --env dvc3 -- dvc push
+# Initialize project configuration
+qxub config init-project
 
-# Auto-select queue on remote platform
-qxub --remote nci_gadi --queue auto -l mem=500GB --env pytorch -- python train.py
+# Set team defaults (git-tracked)
+qxub config set --project qxub.defaults.walltime "4:00:00"
+qxub config set --project qxub.defaults.queue "normal"
 
-# Stream output from remote job to local terminal in real-time
-qxub --remote cluster --env myenv -- python long_running_job.py
+# Personal overrides (git-ignored)
+qxub config set --local qxub.defaults.queue "express"
+
+# Pipeline integration
+find *.csv -exec qxub --terse --env myenv -- process.py {} \; | qxub monitor
 ```
 
 ### 🛠️ Technical Architecture
 
-Building on the solid foundation of v2.1's platform abstraction:
+Building on the solid foundation of v2.1's platform abstraction and v2.2's remote execution:
 
-- **Remote configurations**: User-specific settings for connecting to remote systems
-- **SSH backend**: Secure execution channel with credential delegation to SSH
-- **Conda environments**: Simple remote setup via environment activation
-- **Smart working directories**: Project-based remote path resolution
-- **Real-time streaming**: Output forwarding from remote to local terminal
+- **Project discovery**: Automatic detection of project roots using `.qx`, `.git`, `.dvc` markers
+- **Configuration hierarchy**: Five-tier precedence system with clear override rules
+- **Git integration**: Proper .gitignore handling for local vs shared configurations
+- **Rich UI**: Terminal-based configuration display with origin tracking
+- **Pipeline support**: Machine-readable output and comprehensive monitoring
 
 ### 📈 Success Criteria
 
-- Execute jobs on remote HPC from local machine with same qxub syntax
-- Real-time output streaming to local terminal
-- Proper exit code handling and error propagation
-- Clean separation of platform capabilities and user connection settings
-- Seamless integration with existing v2.1 platform system
+- ✅ Team-shared project configurations that work across all developers
+- ✅ Git-ignored personal overrides for individual workflow preferences
+- ✅ CI/testing configurations that override other settings appropriately
+- ✅ Clear visibility into configuration sources and precedence
+- ✅ Pipeline-friendly job submission and monitoring workflows
+- ✅ Backward compatibility with existing user/system configurations
 
 ---
 
-**Ready to build the future of distributed HPC job submission!** 🚀
-
-For detailed implementation plans, see [docs/dev/v2_roadmap.md](docs/dev/v2_roadmap.md).
+**Configuration management made simple and powerful!** 🚀

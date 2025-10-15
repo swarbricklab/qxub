@@ -79,6 +79,14 @@ def apply_config_defaults(params: Dict[str, Any]) -> Dict[str, Any]:
     if not params.get("resources"):  # Empty tuple means no resources provided
         params["resources"] = defaults.get("resources", [])
 
+    # Ensure boolean flags have defaults
+    if params.get("dry") is None:
+        params["dry"] = False
+    if params.get("quiet") is None:
+        params["quiet"] = False
+    if params.get("terse") is None:
+        params["terse"] = False
+
     return params
 
 

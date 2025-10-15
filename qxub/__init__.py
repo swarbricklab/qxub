@@ -4,11 +4,12 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 
 v2.2 adds remote execution capabilities for seamless job submission to remote HPC systems.
+v2.3 adds parallel job execution with --terse output and 'qxub monitor' for pipeline workflows.
 """
 
 # __init__.py
 
-__version__ = "2.2.0"
+__version__ = "2.3.1"
 
 # Import main CLI
 from .cli import qxub

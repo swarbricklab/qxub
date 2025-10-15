@@ -8,6 +8,7 @@ including defaults and aliases.
 # pylint: disable=broad-exception-caught,protected-access,raise-missing-from,unnecessary-pass,unused-variable
 import os
 import subprocess
+from pathlib import Path
 from typing import Optional
 
 import click
@@ -48,12 +49,43 @@ def get(key_path: Optional[str]):
             click.echo("No configuration found")
 
 
-@config_cli.command()
+@config_cli.command(name="set")
 @click.argument("key_path")
 @click.argument("value")
-def set_config(key_path: str, value: str):
+@click.option(
+    "--global", "global_config", is_flag=True, help="Set value in user config (default)"
+)
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Set value in system config (requires appropriate permissions)",
+)
+@click.option(
+    "--project", is_flag=True, help="Set value in project config (.qx/project.yaml)"
+)
+@click.option(
+    "--local", is_flag=True, help="Set value in local config (.qx/local.yaml)"
+)
+@click.option("--test", is_flag=True, help="Set value in test config (.qx/test.yaml)")
+def set_config(
+    key_path: str,
+    value: str,
+    global_config: bool,
+    system: bool,
+    project: bool,
+    local: bool,
+    test: bool,
+):
     """Set configuration value by key path (e.g., 'defaults.name' 'myjob')."""
     try:
+        # Check for mutually exclusive options
+        config_targets = [global_config, system, project, local, test]
+        if sum(config_targets) > 1:
+            click.echo(
+                "Error: Cannot specify multiple config targets (--global, --system, --project, --local, --test)"
+            )
+            raise click.Abort()
+
         # Try to parse as YAML to handle different types
         try:
             # Create a temporary YAML document to parse the value
@@ -64,23 +96,82 @@ def set_config(key_path: str, value: str):
             # If parsing fails, treat as string
             parsed_value = value
 
-        config_manager.set_user_config_value(key_path, parsed_value)
-        click.echo(f"✅ Set {key_path} = {parsed_value}")
+        if system:
+            config_manager.set_system_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (system-wide)")
+        elif global_config:
+            config_manager.set_user_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (global/user config)")
+        elif project:
+            config_manager.set_project_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (project config)")
+        elif local:
+            config_manager.set_local_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (local config)")
+        elif test:
+            config_manager.set_test_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (test config)")
+        else:
+            # Default to user config when no specific target is specified
+            config_manager.set_user_config_value(key_path, parsed_value)
+            click.echo(f"✅ Set {key_path} = {parsed_value} (user config)")
     except Exception as e:
         click.echo(f"❌ Error setting configuration: {e}")
         raise click.Abort()
 
 
-@config_cli.command()
+@config_cli.command(name="list")
 @click.argument("section", required=False)
-def list_config(section: Optional[str]):
+@click.option("--user-only", is_flag=True, help="Show only user configuration")
+@click.option("--system-only", is_flag=True, help="Show only system configuration")
+@click.option(
+    "--show-origin", is_flag=True, help="Show source file path for each setting"
+)
+def list_config(
+    section: Optional[str], user_only: bool, system_only: bool, show_origin: bool
+):
     """List configuration values, optionally filtered by section."""
-    if not config_manager.merged_config:
-        click.echo("No configuration found")
+    if user_only and system_only:
+        click.echo("Error: Cannot specify both --user-only and --system-only")
+        raise click.Abort()
+
+    if show_origin and (user_only or system_only):
+        click.echo(
+            "Error: --show-origin cannot be used with --user-only or --system-only"
+        )
+        raise click.Abort()
+
+    if show_origin:
+        _show_config_with_origin(section)
+        return
+
+    if user_only:
+        config_to_show = config_manager.user_config
+        title_suffix = " (User Only)"
+    elif system_only:
+        config_to_show = config_manager.system_config
+        title_suffix = " (System Only)"
+    else:
+        config_to_show = config_manager.merged_config
+        title_suffix = ""
+
+    if not config_to_show:
+        if user_only:
+            click.echo("No user configuration found")
+        elif system_only:
+            click.echo("No system configuration found")
+        else:
+            click.echo("No configuration found")
         return
 
     if section:
-        section_config = config_manager.get_config_value(section)
+        if user_only and config_manager.user_config:
+            section_config = config_manager.user_config.get(section)
+        elif system_only and config_manager.system_config:
+            section_config = config_manager.system_config.get(section)
+        else:
+            section_config = config_manager.get_config_value(section)
+
         if section_config is None:
             click.echo(f"Section '{section}' not found")
             raise click.Abort()
@@ -90,7 +181,7 @@ def list_config(section: Optional[str]):
         else:
             config_dict = {section: section_config}
     else:
-        config_dict = OmegaConf.to_container(config_manager.merged_config, resolve=True)
+        config_dict = OmegaConf.to_container(config_to_show, resolve=True)
 
     yaml_str = OmegaConf.to_yaml(OmegaConf.create(config_dict))
     syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True)
@@ -116,6 +207,89 @@ def files():
         table.add_row(name, str(config_file), status)
 
     console.print(table)
+
+
+def _show_config_with_origin(section: Optional[str]):
+    """Show configuration with origin information."""
+    from rich.tree import Tree
+
+    # Get config file paths
+    config_files = config_manager.get_config_files()
+
+    # Build merged config with origin tracking
+    merged_with_origin = {}
+
+    # Process configs in order of precedence (system -> user -> project -> local -> test)
+    config_order = [
+        ("system", config_manager.system_config),
+        ("user", config_manager.user_config),
+        ("project", config_manager.project_config),
+        ("local", config_manager.local_config),
+        ("test", config_manager.test_config),
+    ]
+
+    for config_type, config_obj in config_order:
+        if config_obj:
+            # Find matching config file
+            config_file = None
+            for name, path in config_files.items():
+                if (
+                    config_type == "system"
+                    and name.startswith("system")
+                    and path.exists()
+                ) or (config_type == name and path.exists()):
+                    config_file = path
+                    break
+
+            if config_file:
+                config_dict = OmegaConf.to_container(config_obj, resolve=True)
+                _add_origin_to_dict(merged_with_origin, config_dict, str(config_file))
+
+    if not merged_with_origin:
+        click.echo("No configuration found")
+        return
+
+    # Filter by section if specified
+    if section:
+        if section in merged_with_origin:
+            display_dict = {section: merged_with_origin[section]}
+        else:
+            click.echo(f"Section '{section}' not found")
+            raise click.Abort()
+    else:
+        display_dict = merged_with_origin
+
+    # Display with Rich Tree
+    tree = Tree("📋 Configuration (with origin)")
+    _build_config_tree(tree, display_dict, "")
+    console.print(tree)
+
+
+def _add_origin_to_dict(target_dict, source_dict, origin_file):
+    """Add values from source_dict to target_dict with origin tracking."""
+    for key, value in source_dict.items():
+        if isinstance(value, dict):
+            if key not in target_dict:
+                target_dict[key] = {}
+            _add_origin_to_dict(target_dict[key], value, origin_file)
+        else:
+            # Store value with origin info
+            target_dict[key] = {"_value": value, "_origin": origin_file}
+
+
+def _build_config_tree(tree, config_dict, prefix):
+    """Recursively build Rich tree from config dictionary with origin info."""
+    for key, value in config_dict.items():
+        if isinstance(value, dict) and "_value" in value and "_origin" in value:
+            # Leaf node with origin info - show full path
+            origin_path = value["_origin"]
+            tree.add(
+                f"[cyan]{key}[/cyan]: [green]{value['_value']}[/green] [dim]({origin_path})[/dim]"
+            )
+        elif isinstance(value, dict):
+            # Branch node
+            branch = tree.add(f"[cyan]{key}[/cyan]:")
+            _build_config_tree(branch, value, f"{prefix}{key}.")
 
 
 @config_cli.command()
@@ -221,6 +395,41 @@ def init():
         click.echo(
             "Use 'qxub config edit' to modify or 'qxub config reset' to recreate"
         )
+
+
+@config_cli.command(name="init-project")
+@click.option(
+    "--project-root",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    help="Project root directory (defaults to current directory)",
+)
+def init_project(project_root: Optional[Path]):
+    """Initialize project-level configuration directory (.qx)."""
+    if project_root is None:
+        project_root = Path.cwd()
+
+    try:
+        success = config_manager.init_project_config(project_root)
+        if success:
+            qx_dir = project_root / ".qx"
+            console.print(
+                f"✅ Initialized project configuration in {qx_dir}", style="green"
+            )
+            console.print("\nCreated files:", style="bold")
+            console.print("  📁 .qx/")
+            console.print("  ├── 📄 project.yaml   (git-tracked team settings)")
+            console.print("  ├── 📄 test.yaml      (git-tracked CI settings)")
+            console.print("  └── 🚫 .gitignore     (excludes local.yaml)")
+            console.print(
+                "\n💡 Create local.yaml for personal overrides (git-ignored)",
+                style="dim",
+            )
+        else:
+            console.print(
+                "❌ Project already initialized (.qx directory exists)", style="red"
+            )
+    except Exception as e:
+        console.print(f"❌ Failed to initialize project: {e}", style="red")
 
 
 # Alias management subcommands

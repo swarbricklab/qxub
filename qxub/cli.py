@@ -30,6 +30,7 @@ from .executors import (
 )
 from .history_cli import history
 from .history_manager import history_manager
+from .monitor_cli import monitor_cli
 from .parameters import build_qsub_options, process_parameters
 from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resource_tracker import resource_tracker
@@ -281,6 +282,12 @@ class QxubGroup(click.Group):
 )
 @click.option("--quiet", is_flag=True, default=False, help="Display no output")
 @click.option(
+    "--terse",
+    is_flag=True,
+    default=False,
+    help="Terse output: emit only job ID and return immediately (for use in pipelines)",
+)
+@click.option(
     "-l", "--resources", multiple=True, help="Job resource (default: configured)"
 )
 @click.option(
@@ -474,6 +481,7 @@ def qxub(
     ctx.obj["err"] = params["err"]
     ctx.obj["dry"] = params["dry"]
     ctx.obj["quiet"] = params["quiet"]
+    ctx.obj["terse"] = params["terse"]
     ctx.obj["verbose"] = verbose
 
     # If we reach here and have an execution context, execute the job
@@ -725,3 +733,4 @@ qxub.add_command(platform_cli)
 qxub.add_command(select_queue_cmd)
 qxub.add_command(validate_cmd)
 qxub.add_command(estimate_cmd)
+qxub.add_command(monitor_cli)
