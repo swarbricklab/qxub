@@ -235,31 +235,57 @@ class ConfigManager:
         return template_vars
 
     def resolve_templates(
-        self, value: Any, template_vars: Dict[str, str]
+        self, value: Any, template_vars: Dict[str, str], max_iterations: int = 10
     ) -> Any:  # pylint: disable=too-many-return-statements,no-else-return
-        """Recursively resolve template variables in configuration values."""
+        """Recursively resolve template variables in configuration values.
+
+        Args:
+            value: The value to resolve templates in
+            template_vars: Dictionary of template variables
+            max_iterations: Maximum number of recursive resolution attempts to prevent infinite loops
+        """
         if isinstance(value, str):
             # Only resolve if there are template placeholders
             if "{" in value and "}" in value:
-                try:
-                    return value.format(**template_vars)
-                except KeyError as e:
-                    click.echo(
-                        f"Warning: Unknown template variable {e} in '{value}'", err=True
-                    )
-                    return value
+                resolved_value = value
+                for iteration in range(max_iterations):
+                    try:
+                        new_value = resolved_value.format(**template_vars)
+                        # If no more template variables to resolve, we're done
+                        if new_value == resolved_value or (
+                            "{" not in new_value or "}" not in new_value
+                        ):
+                            return new_value
+                        resolved_value = new_value
+                    except KeyError as e:
+                        click.echo(
+                            f"Warning: Unknown template variable {e} in '{resolved_value}'",
+                            err=True,
+                        )
+                        return resolved_value
+                # If we hit max iterations, warn about possible infinite loop
+                click.echo(
+                    f"Warning: Template resolution hit maximum iterations ({max_iterations}) for '{value}'. "
+                    f"Possible circular reference.",
+                    err=True,
+                )
+                return resolved_value
             return value
         if isinstance(value, (list, tuple)):
-            return [self.resolve_templates(item, template_vars) for item in value]
+            return [
+                self.resolve_templates(item, template_vars, max_iterations)
+                for item in value
+            ]
         if isinstance(value, dict):
             return {
-                k: self.resolve_templates(v, template_vars) for k, v in value.items()
+                k: self.resolve_templates(v, template_vars, max_iterations)
+                for k, v in value.items()
             }
         if OmegaConf.is_config(value):
             # Handle OmegaConf DictConfig
             resolved = {}
             for k, v in value.items():
-                resolved[k] = self.resolve_templates(v, template_vars)
+                resolved[k] = self.resolve_templates(v, template_vars, max_iterations)
             return OmegaConf.create(resolved)
         return value
 
