@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 import click
 
-from .config import get_config, setup_logging
+from .config_manager import config_manager, setup_logging
 from .platform import (
     Platform,
     QueueSelectionResult,

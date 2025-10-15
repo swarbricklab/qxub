@@ -655,6 +655,111 @@ class ConfigManager:
         # Reload configs to pick up the new alias
         self._load_configs()
 
+    def get_platform_search_paths(self) -> List[Path]:
+        """Get platform search paths from config, environment, or defaults."""
+        import os
+
+        # Check environment variable first
+        env_paths = os.getenv("QXUB_PLATFORM_PATHS")
+        if env_paths:
+            # Support both single path and colon-separated paths
+            if ":" in env_paths:
+                return [Path(p.strip()) for p in env_paths.split(":")]
+            else:
+                return [Path(env_paths)]
+
+        # Then check config with template resolution
+        configured_paths = self.get_config_value("platform_search_paths")
+        if configured_paths is not None and configured_paths:
+            # Get template variables (including project from defaults)
+            defaults = self.get_defaults()
+            project = defaults.get("project", "")
+            template_vars = self.get_template_variables(project=project)
+
+            # Resolve templates in each path
+            resolved_paths = []
+            for path in configured_paths:
+                resolved_path = self.resolve_templates(path, template_vars)
+                resolved_paths.append(Path(resolved_path))
+            return resolved_paths
+
+        # Finally use defaults
+        return [
+            Path("/etc/qxub/platforms"),
+            self._get_user_config_dir() / "platforms",
+            Path.home() / ".qxub" / "platforms",
+        ]
+
+    def get_default_platform(self) -> Optional[str]:
+        """Get the default platform name from config."""
+        return self.get_config_value("default_platform")
+
+    def get_platform_preferences(self) -> Dict[str, Any]:
+        """Get platform-specific preferences."""
+        platform_prefs = self.get_config_value("platform_preferences")
+        return platform_prefs if platform_prefs is not None else {}
+
+    def get_queue_preferences(self) -> Dict[str, Any]:
+        """Get queue selection preferences."""
+        queue_prefs = self.get_config_value("queue_preferences")
+        if queue_prefs is not None:
+            return queue_prefs
+        else:
+            return {
+                "optimization": "balanced",  # cost, speed, balanced
+                "adjustment_policy": "suggest",  # auto, suggest, user, error
+                "auto_select": True,
+            }
+
+
+def setup_logging(verbosity: int = None):
+    """
+    Configures the logging level based on the verbosity provided by the user.
+
+    Args:
+        verbosity (int): The number of '-v' flags used, or from config.
+                       - 0: ERROR level (default)
+                       - 1: WARNING level
+                       - 2: INFO level
+                       - 3 or more: DEBUG level
+
+    This function adjusts the logging output to provide more detailed information
+    as verbosity increases, allowing users to control the granularity of log messages.
+    """
+    import logging
+
+    if verbosity is None:
+        verbosity = config_manager.get_config_value("verbosity") or 0
+
+    # Get the root logger and configure it directly
+    root_logger = logging.getLogger()
+
+    # Remove existing handlers to avoid conflicts
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Set the level and format based on verbosity
+    if verbosity == 1:
+        level = logging.WARNING
+        format_str = "%(levelname)s: %(message)s"
+    elif verbosity == 2:
+        level = logging.INFO
+        format_str = "%(levelname)s: %(message)s"
+    elif verbosity >= 3:
+        level = logging.DEBUG
+        format_str = "%(levelname)s:%(name)s: %(message)s"
+    else:
+        level = logging.ERROR
+        format_str = "%(levelname)s: %(message)s"
+
+    # Configure the root logger
+    root_logger.setLevel(level)
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_str)
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+
 
 # Global config manager instance
 config_manager = ConfigManager()

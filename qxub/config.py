@@ -1,4 +1,6 @@
 """
+DEPRECATED: This module is deprecated in favor of config_manager.py
+
 Configuration management for qxub including platform definitions and user preferences.
 
 This module handles:
@@ -6,17 +8,28 @@ This module handles:
 - User preference management and validation
 - Configuration file discovery and validation
 - Default settings and environment-specific overrides
+
+NOTE: This module is kept for backward compatibility. New code should use
+config_manager.ConfigManager instead.
 """
 
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
 logger = logging.getLogger(__name__)
+
+# Issue deprecation warning
+warnings.warn(
+    "qxub.config module is deprecated. Use qxub.config_manager.config_manager instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class QxubConfig:
