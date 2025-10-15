@@ -5,6 +5,7 @@
 platform:
   name: nci_gadi
   type: pbs_pro
+  host: gadi  # Matches any hostname containing "gadi"
   description: "NCI Gadi supercomputer - Australia's peak research supercomputer"
 
 # Queue definitions - describe what this system can do

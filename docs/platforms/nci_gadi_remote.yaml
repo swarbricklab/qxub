@@ -3,9 +3,10 @@
 # Remote connection details are configured separately in user's ~/.config/qxub/config.yaml
 
 platform:
-  name: nci_gadi
+  name: nci_gadi_remote
   type: pbs_pro
-  description: "NCI Gadi supercomputer - Australia's peak research supercomputer"
+  host: gadi.nci.org.au  # Remote hostname for SSH connections
+  description: "NCI Gadi supercomputer - for remote execution"
 
 # Queue definitions - describe what this system can do
 # These are universal and not user-specific
