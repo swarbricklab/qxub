@@ -26,6 +26,9 @@ class ConfigManager:
     def __init__(self):
         self.system_config: Optional[DictConfig] = None
         self.user_config: Optional[DictConfig] = None
+        self.project_config: Optional[DictConfig] = None
+        self.local_config: Optional[DictConfig] = None
+        self.test_config: Optional[DictConfig] = None
         self.merged_config: Optional[DictConfig] = None
         self._load_configs()
 
@@ -41,6 +44,85 @@ class ConfigManager:
         if xdg_config_home:
             return Path(xdg_config_home) / "qxub"
         return Path.home() / ".config" / "qxub"
+
+    def _find_project_root(self, start_path: Optional[Path] = None) -> Optional[Path]:
+        """Find project root by searching for .qx directory or git/dvc markers."""
+        if start_path is None:
+            start_path = Path.cwd()
+
+        current = start_path.resolve()
+
+        # Search up the directory tree
+        while current != current.parent:
+            # Look for .qx directory first (most specific)
+            qx_dir = current / ".qx"
+            if qx_dir.exists() and qx_dir.is_dir():
+                return current
+
+            # Look for project markers (.git, .dvc, etc.)
+            project_markers = [".git", ".dvc", "pyproject.toml", "setup.py"]
+            if any((current / marker).exists() for marker in project_markers):
+                return current
+
+            current = current.parent
+
+        return None
+
+    def _get_project_config_dir(
+        self, start_path: Optional[Path] = None
+    ) -> Optional[Path]:
+        """Get project config directory (.qx) if it exists."""
+        project_root = self._find_project_root(start_path)
+        if project_root:
+            qx_dir = project_root / ".qx"
+            if qx_dir.exists():
+                return qx_dir
+        return None
+
+    def _load_project_configs(
+        self,
+    ) -> tuple[Optional[DictConfig], Optional[DictConfig], Optional[DictConfig]]:
+        """Load project, local, and test configurations."""
+        project_config = None
+        local_config = None
+        test_config = None
+
+        project_dir = self._get_project_config_dir()
+        if project_dir:
+            # Load project config (.qx/project.yaml)
+            project_file = project_dir / "project.yaml"
+            if project_file.exists():
+                try:
+                    project_config = OmegaConf.load(project_file)
+                except Exception as e:
+                    click.echo(
+                        f"Warning: Failed to load project config {project_file}: {e}",
+                        err=True,
+                    )
+
+            # Load local config (.qx/local.yaml)
+            local_file = project_dir / "local.yaml"
+            if local_file.exists():
+                try:
+                    local_config = OmegaConf.load(local_file)
+                except Exception as e:
+                    click.echo(
+                        f"Warning: Failed to load local config {local_file}: {e}",
+                        err=True,
+                    )
+
+            # Load test config (.qx/test.yaml)
+            test_file = project_dir / "test.yaml"
+            if test_file.exists():
+                try:
+                    test_config = OmegaConf.load(test_file)
+                except Exception as e:
+                    click.echo(
+                        f"Warning: Failed to load test config {test_file}: {e}",
+                        err=True,
+                    )
+
+        return project_config, local_config, test_config
 
     def _load_system_config(
         self,
@@ -74,13 +156,23 @@ class ConfigManager:
         """Load and merge all configuration files."""
         self.system_config = self._load_system_config()
         self.user_config = self._load_user_config()
+        self.project_config, self.local_config, self.test_config = (
+            self._load_project_configs()
+        )
 
-        # Merge configurations: system < user
+        # Merge configurations in precedence order:
+        # system < user < project < local < test
         configs = []
         if self.system_config:
             configs.append(self.system_config)
         if self.user_config:
             configs.append(self.user_config)
+        if self.project_config:
+            configs.append(self.project_config)
+        if self.local_config:
+            configs.append(self.local_config)
+        if self.test_config:
+            configs.append(self.test_config)
 
         if configs:
             self.merged_config = OmegaConf.merge(*configs)
@@ -101,6 +193,13 @@ class ConfigManager:
 
         # User config file
         files["user"] = self._get_user_config_dir() / "config.yaml"
+
+        # Project config files
+        project_dir = self._get_project_config_dir()
+        if project_dir:
+            files["project"] = project_dir / "project.yaml"
+            files["local"] = project_dir / "local.yaml"
+            files["test"] = project_dir / "test.yaml"
 
         return files
 
@@ -224,6 +323,169 @@ class ConfigManager:
 
         # Reload configs to pick up changes
         self.reload_configs()
+
+    def set_system_config_value(self, key_path: str, value: Any):
+        """Set a configuration value in system config file."""
+        # Get the first (primary) system config directory
+        system_config_dirs = self._get_xdg_config_dirs()
+        if not system_config_dirs:
+            raise click.ClickException("No system config directories found")
+
+        system_config_file = system_config_dirs[0] / "config.yaml"
+
+        # Create directory if it doesn't exist
+        system_config_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing system config or create new
+        if system_config_file.exists():
+            system_config = OmegaConf.load(system_config_file)
+        else:
+            system_config = OmegaConf.create({})
+
+        # Set the value using OmegaConf.update
+        keys = key_path.split(".")
+        current = system_config
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        current[keys[-1]] = value
+
+        # Save the config
+        OmegaConf.save(system_config, system_config_file)
+
+        # Reload configs to pick up changes
+        self.reload_configs()
+
+    def set_project_config_value(self, key_path: str, value: Any):
+        """Set a configuration value in project config file."""
+        project_dir = self._get_project_config_dir()
+        if not project_dir:
+            raise click.ClickException(
+                "No project directory found. Use 'qxub init' to initialize a project config."
+            )
+
+        project_config_file = project_dir / "project.yaml"
+
+        # Load existing project config or create new
+        if project_config_file.exists():
+            project_config = OmegaConf.load(project_config_file)
+        else:
+            project_config = OmegaConf.create({})
+
+        # Set the value
+        keys = key_path.split(".")
+        current = project_config
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        current[keys[-1]] = value
+
+        # Save the config
+        OmegaConf.save(project_config, project_config_file)
+
+        # Reload configs to pick up changes
+        self.reload_configs()
+
+    def set_local_config_value(self, key_path: str, value: Any):
+        """Set a configuration value in local config file."""
+        project_dir = self._get_project_config_dir()
+        if not project_dir:
+            raise click.ClickException(
+                "No project directory found. Use 'qxub init' to initialize a project config."
+            )
+
+        local_config_file = project_dir / "local.yaml"
+
+        # Load existing local config or create new
+        if local_config_file.exists():
+            local_config = OmegaConf.load(local_config_file)
+        else:
+            local_config = OmegaConf.create({})
+
+        # Set the value
+        keys = key_path.split(".")
+        current = local_config
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        current[keys[-1]] = value
+
+        # Save the config
+        OmegaConf.save(local_config, local_config_file)
+
+        # Reload configs to pick up changes
+        self.reload_configs()
+
+    def set_test_config_value(self, key_path: str, value: Any):
+        """Set a configuration value in test config file."""
+        project_dir = self._get_project_config_dir()
+        if not project_dir:
+            raise click.ClickException(
+                "No project directory found. Use 'qxub init' to initialize a project config."
+            )
+
+        test_config_file = project_dir / "test.yaml"
+
+        # Load existing test config or create new
+        if test_config_file.exists():
+            test_config = OmegaConf.load(test_config_file)
+        else:
+            test_config = OmegaConf.create({})
+
+        # Set the value
+        keys = key_path.split(".")
+        current = test_config
+        for key in keys[:-1]:
+            if key not in current:
+                current[key] = {}
+            current = current[key]
+        current[keys[-1]] = value
+
+        # Save the config
+        OmegaConf.save(test_config, test_config_file)
+
+        # Reload configs to pick up changes
+        self.reload_configs()
+
+    def init_project_config(self, project_root: Path) -> bool:
+        """Initialize project configuration directory and files.
+
+        Args:
+            project_root: Root directory of the project
+
+        Returns:
+            True if initialization was successful, False if already exists
+        """
+        qx_dir = project_root / ".qx"
+
+        if qx_dir.exists():
+            return False  # Already initialized
+
+        # Create .qx directory
+        qx_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create default project.yaml (git-tracked, team-shared settings)
+        project_config_file = qx_dir / "project.yaml"
+        project_defaults = {
+            "qxub": {"defaults": {"walltime": "1:00:00", "queue": "auto"}}
+        }
+        OmegaConf.save(project_defaults, project_config_file)
+
+        # Create default test.yaml (git-tracked, CI/testing settings)
+        test_config_file = qx_dir / "test.yaml"
+        test_defaults = {
+            "qxub": {"defaults": {"walltime": "0:10:00", "queue": "copyq"}}
+        }
+        OmegaConf.save(test_defaults, test_config_file)
+
+        # Create .gitignore for local.yaml (git-ignored, user-specific settings)
+        gitignore_file = qx_dir / ".gitignore"
+        gitignore_file.write_text("local.yaml\n")
+
+        return True
 
     def create_user_config_template(self):
         """Create a template user config file."""
