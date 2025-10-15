@@ -447,6 +447,11 @@ def list_platforms() -> List[str]:
 
 def detect_platform() -> Optional[str]:
     """Detect current platform based on hostname or environment."""
+    # Check for platform override from remote execution
+    platform_override = os.getenv("QXUB_PLATFORM_OVERRIDE")
+    if platform_override:
+        return platform_override
+
     hostname = os.getenv("HOSTNAME", "")
 
     # NCI Gadi detection

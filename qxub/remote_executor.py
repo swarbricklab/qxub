@@ -178,15 +178,16 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Change to working directory
         commands.append(f"cd {working_dir}")
 
-        # Initialize conda properly for non-interactive shells
-        commands.append('eval "$(conda shell.bash hook)"')
+        # Initialize conda environment if specified
+        if self.config.conda_env:
+            # Initialize conda properly for non-interactive shells
+            commands.append('eval "$(conda shell.bash hook)"')
+            # Activate conda environment
+            commands.append(f"conda activate {self.config.conda_env}")
 
-        # Activate conda environment
-        commands.append(f"conda activate {self.config.qxub_env}")
-
-        # Set platform file environment variable
-        # This tells qxub on the remote system which platform file to use
-        commands.append(f"export QXUB_PLATFORM_FILE={self.config.platform_file}")
+        # Set platform override if specified (otherwise let remote auto-detect)
+        if self.config.platform:
+            commands.append(f"export QXUB_PLATFORM_OVERRIDE={self.config.platform}")
 
         # Execute the actual command
         commands.append(command)

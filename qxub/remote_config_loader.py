@@ -106,26 +106,14 @@ def load_remote_configurations(
                     errors.append(f"Remote '{name}' missing required field: url")
                     continue
 
-                qxub_env = remote_data.get("qxub_env")
-                if not qxub_env:
-                    errors.append(f"Remote '{name}' missing required field: qxub_env")
-                    continue
-
-                platform_file = remote_data.get("platform_file")
-                if not platform_file:
-                    errors.append(
-                        f"Remote '{name}' missing required field: platform_file"
-                    )
-                    continue
-
-                # Create RemoteConfig object
+                # Create RemoteConfig object with simplified schema
                 remote_config = RemoteConfig(
                     name=name,
                     url=url,
-                    qxub_env=qxub_env,
-                    platform_file=platform_file,
-                    config=remote_data.get("config"),
-                    project_root_dir=remote_data.get("project_root_dir"),
+                    platform=remote_data.get("platform"),  # Optional
+                    conda_env=remote_data.get("conda_env"),  # Optional
+                    working_dir=remote_data.get("working_dir"),  # Optional
+                    config=remote_data.get("config"),  # Optional
                 )
 
                 # Validate the configuration

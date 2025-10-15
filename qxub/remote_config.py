@@ -33,10 +33,14 @@ class RemoteConfig:
 
     name: str
     url: str
-    qxub_env: str
-    platform_file: str
-    config: Optional[str] = None
-    project_root_dir: Optional[str] = None
+    platform: Optional[str] = (
+        None  # Platform name (optional - remote will auto-detect if not specified)
+    )
+    conda_env: Optional[str] = (
+        None  # Conda environment (optional - remote will use default)
+    )
+    working_dir: Optional[str] = None  # Working directory (optional - uses current dir)
+    config: Optional[str] = None  # Protocol-specific config file (e.g., ~/.ssh/config)
 
     # Parsed URL components (set in __post_init__)
     parsed_url: ParseResult = field(init=False)
@@ -125,11 +129,11 @@ class RemoteConfig:
 
         return result
 
-    def get_project_root_dir(self) -> str:
-        """Get project root directory with environment variable substitution."""
-        if not self.project_root_dir:
+    def get_working_dir(self) -> str:
+        """Get working directory with environment variable substitution."""
+        if not self.working_dir:
             return ""
-        return self.substitute_environment_vars(self.project_root_dir)
+        return self.substitute_environment_vars(self.working_dir)
 
     def determine_remote_working_dir(
         self, local_cwd: Path, explicit_execdir: Optional[str] = None
@@ -145,21 +149,14 @@ class RemoteConfig:
             Remote working directory path
         """
         if explicit_execdir:
-            # If explicit execdir is relative, make it relative to project_root_dir
-            if not os.path.isabs(explicit_execdir):
-                project_root = self.get_project_root_dir()
-                if project_root:
-                    return f"{project_root}/{explicit_execdir}"
             return explicit_execdir
 
-        # Smart default: project_root_dir + local directory name
-        project_root = self.get_project_root_dir()
-        if project_root:
-            local_dir_name = local_cwd.name
-            return f"{project_root}/{local_dir_name}"
+        # Use configured working directory if set
+        if self.working_dir:
+            return self.get_working_dir()
 
-        # Fallback to remote home directory
-        return "~"
+        # Smart default: preserve current directory structure in home
+        return f"~/{local_cwd.name}" if local_cwd.name != "." else "~"
 
     def validate(self) -> list[str]:
         """
@@ -170,15 +167,8 @@ class RemoteConfig:
         """
         errors = []
 
-        # Check required fields
-        if not self.qxub_env:
-            errors.append("qxub_env is required")
-
-        if not self.platform_file:
-            errors.append("platform_file is required")
-
         # Check config file exists if specified
-        if self.config and not Path(self.config).exists():
+        if self.config and not Path(self.config).expanduser().exists():
             errors.append(f"Config file not found: {self.config}")
 
         return errors
