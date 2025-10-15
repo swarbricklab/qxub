@@ -39,15 +39,8 @@ class QxubConfig:
 
     def _load_config(self):
         """Load configuration from all available sources."""
-        # Load system config
-        system_config_file = Path("/etc/qxub/config.yaml")
-        if system_config_file.exists():
-            try:
-                with open(system_config_file) as f:
-                    self._system_config = yaml.safe_load(f) or {}
-                logger.debug(f"Loaded system config from {system_config_file}")
-            except Exception as e:
-                logger.warning(f"Failed to load system config: {e}")
+        # Load system config using XDG-compliant paths
+        self._load_system_config()
 
         # Load user config
         user_config_paths = [
@@ -65,6 +58,28 @@ class QxubConfig:
                 except Exception as e:
                     logger.warning(
                         f"Failed to load user config from {config_path}: {e}"
+                    )
+
+    def _load_system_config(self):
+        """Load system configuration using XDG-compliant paths."""
+        # Get XDG config directories
+        xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
+        system_config_dirs = [Path(d) / "qxub" for d in xdg_config_dirs.split(":")]
+
+        # Also include the traditional path for backwards compatibility
+        system_config_dirs.append(Path("/etc/qxub"))
+
+        for config_dir in system_config_dirs:
+            config_file = config_dir / "config.yaml"
+            if config_file.exists():
+                try:
+                    with open(config_file) as f:
+                        self._system_config = yaml.safe_load(f) or {}
+                    logger.debug(f"Loaded system config from {config_file}")
+                    return  # Use the first found config
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load system config from {config_file}: {e}"
                     )
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -92,10 +107,25 @@ class QxubConfig:
             else:
                 return [Path(env_paths)]
 
-        # Then check config
+        # Then check config with template resolution
         configured_paths = self.get("platform_search_paths", [])
         if configured_paths:
-            return [Path(p) for p in configured_paths]
+            # Import here to avoid circular import
+            from .config_manager import ConfigManager
+
+            config_manager = ConfigManager()
+
+            # Get template variables (including project from defaults)
+            defaults = config_manager.get_defaults()
+            project = defaults.get("project", "")
+            template_vars = config_manager.get_template_variables(project=project)
+
+            # Resolve templates in each path
+            resolved_paths = []
+            for path in configured_paths:
+                resolved_path = config_manager.resolve_templates(path, template_vars)
+                resolved_paths.append(Path(resolved_path))
+            return resolved_paths
 
         # Finally use defaults
         return self.platform_search_paths
