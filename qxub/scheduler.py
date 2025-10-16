@@ -108,14 +108,30 @@ class OutputCoordinator:
 
 def print_status(message, final=False):
     """Print a status message that overwrites the previous one"""
+    import os
+
+    # Check if we're in a remote SSH context
+    is_remote_ssh = any(
+        [
+            os.environ.get("SSH_CLIENT"),
+            os.environ.get("SSH_CONNECTION"),
+            os.environ.get("SSH_TTY"),
+        ]
+    )
+
     try:
         with open("/dev/tty", "w") as tty:
-            if final:
-                # Final message - print normally and move to next line
-                print(f"{message}", file=tty)
+            if is_remote_ssh:
+                # In remote SSH: always use newlines and start fresh
+                print(f"{message}", file=tty, flush=True)
             else:
-                # Temporary message - overwrite without newline
-                print(f"{message}", end="", flush=True, file=tty)
+                # Local TTY: use carriage returns for overwriting
+                if final:
+                    # Final message - print normally and move to next line
+                    print(f"{message}", file=tty)
+                else:
+                    # Temporary message - overwrite without newline
+                    print(f"\r{message}", end="", flush=True, file=tty)
     except (OSError, IOError):
         # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
         with open("/dev/null", "w") as devnull:
@@ -130,13 +146,29 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
 
     def __init__(self, message="", quiet=False, show_message=False, coordinator=None):
         self.message = message
-        self.quiet = quiet  # Re-enable spinner control
+        self.quiet = (
+            quiet or self._is_remote_ssh()
+        )  # Disable spinner in remote SSH contexts
         self.show_message = show_message  # Default to False (no messages)
         self.coordinator = coordinator
         self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         self.spinning = False
         self.thread = None
         self.original_line_len = 0
+
+    def _is_remote_ssh(self):
+        """Detect if we're running in a remote SSH session where spinners don't work well."""
+        import os
+
+        # Check for SSH environment variables that indicate remote execution
+        ssh_indicators = [
+            os.environ.get("SSH_CLIENT"),
+            os.environ.get("SSH_CONNECTION"),
+            os.environ.get("SSH_TTY"),
+        ]
+
+        # If any SSH indicator is present, we're likely in an SSH session
+        return any(ssh_indicators)
 
     def _spin(self):
         """Run the spinner animation"""

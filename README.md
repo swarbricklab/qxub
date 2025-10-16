@@ -40,10 +40,16 @@ qxub --dry --env myenv -- python script.py
 | `--env` | Conda environment | `--env pytorch` |
 | `--mod` | Environment module | `--mod python3` |
 | `--sif` | Singularity container | `--sif container.sif` |
+| `--cmd` | Complex command (alternative to `--`) | `--cmd "echo \"Hello ${USER}\""` |
 | `-l` | PBS resources | `-l mem=16GB,ncpus=8` |
 | `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
 | `--name` | Job name | `--name myjob` |
 | `--terse` | Terse output: emit job ID only | `--terse` |
+| `--remote` | Execute on remote HPC system via SSH | `--remote gadi` |
+
+## Output Display
+- **Local execution**: Interactive spinners and overwriting progress messages
+- **Remote SSH execution**: Clean line-by-line output (spinners auto-disabled)
 
 ## Parallel Job Execution (v2.3)
 ```bash

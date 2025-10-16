@@ -53,6 +53,9 @@ qxub --remote gadi --platform custom_gadi --env myenv -- python script.py
 2. **Remote qxub** automatically detects platform based on hostname
 3. **Remote qxub** uses its own platform definitions and queue knowledge
 4. **Queue selection** happens on remote with current, accurate information
+5. **TTY handling** automatically adapts to SSH context:
+   - **Local execution**: Interactive spinners and overwriting progress messages
+   - **Remote SSH**: Spinner disabled, clean line-by-line progress output
 
 ## Benefits
 
@@ -60,6 +63,7 @@ qxub --remote gadi --platform custom_gadi --env myenv -- python script.py
 - **Always current**: Remote has latest platform/queue information
 - **Self-configuring**: Each HPC system knows its own capabilities
 - **Robust**: No platform file synchronization required
+- **Adaptive output**: Clean display whether local or remote execution
 
 ## Commands
 
