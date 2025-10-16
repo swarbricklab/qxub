@@ -122,8 +122,8 @@ def print_status(message, final=False):
     try:
         with open("/dev/tty", "w") as tty:
             if is_remote_ssh:
-                # In remote SSH: always use newlines and start fresh
-                print(f"{message}", file=tty, flush=True)
+                # In remote SSH: force cursor to start of line, then print message
+                print(f"\r{message}", file=tty, flush=True)
             else:
                 # Local TTY: use carriage returns for overwriting
                 if final:
@@ -134,11 +134,9 @@ def print_status(message, final=False):
                     print(f"\r{message}", end="", flush=True, file=tty)
     except (OSError, IOError):
         # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
+        # This ensures progress messages don't interfere with stdout redirection
         with open("/dev/null", "w") as devnull:
-            if final:
-                print(f"{message}", file=devnull)
-            else:
-                print(f"{message}", end="", flush=True, file=devnull)
+            print(f"{message}", file=devnull, flush=True)
 
 
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
@@ -707,9 +705,7 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
                     if coordinator:
                         coordinator.signal_job_running()
                     if not job_started_notified and not quiet:
-                        from qxub.execution import print_status
-
-                        print_status("\r🚀 Job started running", final=True)
+                        print_status("🚀 Job started running", final=True)
                         job_started_notified = True
 
                 elif status in ["F", "H"]:  # Job finished or held
@@ -760,11 +756,22 @@ def tail(log_file, destination, coordinator=None):
                 if not output_started and coordinator:
                     coordinator.signal_output_started()
                     # Clear any leftover spinner characters before streaming output
-                    try:
-                        with open("/dev/tty", "w") as tty:
-                            print("\r", end="", flush=True, file=tty)
-                    except (OSError, IOError):
-                        pass  # Ignore if /dev/tty is not available
+                    import os
+
+                    is_remote_ssh = any(
+                        [
+                            os.environ.get("SSH_CLIENT"),
+                            os.environ.get("SSH_CONNECTION"),
+                            os.environ.get("SSH_TTY"),
+                        ]
+                    )
+
+                    if not is_remote_ssh:  # Only clear spinner in local contexts
+                        try:
+                            with open("/dev/tty", "w") as tty:
+                                print("\r", end="", flush=True, file=tty)
+                        except (OSError, IOError):
+                            pass  # Ignore if /dev/tty is not available
                     coordinator.signal_spinner_cleared()
                     output_started = True
 
