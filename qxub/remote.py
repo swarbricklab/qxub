@@ -94,6 +94,11 @@ class RemoteConfig:
         """Get port from URL."""
         return self._parsed_url.port
 
+    @property
+    def conda_env(self) -> str:
+        """Get conda environment name (alias for qxub_env)."""
+        return self.qxub_env
+
 
 def load_remote_configurations() -> Dict[str, RemoteConfig]:
     """Load remote configurations from user config file."""
