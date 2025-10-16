@@ -1,33 +1,42 @@
-# Remote Execution Design
+# Remote Execution Architecture
 
-## Overview
-
-This document outlines the design for remote execution capabilities in qxub v2.2, enabling users to submit and monitor jobs on remote platforms from their local machines.
+Remote execution allows job submission from local machine to remote HPC systems via SSH.
 
 ## Architecture
 
-### Client-Server Model
-
 ```
-┌─────────────────┐    SSH    ┌─────────────────┐    PBS    ┌─────────────────┐
-│   Local Client  │ ────────► │  Remote Server  │ ────────► │  Compute Node   │
-│   (Laptop)      │           │   (Login Node)  │           │                 │
-└─────────────────┘           └─────────────────┘           └─────────────────┘
-        │                              │                              │
-        │                              │                              │
-        ▼                              ▼                              ▼
-   Local Logs                   Remote History                  Job Execution
-   Exit Codes                   Resource Tracking               Output Files
+Local Client ─SSH─► Remote Server ─PBS─► Compute Node
+  (Laptop)           (Login Node)         (Job Execution)
 ```
 
-### Execution Flow
+## Implementation
 
-1. **Client Process**: User runs qxub on laptop
-2. **SSH Connection**: Client connects to remote platform
-3. **Remote Invocation**: Client executes qxub on remote login node
-4. **Job Submission**: Remote qxub submits job to scheduler
-5. **Monitoring**: Remote qxub monitors job, streams output
-6. **Output Streaming**: Client receives and displays output
+**Key Components**:
+- `qxub/remote_executor.py` - SSH connection and remote invocation
+- `qxub/remote_config.py` - Remote system configuration
+- `--remote` CLI option - Triggers remote execution
+
+**Execution Flow**:
+1. User runs `qxub --remote gadi --env pytorch -- python train.py`
+2. SSH connection to gadi.nci.org.au
+3. Remote qxub execution with same arguments
+4. Output streaming back to local terminal
+5. Exit code propagation
+
+## Configuration
+
+```yaml
+# ~/.config/qxub/config.yaml
+remotes:
+  gadi:
+    url: "username@gadi.nci.org.au"
+    platform: "nci_gadi"
+    working_dir: "/scratch/a56/username"
+```
+
+## Platform Detection
+
+Remote systems automatically inherit platform definitions for queue auto-selection and validation.
 7. **Exit Propagation**: Exit codes propagated: job → remote qxub → client
 
 ## Configuration Schema

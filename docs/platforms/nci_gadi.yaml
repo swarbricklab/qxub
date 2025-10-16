@@ -1,84 +1,258 @@
 # NCI Gadi Platform Definition
-# This file describes Gadi's capabilities and lives ON the Gadi system
-# Remote connection details are configured separately in user's ~/.config/qxub/config.yaml
+# Based on official NCI documentation: https://opus.nci.org.au/spaces/Help/pages/90308823/Queue+Limits
+# This file describes Gadi's complete queue capabilities
 
 platform:
   name: nci_gadi
   type: pbs_pro
+  host: gadi  # Matches any hostname containing "gadi"
   description: "NCI Gadi supercomputer - Australia's peak research supercomputer"
 
-# Queue definitions - describe what this system can do
-# These are universal and not user-specific
-queues:
-  normal:
-    type: standard
-    limits:
-      max_cores: 48
-      max_memory_gb: 192
-      max_walltime: "48:00:00"
-      max_jobs_per_user: 100
-      max_jobs_queued: 1000
-    priority: normal
-    su_billing_rate: 1.0
-    default_walltime: "1:00:00"
-    walltime_rules:
-      - cores: "1-48"
+  # Complete queue definitions based on NCI official documentation
+  queues:
+    - name: normal
+      type: standard
+      limits:
+        max_cpus: 20736
+        max_memory: "190GB"
         max_walltime: "48:00:00"
-      - cores: "49-144"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      priority: normal
+      su_billing_rate: 2.0
+      default_walltime: "1:00:00"
+      walltime_rules:
+        - cores: "1-672"
+          max_walltime: "48:00:00"
+        - cores: "720-1440"
+          max_walltime: "24:00:00"
+        - cores: "1488-2976"
+          max_walltime: "10:00:00"
+        - cores: "3024-20736"
+          max_walltime: "5:00:00"
+
+    - name: express
+      type: standard
+      limits:
+        max_cpus: 3168
+        max_memory: "190GB"
         max_walltime: "24:00:00"
-      - cores: "145-240"
-        max_walltime: "12:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      priority: high
+      su_billing_rate: 6.0
+      walltime_rules:
+        - cores: "1-480"
+          max_walltime: "24:00:00"
+        - cores: "528-3168"
+          max_walltime: "5:00:00"
 
-  normalsl:
-    type: standard
-    limits:
-      max_cores: 48
-      max_memory_gb: 192
-      max_walltime: "10:00:00"
-      max_jobs_per_user: 20
-    priority: high
-    su_billing_rate: 2.0
-    description: "Short-lived normal queue with higher priority"
+    - name: normalsl
+      type: standard
+      limits:
+        max_cpus: 3200
+        max_memory: "192GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      priority: normal
+      su_billing_rate: 1.5
+      walltime_rules:
+        - cores: "1-288"
+          max_walltime: "48:00:00"
+        - cores: "320-608"
+          max_walltime: "24:00:00"
+        - cores: "640-1984"
+          max_walltime: "10:00:00"
+        - cores: "2016-3200"
+          max_walltime: "5:00:00"
 
-  gpu:
-    type: gpu
-    limits:
-      max_cores: 48
-      max_memory_gb: 384
-      max_gpus: 4
-      max_walltime: "24:00:00"
-      max_jobs_per_user: 10
-      min_gpus: 1
-    priority: high
-    su_billing_rate: 3.0
-    walltime_rules:
-      - cores: "1-48"
+    - name: normalbw
+      type: standard
+      limits:
+        max_cpus: 10080
+        max_memory: "256GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      priority: normal
+      su_billing_rate: 1.25
+      walltime_rules:
+        - cores: "1-336"
+          max_walltime: "48:00:00"
+        - cores: "364-840"
+          max_walltime: "24:00:00"
+        - cores: "868-1736"
+          max_walltime: "10:00:00"
+        - cores: "1764-10080"
+          max_walltime: "5:00:00"
+
+    - name: expressbw
+      type: standard
+      limits:
+        max_cpus: 1848
+        max_memory: "256GB"
         max_walltime: "24:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      priority: high
+      su_billing_rate: 3.75
+      walltime_rules:
+        - cores: "1-280"
+          max_walltime: "24:00:00"
+        - cores: "308-1848"
+          max_walltime: "5:00:00"
 
-  hugemem:
-    type: highmem
-    limits:
-      max_cores: 48
-      max_memory_gb: 1400
-      max_walltime: "48:00:00"
-      min_memory_gb: 250
-      max_jobs_per_user: 5
-    priority: normal
-    su_billing_rate: 1.5
+    - name: normalsr
+      type: standard
+      limits:
+        max_cpus: 10400
+        max_memory: "500GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 300
+        max_jobs_queued: 1000
+      priority: normal
+      su_billing_rate: 2.0
+      walltime_rules:
+        - cores: "1-1040"
+          max_walltime: "48:00:00"
+        - cores: "1144-2080"
+          max_walltime: "24:00:00"
+        - cores: "2184-4160"
+          max_walltime: "10:00:00"
+        - cores: "4264-10400"
+          max_walltime: "5:00:00"
 
-# Auto-selection rules - determine best queue based on resource requirements
-auto_selection:
-  - condition: "gpus > 0"
-    queue: gpu
-  - condition: "memory_gb > 500"
-    queue: hugemem
-  - condition: "walltime_hours <= 10"
-    queue: normalsl
-  - condition: "cores <= 48"
-    queue: normal
-    is_default: true
+    - name: expresssr
+      type: standard
+      limits:
+        max_cpus: 2080
+        max_memory: "500GB"
+        max_walltime: "24:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      priority: high
+      su_billing_rate: 6.0
+      walltime_rules:
+        - cores: "1-1040"
+          max_walltime: "24:00:00"
+        - cores: "1144-2080"
+          max_walltime: "5:00:00"
 
-# Queue efficiency adjustments - optimize resource allocation
-auto_adjust:
-  normal: "round_cores_to_multiple(cores, 4)"
-  hugemem: "max(cores, 8)"
+    - name: hugemem
+      type: highmem
+      limits:
+        max_cpus: 192
+        max_memory: "1470GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+        min_memory: "192GB"
+      priority: normal
+      su_billing_rate: 3.0
+      walltime_rules:
+        - cores: "1-48"
+          max_walltime: "48:00:00"
+        - cores: "96"
+          max_walltime: "24:00:00"
+        - cores: "144-192"
+          max_walltime: "5:00:00"
+
+    - name: hugemembw
+      type: highmem
+      limits:
+        max_cpus: 140
+        max_memory: "1020GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 100
+        max_jobs_queued: 500
+        min_memory: "192GB"
+      priority: normal
+      su_billing_rate: 1.25
+      walltime_rules:
+        - cores: "1-28"
+          max_walltime: "48:00:00"
+        - cores: "56-140"
+          max_walltime: "12:00:00"
+
+    - name: megamem
+      type: megamem
+      limits:
+        max_cpus: 96
+        max_memory: "2990GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 300
+        min_memory: "1000GB"
+      priority: normal
+      su_billing_rate: 1.25
+      walltime_rules:
+        - cores: "32"
+          max_walltime: "48:00:00"
+        - cores: "64"
+          max_walltime: "12:00:00"
+
+    - name: gpuvolta
+      type: gpu
+      limits:
+        max_cpus: 960
+        max_memory: "382GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+        max_gpus: 4
+        min_gpus: 1
+      priority: normal
+      su_billing_rate: 3.0
+      walltime_rules:
+        - cores: "1-96"
+          max_walltime: "48:00:00"
+        - cores: "144-192"
+          max_walltime: "24:00:00"
+        - cores: "240-960"
+          max_walltime: "5:00:00"
+
+    - name: copyq
+      type: data
+      limits:
+        max_cpus: 1
+        max_memory: "190GB"
+        max_walltime: "10:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 1000
+      priority: normal
+      su_billing_rate: 2.0
+      description: "Data transfer and file operations queue"
+
+  # Auto-selection rules - determine best queue based on resource requirements
+  # Optimized for cost-effectiveness and resource availability
+  # Rules are evaluated in order - most specific conditions first
+  auto_selection_rules:
+    - condition: "gpu_requested > 0"
+      queue: gpuvolta
+    - condition: "memory >= 1000GB"
+      queue: megamem
+    - condition: "memory >= 500GB"
+      queue: hugemem
+    - condition: "memory >= 192GB"
+      queue: hugemembw
+    - condition: "cpus > 3200"
+      queue: normalsr
+    - condition: "cpus > 1000"
+      queue: normalbw
+    - condition: "cpus <= 48"
+      queue: normal
+      is_default: true
+    - condition: "cpus <= 3200"
+      queue: normalsl
+
+  # Queue efficiency adjustments - optimize resource allocation
+  auto_adjust:
+    normal: "round_cores_to_multiple(cores, 48)"
+    normalsl: "round_cores_to_multiple(cores, 32)"
+    normalbw: "round_cores_to_multiple(cores, 28)"
+    normalsr: "round_cores_to_multiple(cores, 104)"
+    hugemem: "round_cores_to_multiple(cores, 48)"
+    hugemembw: "select_from_options(cores, [7, 14, 21, 28])"
+    megamem: "select_from_options(cores, [32, 64])"
+    gpuvolta: "round_cores_to_multiple(cores, 12)"

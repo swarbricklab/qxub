@@ -1,52 +1,54 @@
 # qxub Threading Architecture
 
-qxub uses a sophisticated multi-threaded architecture to provide real-time job monitoring with clean output streaming. This document explains how the threading system works, why it was designed this way, and how to work with it.
+qxub uses multi-threaded architecture for real-time job monitoring with clean output streaming.
 
-## Overview
+## Thread Components
 
-The threading system coordinates four key components:
-1. **Job Stat### Thread Safety Considerations
-
-### Race Conditions Avoided
-
-1. **Spinner vs Output**: Spinner waits for `output_started` before clearing
-2. **Multiple Outputs**: Both STDOUT/STDERR can signal `output_started` safely
-3. **Shutdown Coordination**: All threads check the same shutdown conditions
-4. **Exit Status**: Only monitor thread writes `job_exit_status`
-5. **Duplicate Messages**: Fixed by removing redundant print statements
-6. **Spinner Contamination**: Prevented by only using spinner in monitoring phase
-
-### Event-Based Synchronization
-
-Using `threading.Event` objects prevents race conditions:
-- Events are thread-safe and atomic
-- Multiple threads can wait on the same event
-- Setting an event is immediate and visible to all waiters
-- **Enhanced**: New job status events (`job_running`, `job_finished`) provide immediate feedback
-
-### Clean Display Transitions
-
-Carriage returns (`\r`) are strategically used to ensure clean display:
-- **Job start message**: `"\r🚀 Job started running"` overwrites spinner
-- **Output streaming**: Tail threads send `\r` to clear leftover spinner chars
-- **Spinner cleanup**: Context manager clears spinner line on exitPolls PBS for job completion
+1. **Monitor Thread** - Polls PBS for job completion
 2. **STDOUT Tail Thread** - Streams job output to terminal
 3. **STDERR Tail Thread** - Streams job errors to terminal
 4. **Spinner Thread** - Shows progress indicator until output starts
 
-All threads communicate through a central `OutputCoordinator` that manages their lifecycle and synchronization.
+All threads communicate through central `OutputCoordinator` for synchronization.
 
-## Why Threading?
+## OutputCoordinator
 
-Without threading, qxub would need to choose between:
-- **Polling-only**: Check job status every 30 seconds, miss real-time output
-- **Tailing-only**: Stream output but miss job completion/cleanup
+Central hub managing thread lifecycle and events:
+- `output_started` - Triggered when output begins, stops spinner
+- `job_running` - Set when job transitions from queued to running
+- `job_finished` - Set when job completes (success or failure)
+- `shutdown_requested` - Graceful shutdown signal for all threads
 
-Threading allows qxub to do both simultaneously while providing a smooth user experience.
+## Signal Handling
 
-## Core Components
+Ctrl+C cleanup:
+```python
+def _signal_handler(signum, frame):
+    global _CURRENT_JOB_ID
+    if _CURRENT_JOB_ID:
+        subprocess.run(['qdel', _CURRENT_JOB_ID])
+    sys.exit(1)
+```
 
-### OutputCoordinator
+## Key Implementation Details
+
+**Thread Safety**: Uses `threading.Event` objects for coordination
+**Clean Display**: Carriage returns (`\r`) clear spinner before output
+**Exit Code Propagation**: Monitor thread writes job exit status to coordinator
+**Resource Cleanup**: Context managers ensure proper thread termination
+
+## Debug Commands
+
+```bash
+# Enable threading debug logging
+export QXUB_LOG_LEVEL=DEBUG
+qxub --env myenv -- python script.py
+
+# Check for hanging processes
+ps aux | grep qxub
+```
+
+See `qxub/scheduler.py` for implementation details.
 
 The `OutputCoordinator` is the central nervous system that coordinates all threads using Python `threading.Event` objects:
 

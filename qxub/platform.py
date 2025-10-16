@@ -248,9 +248,9 @@ class PlatformLoader:
             self.search_paths = search_paths
         else:
             # Import here to avoid circular import
-            from .config import get_config
+            from .config_manager import config_manager
 
-            self.search_paths = get_config().get_platform_search_paths()
+            self.search_paths = config_manager.get_platform_search_paths()
 
         self.platforms: Dict[str, Platform] = {}
         self._load_platforms()
@@ -447,6 +447,11 @@ def list_platforms() -> List[str]:
 
 def detect_platform() -> Optional[str]:
     """Detect current platform based on hostname or environment."""
+    # Check for platform override from remote execution
+    platform_override = os.getenv("QXUB_PLATFORM_OVERRIDE")
+    if platform_override:
+        return platform_override
+
     hostname = os.getenv("HOSTNAME", "")
 
     # NCI Gadi detection
@@ -773,13 +778,13 @@ def select_best_queue(
         QueueSelectionResult with selection details
     """
     # Import here to avoid circular import
-    from .config import get_config
+    from .config_manager import config_manager
 
     # Get platform
     if platform_name:
         platform = get_platform(platform_name)
     else:
-        platform_name = get_config().get_default_platform()
+        platform_name = config_manager.get_default_platform()
         if platform_name:
             platform = get_platform(platform_name)
         else:
@@ -791,7 +796,7 @@ def select_best_queue(
         return result
 
     # Merge preferences with config
-    config_prefs = get_config().get_queue_preferences()
+    config_prefs = config_manager.get_queue_preferences()
     final_preferences = {**config_prefs}
     if preferences:
         final_preferences.update(preferences)

@@ -1,33 +1,44 @@
-# Click Argument Parsing Solution for Unified CLI Interface
+# Click Argument Parsing Solution
 
-## Problem Statement
+## Problem
+Transform CLI from subcommands to unified interface while preserving management commands:
 
-During the qxub 2.0 migration, we needed to transform the CLI from a subcommand-based architecture to a unified interface while preserving management commands. This created a complex Click framework challenge:
-
-**Before (1.x):**
 ```bash
+# Before (1.x)
 qxub conda --env myenv python script.py
-qxub module --mods python3,gcc make
-qxub sing --sif container.sif python script.py
-qxub config --help  # Management command
-```
 
-**After (2.x):**
-```bash
+# After (2.x)
 qxub --env myenv -- python script.py
-qxub --mods python3,gcc -- make
-qxub --sif container.sif -- python script.py
-qxub --default -- echo "hello world"  # Default execution (no special environment)
-qxub config --help  # Management command (unchanged)
+qxub config --help  # Management commands preserved
 ```
 
-## The Challenge
+## Solution: Custom QxubGroup Class
 
-Click's argument parsing was designed for traditional subcommand patterns. When we tried to implement both execution options (`--env`, `--mod`, `--sif`, `--default`) and management subcommands in the same group, we encountered:
+```python
+class QxubGroup(click.Group):
+    def invoke(self, ctx):
+        # Check for execution contexts
+        execution_contexts = [conda_env, module_list, container]
+        if sum(bool(x) for x in execution_contexts) > 1:
+            raise click.ClickException("Cannot specify multiple execution contexts")
 
-1. **Argument Capture Conflicts**: Using `@click.argument("command", nargs=-1)` captured everything, preventing Click from recognizing subcommands
-2. **Subcommand Resolution Issues**: Click tried to resolve execution commands (like `echo`) as subcommands, causing "No such command" errors
-3. **Protected Args vs Args**: The `--` separator correctly put commands in `ctx.protected_args`, but Click still attempted subcommand resolution
+        # If execution context + protected args, handle as execution
+        if any(execution_contexts) and ctx.protected_args:
+            handle_execution(ctx)
+            return
+
+        # Otherwise handle as management command
+        return super().invoke(ctx)
+```
+
+## Key Implementation Details
+
+**Protected Args**: Commands after `--` go to `ctx.protected_args`
+**Context Detection**: Check for `--env`, `--mod`, `--sif` flags
+**Mutual Exclusivity**: Only one execution context allowed
+**Default Execution**: `--default` flag for plain job submission
+
+See `qxub/cli.py` for complete implementation.
 
 ## Technical Details
 

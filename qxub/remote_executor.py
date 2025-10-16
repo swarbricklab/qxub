@@ -98,6 +98,25 @@ class SSHRemoteExecutor(RemoteExecutor):
                 f"SSHRemoteExecutor requires SSH protocol, got: {config.protocol}"
             )
 
+    def _should_allocate_tty(self) -> bool:
+        """
+        Auto-detect if TTY allocation would be beneficial.
+
+        Allocates TTY if local session is interactive, which preserves
+        progress indicators, colors, and other TTY-dependent features
+        in remote qxub execution.
+
+        Returns:
+            True if TTY should be allocated, False otherwise
+        """
+        try:
+            # Allocate TTY if local session has both stdout and stderr as TTYs
+            # This preserves the interactive experience for remote execution
+            return sys.stdout.isatty() and sys.stderr.isatty()
+        except (AttributeError, OSError):
+            # Fallback to False if TTY detection fails
+            return False
+
     def execute(
         self,
         command: str,
@@ -149,6 +168,21 @@ class SSHRemoteExecutor(RemoteExecutor):
         if self.config.port:
             ssh_cmd.extend(["-p", str(self.config.port)])
 
+        # TTY allocation logic
+        should_allocate_tty = False
+        if self.config.force_tty is True:
+            # Explicitly requested
+            should_allocate_tty = True
+        elif self.config.force_tty is False:
+            # Explicitly disabled
+            should_allocate_tty = False
+        else:
+            # Auto-detect (None)
+            should_allocate_tty = self._should_allocate_tty()
+
+        if should_allocate_tty:
+            ssh_cmd.append("-t")
+
         # Add connection options for better reliability
         ssh_cmd.extend(
             [
@@ -178,15 +212,16 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Change to working directory
         commands.append(f"cd {working_dir}")
 
-        # Initialize conda properly for non-interactive shells
-        commands.append('eval "$(conda shell.bash hook)"')
+        # Initialize conda environment if specified
+        if self.config.conda_env:
+            # Initialize conda properly for non-interactive shells
+            commands.append('eval "$(conda shell.bash hook)"')
+            # Activate conda environment
+            commands.append(f"conda activate {self.config.conda_env}")
 
-        # Activate conda environment
-        commands.append(f"conda activate {self.config.qxub_env}")
-
-        # Set platform file environment variable
-        # This tells qxub on the remote system which platform file to use
-        commands.append(f"export QXUB_PLATFORM_FILE={self.config.platform_file}")
+        # Set platform override if specified (otherwise let remote auto-detect)
+        if self.config.platform:
+            commands.append(f"export QXUB_PLATFORM_OVERRIDE={self.config.platform}")
 
         # Execute the actual command
         commands.append(command)

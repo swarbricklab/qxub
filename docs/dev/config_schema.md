@@ -1,52 +1,59 @@
-# User Configuration Schema
+# Configuration Schema Reference
 
-## Overview
+Configuration hierarchy and structure for qxub v2.3.2.
 
-This document defines the enhanced user configuration schema for qxub v2.1+, which adds platform-aware features and intelligent resource selection capabilities.
+## Configuration Files
 
-## Enhanced Configuration Schema
+System configuration uses XDG standard locations:
+- **System**: `/etc/xdg/qxub/config.yaml`
+- **User**: `~/.config/qxub/config.yaml`
+- **Project**: `.qxub/config.yaml` (git-tracked)
+- **Local**: `.qxub/local.yaml` (git-ignored)
 
-The user configuration file (`~/.config/qxub/config.yaml`) is extended to support platform awareness and auto-selection preferences.
-
-### Complete Configuration Example
+## Configuration Structure
 
 ```yaml
-# ~/.config/qxub/config.yaml (enhanced for v2.1+)
-
-# Preserve existing v2.0 defaults
+# Basic configuration
 defaults:
-  project: a56
-  queue: "auto"        # New: was "normal" - enables intelligent queue selection
-  walltime: "00:30:00"
+  project: "a56"
+  queue: "auto"          # Enables cost-optimized auto-selection
+  walltime: "01:00:00"
   mem: "4GB"
   ncpus: 1
 
-  # New platform-aware defaults
-  platform: "nci_gadi"  # Default platform for local execution
+# Template variables
+templates:
+  job_name: "{user}-{timestamp}"
+  output_dir: "/scratch/{project}/{user}/{timestamp}"
 
-# Auto-selection preferences
-auto_selection:
-  queue:
-    enabled: true
-    strategy: "optimal"    # vs "conservative", "aggressive"
+# Remote execution
+remotes:
+  gadi:
+    url: "jr9959@gadi.nci.org.au"
+    platform: "nci_gadi"
+    working_dir: "/scratch/a56/jr9959"
+```
 
-  resources:
-    # How to handle resource conflicts
-    cpus:
-      policy: "auto_adjust"     # vs "warn", "error"
-      prefer: "minimum_viable"  # vs "user_specified"
+## Alias Configuration
 
-    memory:
-      policy: "suggest"         # vs "auto_adjust", "error"
+```yaml
+aliases:
+  main:
+    gpu:
+      options: ["--env", "pytorch", "--queue", "auto", "-l", "ngpus=1"]
+    bigmem:
+      options: ["-l", "mem=500GB", "--queue", "auto"]
+```
 
-    walltime:
-      policy: "warn"           # vs "auto_adjust", "error"
+## Template Variable Resolution
 
-# Override behaviors per queue
-queue_overrides:
-  gpuvolta:
-    auto_adjust_cpus: true    # Always adjust to minimum 12
-    confirm_gpu_request: false # Don't prompt for GPU requests
+Variables are resolved recursively:
+- `{user}` → Current username
+- `{project}` → Project code
+- `{timestamp}` → ISO timestamp
+- Config values can reference other config values
+
+See `qxub/config_manager.py` for implementation details.
 
   hugemem:
     confirm_high_memory: true # Prompt for >500GB requests

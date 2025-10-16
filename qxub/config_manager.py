@@ -235,31 +235,57 @@ class ConfigManager:
         return template_vars
 
     def resolve_templates(
-        self, value: Any, template_vars: Dict[str, str]
+        self, value: Any, template_vars: Dict[str, str], max_iterations: int = 10
     ) -> Any:  # pylint: disable=too-many-return-statements,no-else-return
-        """Recursively resolve template variables in configuration values."""
+        """Recursively resolve template variables in configuration values.
+
+        Args:
+            value: The value to resolve templates in
+            template_vars: Dictionary of template variables
+            max_iterations: Maximum number of recursive resolution attempts to prevent infinite loops
+        """
         if isinstance(value, str):
             # Only resolve if there are template placeholders
             if "{" in value and "}" in value:
-                try:
-                    return value.format(**template_vars)
-                except KeyError as e:
-                    click.echo(
-                        f"Warning: Unknown template variable {e} in '{value}'", err=True
-                    )
-                    return value
+                resolved_value = value
+                for iteration in range(max_iterations):
+                    try:
+                        new_value = resolved_value.format(**template_vars)
+                        # If no more template variables to resolve, we're done
+                        if new_value == resolved_value or (
+                            "{" not in new_value or "}" not in new_value
+                        ):
+                            return new_value
+                        resolved_value = new_value
+                    except KeyError as e:
+                        click.echo(
+                            f"Warning: Unknown template variable {e} in '{resolved_value}'",
+                            err=True,
+                        )
+                        return resolved_value
+                # If we hit max iterations, warn about possible infinite loop
+                click.echo(
+                    f"Warning: Template resolution hit maximum iterations ({max_iterations}) for '{value}'. "
+                    f"Possible circular reference.",
+                    err=True,
+                )
+                return resolved_value
             return value
         if isinstance(value, (list, tuple)):
-            return [self.resolve_templates(item, template_vars) for item in value]
+            return [
+                self.resolve_templates(item, template_vars, max_iterations)
+                for item in value
+            ]
         if isinstance(value, dict):
             return {
-                k: self.resolve_templates(v, template_vars) for k, v in value.items()
+                k: self.resolve_templates(v, template_vars, max_iterations)
+                for k, v in value.items()
             }
         if OmegaConf.is_config(value):
             # Handle OmegaConf DictConfig
             resolved = {}
             for k, v in value.items():
-                resolved[k] = self.resolve_templates(v, template_vars)
+                resolved[k] = self.resolve_templates(v, template_vars, max_iterations)
             return OmegaConf.create(resolved)
         return value
 
@@ -628,6 +654,111 @@ class ConfigManager:
 
         # Reload configs to pick up the new alias
         self._load_configs()
+
+    def get_platform_search_paths(self) -> List[Path]:
+        """Get platform search paths from config, environment, or defaults."""
+        import os
+
+        # Check environment variable first
+        env_paths = os.getenv("QXUB_PLATFORM_PATHS")
+        if env_paths:
+            # Support both single path and colon-separated paths
+            if ":" in env_paths:
+                return [Path(p.strip()) for p in env_paths.split(":")]
+            else:
+                return [Path(env_paths)]
+
+        # Then check config with template resolution
+        configured_paths = self.get_config_value("platform_search_paths")
+        if configured_paths is not None and configured_paths:
+            # Get template variables (including project from defaults)
+            defaults = self.get_defaults()
+            project = defaults.get("project", "")
+            template_vars = self.get_template_variables(project=project)
+
+            # Resolve templates in each path
+            resolved_paths = []
+            for path in configured_paths:
+                resolved_path = self.resolve_templates(path, template_vars)
+                resolved_paths.append(Path(resolved_path))
+            return resolved_paths
+
+        # Finally use defaults
+        return [
+            Path("/etc/qxub/platforms"),
+            self._get_user_config_dir() / "platforms",
+            Path.home() / ".qxub" / "platforms",
+        ]
+
+    def get_default_platform(self) -> Optional[str]:
+        """Get the default platform name from config."""
+        return self.get_config_value("default_platform")
+
+    def get_platform_preferences(self) -> Dict[str, Any]:
+        """Get platform-specific preferences."""
+        platform_prefs = self.get_config_value("platform_preferences")
+        return platform_prefs if platform_prefs is not None else {}
+
+    def get_queue_preferences(self) -> Dict[str, Any]:
+        """Get queue selection preferences."""
+        queue_prefs = self.get_config_value("queue_preferences")
+        if queue_prefs is not None:
+            return queue_prefs
+        else:
+            return {
+                "optimization": "balanced",  # cost, speed, balanced
+                "adjustment_policy": "suggest",  # auto, suggest, user, error
+                "auto_select": True,
+            }
+
+
+def setup_logging(verbosity: int = None):
+    """
+    Configures the logging level based on the verbosity provided by the user.
+
+    Args:
+        verbosity (int): The number of '-v' flags used, or from config.
+                       - 0: ERROR level (default)
+                       - 1: WARNING level
+                       - 2: INFO level
+                       - 3 or more: DEBUG level
+
+    This function adjusts the logging output to provide more detailed information
+    as verbosity increases, allowing users to control the granularity of log messages.
+    """
+    import logging
+
+    if verbosity is None:
+        verbosity = config_manager.get_config_value("verbosity") or 0
+
+    # Get the root logger and configure it directly
+    root_logger = logging.getLogger()
+
+    # Remove existing handlers to avoid conflicts
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Set the level and format based on verbosity
+    if verbosity == 1:
+        level = logging.WARNING
+        format_str = "%(levelname)s: %(message)s"
+    elif verbosity == 2:
+        level = logging.INFO
+        format_str = "%(levelname)s: %(message)s"
+    elif verbosity >= 3:
+        level = logging.DEBUG
+        format_str = "%(levelname)s:%(name)s: %(message)s"
+    else:
+        level = logging.ERROR
+        format_str = "%(levelname)s: %(message)s"
+
+    # Configure the root logger
+    root_logger.setLevel(level)
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_str)
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
 
 
 # Global config manager instance
