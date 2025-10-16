@@ -98,6 +98,25 @@ class SSHRemoteExecutor(RemoteExecutor):
                 f"SSHRemoteExecutor requires SSH protocol, got: {config.protocol}"
             )
 
+    def _should_allocate_tty(self) -> bool:
+        """
+        Auto-detect if TTY allocation would be beneficial.
+
+        Allocates TTY if local session is interactive, which preserves
+        progress indicators, colors, and other TTY-dependent features
+        in remote qxub execution.
+
+        Returns:
+            True if TTY should be allocated, False otherwise
+        """
+        try:
+            # Allocate TTY if local session has both stdout and stderr as TTYs
+            # This preserves the interactive experience for remote execution
+            return sys.stdout.isatty() and sys.stderr.isatty()
+        except (AttributeError, OSError):
+            # Fallback to False if TTY detection fails
+            return False
+
     def execute(
         self,
         command: str,
@@ -148,6 +167,21 @@ class SSHRemoteExecutor(RemoteExecutor):
         # Add port if specified in URL
         if self.config.port:
             ssh_cmd.extend(["-p", str(self.config.port)])
+
+        # TTY allocation logic
+        should_allocate_tty = False
+        if self.config.force_tty is True:
+            # Explicitly requested
+            should_allocate_tty = True
+        elif self.config.force_tty is False:
+            # Explicitly disabled
+            should_allocate_tty = False
+        else:
+            # Auto-detect (None)
+            should_allocate_tty = self._should_allocate_tty()
+
+        if should_allocate_tty:
+            ssh_cmd.append("-t")
 
         # Add connection options for better reliability
         ssh_cmd.extend(

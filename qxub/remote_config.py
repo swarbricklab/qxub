@@ -41,6 +41,9 @@ class RemoteConfig:
     )
     working_dir: Optional[str] = None  # Working directory (optional - uses current dir)
     config: Optional[str] = None  # Protocol-specific config file (e.g., ~/.ssh/config)
+    force_tty: Optional[bool] = (
+        None  # Force TTY allocation (None=auto-detect, True=force, False=disable)
+    )
 
     # Parsed URL components (set in __post_init__)
     parsed_url: ParseResult = field(init=False)

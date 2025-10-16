@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from qxub.platform import Platform, Queue, QueueLimits
-from qxub.remote import RemoteConfig, execute_remote_platform
+from qxub.remote import execute_remote_platform
+from qxub.remote_config import RemoteConfig
 
 logger = logging.getLogger(__name__)
 
