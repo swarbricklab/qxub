@@ -6,7 +6,7 @@ Create shortcuts for common workflows.
 
 ```bash
 # Create an alias
-qxub config alias set gpu --env pytorch --queue gpu -l ngpus=1 -l ncpus=12
+qxub config alias set gpu --env pytorch --queue auto -l ngpus=1 -l ncpus=12
 
 # Use the alias
 qxub alias gpu -- python train.py
@@ -30,7 +30,7 @@ qxub alias NAME [-- COMMAND]            # Execute alias
 
 ```bash
 # GPU training workflow
-qxub config alias set train --env pytorch --queue gpu -l ngpus=1 -l ncpus=12 --name "training-{timestamp}"
+qxub config alias set train --env pytorch --queue auto -l ngpus=1 -l ncpus=12 --name "training-{timestamp}"
 
 # Big memory analysis
 qxub config alias set bigmem --env pandas -l mem=256GB --queue hugemem
@@ -48,7 +48,7 @@ qxub alias test -- python test_script.py
 
 ```bash
 # Create alias without command
-qxub config alias set gpu --env pytorch --queue gpu -l ngpus=1
+qxub config alias set gpu --env pytorch --queue auto -l ngpus=1
 
 # Use with different commands
 qxub alias gpu -- python train.py

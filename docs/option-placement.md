@@ -36,7 +36,7 @@ qxub --mod python3 -- python analysis.py
 qxub --sif container.sif -- blastn -query input.fa
 
 # ✅ PBS options
-qxub -l mem=32GB -l ncpus=8 --queue gpu -- python script.py
+qxub -l mem=32GB -l ncpus=8 --queue auto -- python script.py
 ```
 
 ## Wrong Examples

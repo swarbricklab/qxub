@@ -122,7 +122,7 @@ Create shortcuts for common workflows:
 
 ```bash
 # Create alias
-qxub config alias set gpu --env pytorch --queue gpu -l ngpus=1 -l ncpus=12
+qxub config alias set gpu --env pytorch --queue auto -l ngpus=1 -l ncpus=12
 
 # Use alias
 qxub alias gpu -- python train.py

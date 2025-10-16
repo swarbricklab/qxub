@@ -1,103 +1,61 @@
-# Platform Schema Design
+# Platform Schema Reference
 
-## Overview
+Platform definitions describe HPC system capabilities for queue auto-selection and validation.
 
-This document defines the schema for platform definitions in qxub v2.1+. Platforms encapsulate the queue constraints, resource limits, and auto-selection rules for different computational environments.
+## Platform YAML Structure
 
-## Platform Definition Schema
-
-Platforms are defined in YAML files under `~/.config/qxub/platforms/`
-
-### Example: NCI Gadi Platform
+Platforms are defined in `docs/platforms/` and loaded via `qxub/platform.py`:
 
 ```yaml
-# ~/.config/qxub/platforms/nci_gadi.yaml
 platform:
   name: nci_gadi
+  description: "NCI Gadi supercomputer"
   type: pbs_pro
   host: gadi.nci.org.au
 
-  # Queue definitions with constraints
-  queues:
-    normal:
-      description: "General purpose compute"
-      limits:
-        max_cpus: 20736
-        min_cpus: 1
-        max_memory: "190GB"        # Per-job memory limit
-        max_local_storage: "400GB"
-        max_jobs_per_user: 300
-        max_jobs_queued: 1000
-      walltime_rules:
-        # Complex NCI walltime rules based on core count
-        - cores: "1-672"
-          max_walltime: "48:00:00"
-        - cores: "720-1440"
-          max_walltime: "24:00:00"
-        - cores: "1488-2976"
-          max_walltime: "10:00:00"
-        - cores: "3024-20736"
-          max_walltime: "5:00:00"
-      default_walltime: "1:00:00"  # NCI default
-      su_rate: 2.0               # SU per core-hour
-      constraints:
-        - no_gpu: true
+queues:
+  normal:
+    description: "General purpose compute"
+    type: cpu
+    limits:
+      max_cpus: 20736
+      max_memory: "190GB"
+      max_walltime: "48:00:00"
+    su_billing_rate: 2.0
 
-    hugemem:
-      description: "High memory compute"
-      limits:
-        max_cpus: 192
-        min_cpus: 1
-        max_memory: "1470GB"       # Per-job memory limit
-        max_local_storage: "1400GB"
-        min_memory: "193GB"        # Auto-trigger threshold
-        max_jobs_per_user: 50
-        max_jobs_queued: 1000
-      walltime_rules:
-        - cores: "1-48"
-          max_walltime: "48:00:00"
-        - cores: "96"
-          max_walltime: "24:00:00"
-        - cores: "144,192"
-          max_walltime: "5:00:00"
-      default_walltime: "2:00:00"
-      su_rate: 3.0
-      constraints:
-        - no_gpu: true
+  gpuvolta:
+    description: "V100 GPU compute"
+    type: gpu
+    limits:
+      max_cpus: 960
+      max_memory: "382GB"
+      min_gpus: 1
+      max_gpus: 4
+    su_billing_rate: 3.0
 
-    gpuvolta:
-      description: "V100 GPU compute"
-      limits:
-        max_cpus: 960
-        min_cpus: 12              # NCI requirement for GPU jobs
-        max_memory: "382GB"       # Per-job memory limit
-        max_local_storage: "400GB"
-        max_gpus: 4
-        min_gpus: 1
-        max_jobs_per_user: 50
-        max_jobs_queued: 1000
-      walltime_rules:
-        - cores: "1-96"
-          max_walltime: "48:00:00"
-        - cores: "144-192"
-          max_walltime: "24:00:00"
-        - cores: "240-960"
-          max_walltime: "5:00:00"
-      default_walltime: "1:00:00"
-      su_rate: 3.0
-      constraints:
-        - requires_gpu: true
-        - gpu_types: ["V100"]
-      resources:
-        auto_min_cpus: 12
+auto_selection:
+  memory_rules:
+    - threshold: "1000GB"
+      preferred_queue: "megamem"
+    - threshold: "190GB"
+      preferred_queue: "hugemembw"
+  gpu_rules:
+    - preferred_queue: "gpuvolta"
+  cpu_rules:
+    - threshold: 3200
+      preferred_queue: "normalsr"
+```
 
-    express:
-      description: "High priority compute (6x SU cost)"
-      limits:
-        max_cpus: 3168
-        min_cpus: 1
-        max_memory: "190GB"       # Same as normal queue
-        max_local_storage: "400GB"
+## Auto-Selection Logic
+
+Cost-optimized queue selection in `qxub/platform.py`:
+
+1. **Memory-based**: Large memory jobs → cheaper high-memory queues
+2. **GPU-based**: GPU requests → appropriate GPU queues
+3. **CPU-based**: High CPU counts → specialized queues
+4. **Cost optimization**: Lower SU billing rates preferred
+
+See `docs/platforms/nci_gadi.yaml` for complete NCI Gadi definition.
         max_jobs_per_user: 50
         max_jobs_queued: 1000
       walltime_rules:

@@ -39,8 +39,11 @@ qxub -- ./my_program
 # Memory and CPU
 qxub -l mem=32GB -l ncpus=8 --env myenv -- python script.py
 
-# GPU job
-qxub -l ngpus=1 -l ncpus=12 --queue gpu --env pytorch -- python train.py
+# GPU job (auto-selects cost-effective queue)
+qxub --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
+
+# Large memory job (auto-selects megamem for best cost)
+qxub --queue auto -l mem=1500GB --env myenv -- python big_memory_job.py
 
 # Long-running job
 qxub -l walltime=24:00:00 --env myenv -- python long_script.py
@@ -127,7 +130,7 @@ Output: echo "Cost: $100, User: jr9959"
 
 ```bash
 # Create shortcuts for common workflows
-qxub config alias set train --env pytorch --queue gpu -l ngpus=1 -l ncpus=12
+qxub config alias set train --env pytorch --queue auto -l ngpus=1 -l ncpus=12
 qxub config alias set analyze --env pandas -l mem=64GB
 
 # Use them
@@ -248,7 +251,7 @@ ls cohort/*.bam | xargs -I {} qxub --terse --env gatk -- \
 # Hyperparameter sweep
 for lr in 0.01 0.001 0.0001; do
     for batch in 32 64 128; do
-        qxub --terse --env pytorch --queue gpu -l ngpus=1 --cmd \
+        qxub --terse --env pytorch --queue auto -l ngpus=1 --cmd \
             "python train.py --lr $lr --batch-size $batch --name lr${lr}_batch${batch}"
     done
 done | qxub monitor --suffix .gadi-pbs --summary

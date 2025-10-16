@@ -1,83 +1,59 @@
-# qxub Developer Documentation
-
-Welcome to the qxub developer documentation! This section provides detailed technical information for developers working on or extending qxub.
-
-## Architecture Documentation
-
-### [Threading Architecture](threading-architecture.md)
-Complete guide to qxub's multi-threaded job monitoring system:
-- **OutputCoordinator**: Central thread synchronization
-- **Thread Responsibilities**: Monitor, STDOUT/STDERR tail, spinner
-- **Signal Flow**: Event-based coordination between threads
-- **Exit Code Propagation**: How job exit codes flow through the system
-- **Graceful Shutdown**: Ctrl-C handling and cleanup
-
-### [Threading Diagrams](threading-diagrams.md)
-Visual representations of the threading system:
-- **State Diagrams**: Thread lifecycle and transitions
-- **Sequence Diagrams**: Message flow between components
-- **Event Timeline**: Timing of signals and coordination
-- **Control Flow**: Different execution scenarios
-
-### [Threading Troubleshooting](threading-troubleshooting.md)
-Practical debugging guide for threading issues:
-- **Common Problems**: Hanging, wrong exit codes, missing output
-- **Diagnostic Tools**: Debug logging, thread inspection
-- **Testing Strategies**: Unit testing, integration testing
-- **Emergency Procedures**: Kill processes, clean up orphaned jobs
-
-## System Design Documentation
-
-### [Config and Alias System Design](config-and-alias-system-design.md)
-
-*Note: The remainder of this file contains the existing config and alias system documentation.*
-
----
-
 # Config and Alias System Design
 
-## Overview
+## Configuration Hierarchy
 
-This document outlines the design for qxub's configuration management and alias system, enabling users to define defaults for common options and create ultra-simple shortcuts for complex workflows.
+XDG-compliant configuration with clear precedence:
 
-## Design Goals
-
-1. **Ultra-Simple Usage**: Enable patterns like `qxub alias dvc_push` for common workflows
-2. **Flexible Configuration**: Support both simple defaults and complex workflow definitions
-3. **Clear Precedence**: Unambiguous option resolution with helpful error messages
-4. **Institutional Knowledge**: Allow encoding of best practices in shareable configurations
-
-## Configuration System
-
-### File Hierarchy
-
-Configuration follows XDG Base Directory specification with clear precedence:
-
-1. **System Config**: `${XDG_CONFIG_DIRS}/qxub/config.yaml` (e.g., `/etc/xdg/qxub/config.yaml`)
+1. **CLI Arguments** (highest)
 2. **User Config**: `~/.config/qxub/config.yaml`
-3. **CLI Arguments**: Highest precedence
+3. **System Config**: `/etc/xdg/qxub/config.yaml`
+4. **Built-in Defaults** (lowest)
 
-**Precedence Rule**: CLI Args > User Config > System Config > Built-in Defaults
+## Configuration Structure
 
-### File Format
-
-**Format**: YAML (human-readable, supports complex structures, excellent Python support)
-
-**Structure**:
 ```yaml
-# ~/.config/qxub/config.yaml
 defaults:
-  # Global qxub options
-  name: "qt"
-  queue: "normal"
   project: "a56"
-  joblog: "{name}.log"  # Template support
-  resources:
-    - "mem=4GB"
-    - "ncpus=1"
+  queue: "normal"
+  joblog: "{name}.log"     # Template variables supported
 
-  # Output paths (support templates)
-  out: "/scratch/{project}/{user}/qt/{timestamp}/out"
+aliases:
+  main:
+    gpu:
+      options: ["--env", "pytorch", "-l", "ngpus=1"]
+      command: ["python", "train.py"]
+```
+
+## Alias System
+
+**Hierarchical Structure**: `main > subcommand > target`
+
+**Execution Flow**:
+1. Parse `qxub alias <target>`
+2. Resolve alias options from config
+3. Merge with CLI options (CLI takes precedence)
+4. Execute with merged options
+
+## Template Variables
+
+Variables resolved recursively in config values:
+- `{user}` → Current username
+- `{project}` → Project code from config
+- `{timestamp}` → ISO 8601 timestamp
+- `{name}` → Job name
+
+## Implementation
+
+**Key Files**:
+- `qxub/config_manager.py` - Configuration loading and merging
+- `qxub/alias_cli.py` - Alias command implementation
+- `qxub/cli.py` - Main CLI with alias integration
+
+**Option Resolution**:
+1. Load configs in precedence order
+2. Merge alias options with CLI options
+3. Apply template variable substitution
+4. Validate final option set
   err: "/scratch/{project}/{user}/qt/{timestamp}/err"
 
   # Subcommand-specific defaults

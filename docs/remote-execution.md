@@ -38,7 +38,7 @@ remotes:
 qxub --remote gadi --env pytorch -- python train.py
 
 # With PBS options (queue selection happens on remote)
-qxub --remote gadi --queue gpu -l ngpus=1 --env pytorch -- python train.py
+qxub --remote gadi --queue auto -l ngpus=1 --env pytorch -- python train.py
 
 # Platform auto-selection works remotely too
 qxub --remote gadi --queue auto -l mem=500GB --env myenv -- python big_job.py
