@@ -85,13 +85,13 @@ qxub supports multiple verbosity levels to help you understand what's happening:
 
 ### Default Verbosity (Quiet)
 ```bash
-qxub -- echo "Hello"
+qxub --default -- echo "Hello"
 ```
 Shows only essential information during job execution.
 
 ### Verbose (`-v`)
 ```bash
-qxub -v -- echo "Hello"
+qxub --default -v -- echo "Hello"
 ```
 
 **Additional information shown:**
@@ -272,7 +272,7 @@ When things go wrong, follow this process:
 
 5. **Test with minimal options**: Strip down to basics
    ```bash
-   qxub -- [simple version of command]
+   qxub --default -- [simple version of command]
    ```
 
 ## Getting Help

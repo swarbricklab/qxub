@@ -258,7 +258,7 @@ qxub --mods python3/3.11.7,gcc/11.1.0 -- python3 script.py
 qxub --sif container.sif -- python3 script.py
 
 # ✅ Good: No execution context (uses login environment)
-qxub -- python3 script.py
+qxub --default -- python3 script.py
 ```
 
 ## Choosing the Right Execution Context

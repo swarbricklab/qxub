@@ -19,10 +19,10 @@ The key is the `--terse` flag, which makes qxub output only the job ID, perfect 
 
 ```bash
 # Normal qxub output (verbose)
-qxub -- echo "Hello World"
+qxub --default -- echo "Hello World"
 
 # Terse output (just job ID)
-qxub --terse -- echo "Hello World"
+qxub --default --terse -- echo "Hello World"
 ```
 
 **Terse output:**

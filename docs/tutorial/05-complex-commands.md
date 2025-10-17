@@ -20,7 +20,7 @@ For commands with spaces or special characters:
 
 ```bash
 # Single quotes preserve everything literally
-qxub -- echo 'Hello World! $USER will not be expanded'
+qxub --default -- echo 'Hello World! $USER will not be expanded'
 ```
 
 **Expected output:**
@@ -30,7 +30,7 @@ Hello World! $USER will not be expanded
 
 ```bash
 # Double quotes allow variable expansion
-qxub -- echo "Hello World! Current user is $USER"
+qxub --default -- echo "Hello World! Current user is $USER"
 ```
 
 **Expected output:**
@@ -44,8 +44,8 @@ Variables are expanded by the shell when you type the command:
 
 ```bash
 # Variable expanded on the login node (when you type it)
-export MY_VAR="test123"
-qxub -- echo "My variable: $MY_VAR"
+MY_VAR="my custom value"
+qxub --default -- echo "My variable: $MY_VAR"
 ```
 
 **Expected output:**
@@ -57,10 +57,11 @@ But be careful with variables that should be expanded on the compute node:
 
 ```bash
 # This expands $HOSTNAME on the login node (probably not what you want)
-qxub -- echo "Running on: $HOSTNAME"
+# This expands $HOSTNAME at submission time
+qxub --default -- echo "Running on: $HOSTNAME"
 
-# Better: escape the $ to expand on compute node
-qxub -- echo "Running on: \$HOSTNAME"
+# This preserves $HOSTNAME for execution time
+qxub --default -- echo "Running on: \$HOSTNAME"
 ```
 
 **Expected output:**
@@ -73,14 +74,15 @@ Running on: gadi-cpu-clx-XXXX
 ### Using Bash -c for Complex Logic
 
 ```bash
-qxub -- bash -c '
-echo "Starting complex script..."
+```bash
+qxub --default -- bash -c '
 for i in {1..5}; do
     echo "Processing item $i"
     sleep 1
 done
-echo "Script completed successfully"
+echo "All done!"
 '
+```
 ```
 
 **Expected output:**
@@ -162,7 +164,8 @@ qxub --cmd 'echo "Hello from --cmd"'
 
 This is equivalent to:
 ```bash
-qxub -- echo "Hello from --cmd"
+# ❌ This won't work as expected
+qxub --default -- echo "Hello from --cmd"
 ```
 
 ### When to Use `--cmd`
@@ -217,10 +220,10 @@ echo "Number of CPUs: $PBS_NCPUS"
 ```bash
 # Method 1: Export and reference
 export DATA_DIR="/scratch/a56/$USER/data"
-qxub -- bash -c "echo 'Data directory: $DATA_DIR'"
+qxub --default -- bash -c "echo 'Data directory: $DATA_DIR'"
 
 # Method 2: Inline definition
-qxub -- bash -c 'DATA_DIR="/scratch/a56/$USER/data"; echo "Data directory: $DATA_DIR"'
+qxub --default -- bash -c 'DATA_DIR="/scratch/a56/$USER/data"; echo "Data directory: $DATA_DIR"'
 ```
 
 ### Template Variable Expansion
@@ -350,31 +353,31 @@ This shows you exactly how your command will be encoded and executed.
 #### Problem: Variable Expansion Timing
 ```bash
 # ❌ Wrong: $USER expanded on login node
-qxub -- echo "User: $USER"
+qxub --default -- echo "User: $USER"
 
 # ✅ Right: \$USER expanded on compute node
-qxub -- echo "User: \$USER"
+qxub --default -- echo "User: \$USER"
 ```
 
 #### Problem: Nested Quotes
 ```bash
 # ❌ Wrong: Quote confusion
-qxub -- python3 -c "print("Hello")"
+qxub --default -- python3 -c "print("Hello")"
 
 # ✅ Right: Escape inner quotes
-qxub -- python3 -c "print(\"Hello\")"
+qxub --default -- python3 -c "print(\"Hello\")"
 
 # ✅ Alternative: Use single quotes outside
-qxub -- python3 -c 'print("Hello")'
+qxub --default -- python3 -c 'print("Hello")'
 ```
 
 #### Problem: Special Characters
 ```bash
 # ❌ Wrong: Semicolon interpreted by login shell
-qxub -- echo "First"; echo "Second"
+qxub --default -- echo "First"; echo "Second"
 
 # ✅ Right: Wrap in bash -c
-qxub -- bash -c 'echo "First"; echo "Second"'
+qxub --default -- bash -c 'echo "First"; echo "Second"'
 ```
 
 ## File-based Scripts

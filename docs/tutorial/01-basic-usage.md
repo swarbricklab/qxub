@@ -11,7 +11,7 @@ Traditional PBS workflow:
 4. Check output files later
 
 qxub workflow:
-1. Run `qxub -- your_command`
+1. Run `qxub --default -- your_command`
 2. Watch output in real-time
 3. Get results immediately
 
@@ -20,7 +20,7 @@ qxub workflow:
 Let's start with something simple - a basic system information command:
 
 ```bash
-qxub -- hostname
+qxub --default -- hostname
 ```
 
 **Expected output:**
@@ -50,7 +50,7 @@ gadi-login-01
 Let's try something that takes a bit longer to really see the streaming in action:
 
 ```bash
-qxub -- bash -c 'for i in {1..10}; do echo "Processing step $i"; sleep 2; done'
+qxub --default -- bash -c 'for i in {1..10}; do echo "Processing step $i"; sleep 2; done'
 ```
 
 **What you'll see:**
