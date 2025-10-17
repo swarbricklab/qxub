@@ -85,7 +85,7 @@ All imports successful!
 
 ```bash
 # Pandas analysis in a specialized environment
-qxub --env dvc3 --mem 8GB --ncpus 2 -- python3 -c "
+qxub --env dvc3 --resources mem=8GB,ncpus=2 -- python3 -c "
 import pandas as pd
 import numpy as np
 print('Creating sample dataset...')
@@ -117,7 +117,7 @@ print(data)
 
 ```bash
 # Single-cell analysis with specialized packages
-qxub --env sc --mem 16GB -- python3 -c "
+qxub --env sc --resources mem=16GB -- python3 -c "
 import scanpy as sc
 import pandas as pd
 print('Scanpy version:', sc.__version__)
@@ -323,7 +323,7 @@ This will show you exactly how qxub tries to activate the environment and where 
 
 ```bash
 # Using pysam for genomics work
-qxub --env pysam --mem 8GB -- python3 -c "
+qxub --env pysam --resources mem=8GB -- python3 -c "
 import pysam
 import sys
 print(f'Pysam version: {pysam.__version__}')
@@ -336,7 +336,7 @@ print('Genomics environment ready')
 
 ```bash
 # ML training in sc environment
-qxub --env sc --mem 32GB --ncpus 4 --walltime 2:00:00 -- python3 -c "
+qxub --env sc --resources mem=32GB,ncpus=4,walltime=2:00:00 -- python3 -c "
 import scanpy as sc
 import pandas as pd
 import numpy as np
@@ -350,7 +350,7 @@ print('Training could start here...')
 
 ```bash
 # Numerical computation with modules
-qxub --mod python3/3.11.7 --mem 16GB --ncpus 8 -- python3 -c "
+qxub --mod python3/3.11.7 --resources mem=16GB,ncpus=8 -- python3 -c "
 import multiprocessing
 print(f'CPUs available: {multiprocessing.cpu_count()}')
 print('Scientific computing environment ready')
@@ -377,6 +377,6 @@ Execution contexts are fundamental to productive HPC work. They ensure your jobs
 
 **💡 Pro Tips:**
 - Use `--dry` to verify environment activation before submitting
-- Combine execution contexts with appropriate resources (`--mem`, `--ncpus`)
+- Combine execution contexts with appropriate resources (`--resources mem=8GB,ncpus=2`)
 - Keep commonly used environment+resource combinations as aliases
 - Test environment availability locally before using in jobs

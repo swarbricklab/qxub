@@ -38,7 +38,7 @@ qxub --dry ---resources mem=8192MB -- python3 -c "print('8192MB job')"
 
 ```bash
 # Request 4 CPUs for parallel processing
-qxub --dry --ncpus 4 -- python3 -c "
+qxub --dry --resources ncpus=4 -- python3 -c "
 import multiprocessing
 print(f'CPUs available: {multiprocessing.cpu_count()}')
 "
@@ -123,7 +123,7 @@ qxub --dry --queue auto --resources mem=64GB -- echo "Big memory job"
 
 ```bash
 # Many CPUs might trigger normalsl selection
-qxub --dry --queue auto --ncpus 32 --walltime 2:00:00 -- echo "Many CPU job"
+qxub --dry --queue auto --resources ncpus=32,walltime=2:00:00 -- echo "Many CPU job"
 ```
 
 qxub analyzes:
@@ -216,7 +216,7 @@ print('Analysis complete!')
 
 ```bash
 # ML training with multiple cores
-qxub --queue auto --mem 32GB --ncpus 8 --walltime 6:00:00 -- python3 -c "
+qxub --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python3 -c "
 print('Training ML model with 8 cores and 32GB RAM...')
 import time; time.sleep(3)
 print('Model training complete!')
@@ -248,7 +248,7 @@ qxub --dry --resources mem=200GB --queue normal -- echo "Too much memory"
 ```
 ⚠️  Warning: Requested memory (200GB) exceeds normal queue limit (~190GB)
 💡 Suggestion: Use --queue auto or --queue hugemem
-💡 Alternative: Reduce --mem to 190GB or less
+💡 Alternative: Reduce memory in --resources to 190GB or less
 ```
 
 ### Walltime vs CPU Rules
@@ -261,7 +261,7 @@ qxub --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "Large 
 ```
 ⚠️  Warning: Large jobs (48+ CPUs) have reduced walltime limits
 💡 Max walltime for 48 CPUs: 5:00:00 in normal queue
-💡 Suggestion: Reduce --walltime to 5:00:00 or use fewer CPUs
+💡 Suggestion: Reduce walltime in --resources to 5:00:00 or use fewer CPUs
 ```
 
 ## Best Practices
@@ -314,7 +314,7 @@ print('Done!')
 🎉 Job completed successfully (exit code: 0)
 📊 Walltime used: 00:00:15 / 01:00:00 (25% efficiency)
 💾 Memory used: 0.3GB / 8.0GB (4% efficiency)
-💡 Suggestion: This job could use --mem 1GB --walltime 30:00
+💡 Suggestion: This job could use --resources mem=1GB,walltime=30:00
 ```
 
 ## Key Takeaways

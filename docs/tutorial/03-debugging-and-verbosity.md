@@ -51,7 +51,7 @@ This shows you:
 Let's see what happens with custom resources:
 
 ```bash
-qxub --dry --mem 8GB --ncpus 2 --walltime 30:00 -- python3 -c "print('Hello world')"
+qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python3 -c "print('Hello world')"
 ```
 
 **Notice the differences:**
@@ -171,7 +171,7 @@ The dry run will show you the working directory and environment. You might need:
 If jobs are rejected or queued indefinitely:
 
 ```bash
-qxub --dry --mem 500GB --ncpus 48 --walltime 72:00:00 -- echo "test"
+qxub --dry --resources mem=500GB,ncpus=48,walltime=72:00:00 -- echo "test"
 ```
 
 The dry run might reveal:
@@ -212,14 +212,14 @@ qxub provides helpful error messages with suggestions:
 
 ### Invalid Resource Format
 ```bash
-qxub --mem 4g -- echo "test"  # Wrong format
+qxub --resources mem=4g -- echo "test"  # Wrong format
 ```
 
 **Error output:**
 ```
 ❌ Error: Invalid memory format '4g'
 💡 Hint: Use formats like '4GB', '4000MB', or '4096MB'
-💡 Examples: --mem 8GB, --mem 2000MB
+💡 Examples: --resources mem=8GB,ncpus=2
 ```
 
 ### Unknown Queue

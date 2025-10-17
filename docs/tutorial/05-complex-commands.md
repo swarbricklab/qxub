@@ -237,7 +237,7 @@ qxub --name "analysis-{timestamp}" --out "/scratch/a56/{user}/results-{timestamp
 ### Data Processing Pipeline
 
 ```bash
-qxub --env dvc3 --mem 8GB --walltime 1:00:00 -- bash -c '
+qxub --env dvc3 --resources mem=8GB,walltime=1:00:00 -- bash -c '
 echo "Starting data processing pipeline..."
 
 # Set up directories
@@ -273,7 +273,7 @@ echo "Results saved in: $WORK_DIR"
 ### Bioinformatics Example
 
 ```bash
-qxub --env pysam --mem 16GB --ncpus 4 -- bash -c '
+qxub --env pysam --resources mem=16GB,ncpus=4 -- bash -c '
 echo "Bioinformatics analysis starting..."
 
 # Set analysis parameters
@@ -406,7 +406,7 @@ chmod +x /tmp/analysis_script.py
 
 ### Run Script File
 ```bash
-qxub --env dvc3 --mem 8GB -- python3 /tmp/analysis_script.py
+qxub --env dvc3 --resources mem=8GB -- python3 /tmp/analysis_script.py
 ```
 
 ## Key Takeaways

@@ -6,7 +6,7 @@ Aliases are one of qxub's most powerful features, allowing you to save complex c
 
 Aliases in qxub are pre-configured combinations of:
 - Execution environments (`--env`, `--mod`, etc.)
-- Resource specifications (`--mem`, `--ncpus`, `--walltime`)
+- Resource specifications (`--resources mem=8GB,ncpus=2,walltime=1:00:00`)
 - Queue selections
 - Any other qxub options
 
@@ -27,25 +27,25 @@ qxub config alias list
 📋 Available Aliases:
 
 py (Python Data Science):
-└── main: --env dvc3 --mem 8GB --ncpus 2 --walltime 1:00:00
+└── main: --env dvc3 --resources mem=8GB,ncpus=2,walltime=1:00:00
 
 r (R Analysis):
-└── main: --env tidyverse --mem 8GB --ncpus 2 --walltime 1:00:00
+└── main: --env tidyverse --resources mem=8GB,ncpus=2,walltime=1:00:00
 
 sc (Single-cell Analysis):
-└── main: --env sc --mem 16GB --ncpus 4 --walltime 2:00:00
+└── main: --env sc --resources mem=16GB,ncpus=4,walltime=2:00:00
 
 bio (Bioinformatics):
-└── main: --env pysam --mem 8GB --ncpus 4 --walltime 2:00:00
+└── main: --env pysam --resources mem=8GB,ncpus=4,walltime=2:00:00
 
 bigmem (High Memory Jobs):
-└── main: --mem 64GB --ncpus 8 --walltime 4:00:00 --queue hugemem
+└── main: --resources mem=64GB,ncpus=8,walltime=4:00:00 --queue hugemem
 
 test (Quick Testing):
-└── main: --mem 2GB --ncpus 1 --walltime 0:15:00 --queue express
+└── main: --resources mem=2GB,ncpus=1,walltime=0:15:00 --queue express
 
 parallel (Parallel Processing):
-└── main: --mem 4GB --ncpus 8 --walltime 2:00:00
+└── main: --resources mem=4GB,ncpus=8,walltime=2:00:00
 ```
 
 ### Using Simple Aliases
@@ -54,7 +54,7 @@ Replace long resource specifications with short aliases:
 
 ```bash
 # Instead of this long command:
-qxub --env dvc3 --mem 8GB --ncpus 2 --walltime 1:00:00 -- python3 my_analysis.py
+qxub --env dvc3 --resources mem=8GB,ncpus=2,walltime=1:00:00 -- python3 my_analysis.py
 
 # Use this simple alias:
 qxub py -- python3 my_analysis.py
@@ -62,7 +62,7 @@ qxub py -- python3 my_analysis.py
 
 **Expected output:**
 ```
-🔧 Using alias 'py': --env dvc3 --mem 8GB --ncpus 2 --walltime 1:00:00
+🔧 Using alias 'py': --env dvc3 --resources mem=8GB,ncpus=2,walltime=1:00:00
 🚀 Submitting job...
 📋 Job submitted: 12345692.gadi-pbs (qx-20241017-151052)
 ...
