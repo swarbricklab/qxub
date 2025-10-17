@@ -591,7 +591,7 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
 @click.option(
     "--resources", multiple=True, help="Resource requests (can specify multiple)"
 )
-@click.option("--env", help="Conda environment (for conda subcommand)")
+@click.option("--env", help="Conda environment to use")
 @click.option("--mod", help="Single module to load (for module subcommand)")
 @click.option(
     "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"

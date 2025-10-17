@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Quick integration test for qxub conda subcommand using dry-run mode.
+# Quick integration test for qxub --env execution using dry-run mode.
 #
 # This test focuses on validating the command generation and parsing
 # without actually submitting jobs to the PBS queue. Perfect for rapid
@@ -337,7 +337,7 @@ print_results() {
 
 # Main execution
 main() {
-    log_info "Starting qxub conda dry-run integration tests..."
+    log_info "Starting qxub --env dry-run integration tests..."
     echo -e "${BLUE}ℹ️  These tests use --dry-run mode and won't submit actual jobs${NC}"
     echo
 

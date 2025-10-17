@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Integration test for qxub conda subcommand.
+# Integration test for qxub --env execution.
 #
-# Tests all combinations of options and calling patterns for the conda subcommand,
+# Tests all combinations of options and calling patterns for the --env context,
 # including config files, aliases, and CLI overrides. Designed to catch HPC-specific
 # issues and edge cases in the new config and alias system.
 #
@@ -234,7 +234,7 @@ test_edge_cases() {
 
     # Test 14: Missing environment (should fail when no conda env available)
     run_test "Missing environment" \
-        "CONDA_DEFAULT_ENV= qxub conda echo 'No env specified'" \
+        "CONDA_DEFAULT_ENV= qxub --env '' -- echo 'No env specified'" \
         2
 
     # Test 15: Invalid environment name
@@ -342,7 +342,7 @@ print_results() {
 
 # Main execution
 main() {
-    log_info "Starting qxub conda integration tests..."
+    log_info "Starting qxub --env integration tests..."
 
     # Setup
     setup_test_env

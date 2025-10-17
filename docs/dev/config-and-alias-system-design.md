@@ -389,10 +389,9 @@ qxub config set defaults.conda.env "myenv"
 
 # Create new alias
 qxub config alias set my_workflow \
-  --subcommand conda \
-  --cmd "python analysis.py" \
   --env myenv \
-  --resources mem=16GB,ncpus=4
+  --resources mem=16GB,ncpus=4 \
+  -- python analysis.py
 
 # Test alias
 qxub alias test my_workflow
