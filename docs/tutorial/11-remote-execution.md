@@ -34,22 +34,11 @@ cat > ~/.config/qxub/config.yaml << 'EOF'
 
 remotes:
   gadi:
-    host: gadi.nci.org.au
-    user: jr9959  # Replace with your username
-    platform: nci_gadi
-    connection:
-      ssh_key: ~/.ssh/id_rsa
-      connect_timeout: 30
-    paths:
-      remote_work: /scratch/a56/jr9959/remote_work
-      local_sync: ~/projects/hpc_work
-    defaults:
-      project: a56
-      queue: normal
-      resources: ["mem=4GB", "ncpus=1", "walltime=2:00:00"]
-
-# Default remote (optional)
-default_remote: gadi
+    url: ssh://gadi.nci.org.au
+    conda_env: dvc3
+    platform_file: "/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml"
+    working_dir: "/scratch/a56/jr9959"
+    force_tty: false
 EOF
 ```
 
@@ -83,7 +72,7 @@ This should show the remote system's configuration, confirming the connection wo
 
 ```bash
 # Run a simple command on the remote HPC system
-qxub --remote gadi -- hostname
+qxub --remote gadi --default -- hostname
 ```
 
 **Expected output:**
