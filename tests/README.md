@@ -132,8 +132,8 @@ aliases:
 
 # Check specific test failure details
 echo $?  # Non-zero indicates failures
-```
-
+run_dry_test "Test description" \
+  "qxub --env base -- your-command-here"
 ### 2. **Full Testing** (Before releases)
 ```bash
 # Run comprehensive tests (careful - submits jobs!)
@@ -144,9 +144,9 @@ watch qstat -u $USER
 ```
 
 ### 3. **Debugging Failed Tests**
-```bash
-# Run individual commands from failed tests
-qxub conda --env base --dry-run echo "Debug test"
+run_test "Test description" \
+  "qxub --env base -- your-command-here" \
+  0  # Expected exit code
 
 # Check configuration
 qxub config get
@@ -239,8 +239,8 @@ Failed Test Details:
 Missing environment: Expected exit 2, got 0
 ❌ Some tests failed!
 ```
-
-## Continuous Integration
+[INFO] Starting qxub dry-run integration tests...
+Command: qxub --name cli-test --project a56 --queue normal --env base -- echo 'All options test' --dry-run
 
 These tests can be integrated into CI/CD pipelines:
 

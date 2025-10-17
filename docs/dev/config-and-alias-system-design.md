@@ -213,7 +213,7 @@ qxub config OPERATION [ARGS]
 **Valid Patterns**:
 ```bash
 qxub --dry --name myjob alias dvc_push            # ✅ Global options first
-qxub --quiet --resources mem=8GB conda --env dvc3 -- command  # ✅ Clear separation
+qxub --quiet --resources mem=8GB --env dvc3 -- command  # ✅ Clear separation
 qxub alias dvc_push --env dvc4 --queue normal     # ✅ Override alias properties
 qxub alias dvc_push -- input.txt output.txt       # ✅ Command arguments after --
 ```
@@ -221,7 +221,7 @@ qxub alias dvc_push -- input.txt output.txt       # ✅ Command arguments after 
 **Invalid Patterns** (with helpful errors):
 ```bash
 qxub alias dvc_push --dry                         # ❌ Error: --dry is global
-qxub conda --env dvc3 --quiet -- command          # ❌ Error: --quiet is global
+qxub --env dvc3 --quiet -- command          # ❌ Error: --quiet is global
 ```
 
 **Error Messages**:
