@@ -156,17 +156,11 @@ qxub --default -- python failing_script.py
 
 **Expected output:**
 ```
-🚀 Submitting job...
-📋 Job submitted: 12345682.gadi-pbs (qx-20241017-143452)
-⏳ Job queued, waiting for execution...
-✅ Job started, streaming output...
-
-Starting...
-
-❌ Job failed with exit code: 1
-📊 Walltime used: 00:00:03 / 02:00:00
-💾 Memory used: 0.1GB / 4.0GB
-📁 Outputs: /scratch/a56/jr9959/qxub/qx-20241017-143452_20241017-143452.{out,err,log}
+� Job command constructed
+✅ Job submitted successfully! Job ID: 152754438.gadi-pbs
+❌ ERROR: Command failed with exit code 2
+python: can't open file '/g/data/a56/software/qsub_tools/failing_script.py': [Errno 2] No such file or directory
+� Failed command: python failing_script.py
 ```
 
 qxub clearly reports failures and still provides resource usage information.
