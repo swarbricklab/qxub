@@ -812,6 +812,17 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
     # Set up signal handler for Ctrl-C
     def signal_handler(signum, frame):
         logging.info("Interrupt received, shutting down threads...")
+        # Clean up job first
+        print(" " * 100, end="", flush=True)  # Clear current line
+        print("🛑 Interrupted! Cleaning up job...")
+        success = qdel(job_id, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+        else:
+            print(
+                f"⚠️  Job cleanup failed - you may need to manually run: qdel {job_id}"
+            )
+        # Then signal coordinator to shutdown threads
         coordinator.signal_shutdown()
 
     original_handler = signal.signal(signal.SIGINT, signal_handler)

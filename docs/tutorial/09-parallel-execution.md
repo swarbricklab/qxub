@@ -19,10 +19,10 @@ The key is the `--terse` flag, which makes qxub output only the job ID, perfect 
 
 ```bash
 # Normal qxub output (verbose)
-qxub -- echo "Hello World"
+qxub --default -- echo "Hello World"
 
 # Terse output (just job ID)
-qxub --terse -- echo "Hello World"
+qxub --default --terse -- echo "Hello World"
 ```
 
 **Terse output:**
@@ -206,7 +206,7 @@ find /scratch/a56/$USER -name "*.fastq" -size +100M 2>/dev/null | head -3 | \
 while read fastq_file; do
     basename=$(basename "$fastq_file" .fastq)
     JOB_ID=$(qxub --terse --name "bigfile-$basename" \
-        --mem 32GB --ncpus 8 --walltime 4:00:00 \
+        --resources mem=32GB,ncpus=8,walltime=4:00:00 \
         --env pysam -- python3 -c "
 import time
 import os
@@ -261,12 +261,8 @@ EOF
 
 # Submit with different resource requirements
 parallel --colsep ',' 'job_id=$(qxub --terse --name "{1}-job" \
-    --mem {2} --ncpus {3} --walltime 2:00:00 py -- python3 -c "
-print(\"Running {1} analysis with {2} RAM and {3} CPUs\")
-import time
-time.sleep(10)
-print(\"{1} analysis completed\")
-"); echo "Submitted {1}: $job_id"' :::: /tmp/job_specs.txt
+    --resources mem={2},ncpus={3},walltime=2:00:00 py -- python analysis_{1}.py \
+    ); echo "Submitted {1}: $job_id"' :::: /tmp/job_specs.txt
 ```
 
 ## Pattern 5: Custom R Script for Job Management
@@ -294,7 +290,7 @@ submit_job <- function(sample_id, replicate, condition) {
     job_name <- paste0("analysis-", sample_id, "-rep", replicate)
 
     cmd <- paste0('qxub --terse --name "', job_name, '" ',
-                  '--env tidyverse --mem 8GB --ncpus 2 -- Rscript -e "
+                  '--env tidyverse --resources mem=8GB,ncpus=2 -- Rscript -e "
                   sample_id <- \\"', sample_id, '\\"
                   replicate <- ', replicate, '
                   condition <- \\"', condition, '\\"

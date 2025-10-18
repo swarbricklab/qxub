@@ -28,20 +28,15 @@ These defaults work well for:
 qxub accepts various memory formats:
 
 ```bash
-# Different ways to specify 8GB of memory
-qxub --dry --resources mem=8GB -- python3 -c "print('8GB job')"
-qxub --dry --resources mem=8000MB -- python3 -c "print('8000MB job')"
-qxub --dry ---resources mem=8192MB -- python3 -c "print('8192MB job')"
+# Request 8GB of memory (also accepts MB: mem=8000MB)
+qxub --dry --resources mem=8GB -- python analysis.py
 ```
 
 ### CPU Specification
 
 ```bash
 # Request 4 CPUs for parallel processing
-qxub --dry --ncpus 4 -- python3 -c "
-import multiprocessing
-print(f'CPUs available: {multiprocessing.cpu_count()}')
-"
+qxub --dry --resources ncpus=4 -- python parallel_analysis.py
 ```
 
 ### Walltime Specification
@@ -49,17 +44,15 @@ print(f'CPUs available: {multiprocessing.cpu_count()}')
 qxub accepts flexible walltime formats:
 
 ```bash
-# Various walltime formats
-qxub --dry --resources walltime=30:00 -- echo "30 minutes"       # MM:SS
-qxub --dry --resources walltime=1:30:00 -- echo "1.5 hours"      # H:MM:SS
-qxub --dry resources walltime=24:00:00 -- echo "24 hours"      # H:MM:SS
+# Walltime formats: MM:SS or H:MM:SS
+qxub --dry --default --resources walltime=1:30:00 -- python long_analysis.py
 ```
 
 ### Combining Resources
 
 ```bash
 # A job that needs more resources
-qxub --dry --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
+qxub --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
 ```
 
 **Expected dry run output:**
@@ -78,7 +71,7 @@ One of qxub's most powerful features is automatic queue selection with `--queue 
 
 ```bash
 # Let qxub choose the best queue
-qxub --dry --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
+qxub --dry --default --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
 ```
 
 **Expected output:**
@@ -123,7 +116,7 @@ qxub --dry --queue auto --resources mem=64GB -- echo "Big memory job"
 
 ```bash
 # Many CPUs might trigger normalsl selection
-qxub --dry --queue auto --ncpus 32 --walltime 2:00:00 -- echo "Many CPU job"
+qxub --dry --queue auto --resources ncpus=32,walltime=2:00:00 -- echo "Many CPU job"
 ```
 
 qxub analyzes:
@@ -138,17 +131,11 @@ You can also specify queues directly:
 ### Standard Queues
 
 ```bash
-# Standard production queue
-qxub --dry --queue normal --resources mem=8GB -- echo "Normal queue"
+# Specify queue directly
+qxub --dry --queue express --resources mem=8GB,walltime=30:00 -- python analysis.py
 
-# Fast queue with higher priority (costs more SUs)
-qxub --dry --queue express --resources mem=8GB,walltime=30:00 -- echo "Express queue"
-
-# Large shared-memory queue
-qxub --dry --queue normalsl --resources ncpus=16 -- echo "Shared memory queue"
-
-# High-memory queue
-qxub --dry --queue hugemem --resources mem=128GB -- echo "Huge memory queue"
+# High-memory jobs typically use hugemem queue
+qxub --dry --queue hugemem --resources mem=128GB -- python big_analysis.py
 ```
 
 ### Understanding Queue Characteristics
@@ -216,22 +203,14 @@ print('Analysis complete!')
 
 ```bash
 # ML training with multiple cores
-qxub --queue auto --mem 32GB --ncpus 8 --walltime 6:00:00 -- python3 -c "
-print('Training ML model with 8 cores and 32GB RAM...')
-import time; time.sleep(3)
-print('Model training complete!')
-"
+qxub --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python train_model.py
 ```
 
 ### Quick Test with Express Queue
 
 ```bash
 # Fast turnaround for debugging
-qxub --queue express --resources walltime=15:00 -- python3 -c "
-print('Quick test in express queue')
-import sys
-print(f'Python: {sys.version}')
-"
+qxub --queue express --resources walltime=15:00 -- python quick_test.py
 ```
 
 ## Resource Validation and Warnings
@@ -248,7 +227,7 @@ qxub --dry --resources mem=200GB --queue normal -- echo "Too much memory"
 ```
 ⚠️  Warning: Requested memory (200GB) exceeds normal queue limit (~190GB)
 💡 Suggestion: Use --queue auto or --queue hugemem
-💡 Alternative: Reduce --mem to 190GB or less
+💡 Alternative: Reduce memory in --resources to 190GB or less
 ```
 
 ### Walltime vs CPU Rules
@@ -261,7 +240,7 @@ qxub --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "Large 
 ```
 ⚠️  Warning: Large jobs (48+ CPUs) have reduced walltime limits
 💡 Max walltime for 48 CPUs: 5:00:00 in normal queue
-💡 Suggestion: Reduce --walltime to 5:00:00 or use fewer CPUs
+💡 Suggestion: Reduce walltime in --resources to 5:00:00 or use fewer CPUs
 ```
 
 ## Best Practices
@@ -314,7 +293,7 @@ print('Done!')
 🎉 Job completed successfully (exit code: 0)
 📊 Walltime used: 00:00:15 / 01:00:00 (25% efficiency)
 💾 Memory used: 0.3GB / 8.0GB (4% efficiency)
-💡 Suggestion: This job could use --mem 1GB --walltime 30:00
+💡 Suggestion: This job could use --resources mem=1GB,walltime=30:00
 ```
 
 ## Key Takeaways

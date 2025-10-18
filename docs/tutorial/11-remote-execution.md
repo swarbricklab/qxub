@@ -36,8 +36,8 @@ remotes:
   gadi:
     url: ssh://gadi.nci.org.au
     conda_env: dvc3
-    platform_file: "/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml"
-    working_dir: "/scratch/a56/jr9959"
+    platform: nci_gadi
+    working_dir: "/scratch/a56/$USER"
     force_tty: false
 EOF
 ```
@@ -51,10 +51,10 @@ Ensure your SSH key is configured:
 ssh-keygen -t rsa -b 4096 -C "your.email@example.com"
 
 # Copy public key to HPC system
-ssh-copy-id jr9959@gadi.nci.org.au
+ssh-copy-id your_username@gadi.nci.org.au
 
 # Test connection
-ssh jr9959@gadi.nci.org.au "echo 'Connection successful'"
+ssh your_username@gadi.nci.org.au "echo 'Connection successful'"
 ```
 
 ### Verify Remote Setup
@@ -126,7 +126,7 @@ qxub can automatically sync your local files to the remote system:
 
 ```bash
 # Sync local directory and run remote job
-qxub --remote gadi --sync-up ~/my_project /scratch/a56/jr9959/my_project -- python3 analysis.py
+qxub --remote gadi --sync-up ~/my_project /scratch/a56/$USER/my_project --default -- python3 analysis.py
 ```
 
 ### Sync and Download Results
@@ -134,8 +134,8 @@ qxub --remote gadi --sync-up ~/my_project /scratch/a56/jr9959/my_project -- pyth
 ```bash
 # Upload code, run analysis, download results
 qxub --remote gadi \
-  --sync-up ~/my_analysis /scratch/a56/jr9959/analysis \
-  --sync-down /scratch/a56/jr9959/analysis/results ~/results \
+  --sync-up ~/my_analysis /scratch/a56/$USER/analysis \
+  --sync-down /scratch/a56/$USER/analysis/results ~/results \
   --env dvc3 --mem 8GB \
   -- python3 run_analysis.py
 ```
@@ -144,7 +144,7 @@ qxub --remote gadi \
 
 ```bash
 # Set remote working directory
-qxub --remote gadi --work-dir /scratch/a56/jr9959/project1 -- python3 script.py
+qxub --remote gadi --work-dir /scratch/a56/$USER/project1 --default -- python3 script.py
 
 # Use project-specific remote directory
 qxub --remote gadi --work-dir '{remote_work}/current_project' --env dvc3 -- python3 analysis.py
@@ -168,10 +168,10 @@ print(result.head())
 EOF
 
 # Test on HPC with minimal resources
-qxub --remote gadi --sync-up . /scratch/a56/jr9959/dev_test test -- python3 test_script.py
+qxub --remote gadi --sync-up . /scratch/a56/$USER/dev_test test --default -- python3 test_script.py
 
 # Scale up for production
-qxub --remote gadi --sync-up . /scratch/a56/jr9959/production \
+qxub --remote gadi --sync-up . /scratch/a56/$USER/production \
   --env dvc3 --mem 16GB --ncpus 4 -- python3 production_script.py
 ```
 
@@ -187,8 +187,8 @@ for iteration in {1..3}; do
 
     # Run remotely with results download
     qxub --remote gadi \
-      --sync-up . /scratch/a56/jr9959/iter_$iteration \
-      --sync-down /scratch/a56/jr9959/iter_$iteration/results ./results_iter_$iteration \
+      --sync-up . /scratch/a56/$USER/iter_$iteration \
+      --sync-down /scratch/a56/$USER/iter_$iteration/results ./results_iter_$iteration \
       --env dvc3 -- python3 analysis.py
 
     echo "Iteration $iteration completed, results downloaded"
@@ -294,13 +294,9 @@ jobs:
         cat > ~/.config/qxub/config.yaml << EOF
         remotes:
           gadi:
-            host: gadi.nci.org.au
-            user: ${{ secrets.HPC_USERNAME }}
+            url: ssh://${{ secrets.HPC_USERNAME }}@gadi.nci.org.au
             platform: nci_gadi
-            connection:
-              ssh_key: ~/.ssh/id_rsa
-            defaults:
-              project: ${{ secrets.HPC_PROJECT }}
+            config: ~/.ssh/config
         default_remote: gadi
         EOF
 
@@ -321,7 +317,7 @@ jobs:
       if: always()
       run: |
         # Clean up test directory
-        qxub --remote gadi -- rm -rf /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }}
+        qxub --remote gadi --default -- rm -rf /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }}
 ```
 
 ### Automated Deployment Pipeline
@@ -367,7 +363,7 @@ jobs:
 # Run entire DVC pipeline remotely from laptop
 upload_and_run_pipeline() {
     local project_name=$1
-    local remote_dir="/scratch/a56/jr9959/$project_name"
+    local remote_dir="/scratch/a56/$USER/$project_name"
 
     echo "Uploading project to HPC..."
     qxub --remote gadi --sync-up . "$remote_dir" -- echo "Project uploaded"
@@ -397,8 +393,8 @@ jupyter nbconvert --to script analysis.ipynb
 
 # Run notebook script on HPC
 qxub --remote gadi \
-  --sync-up . /scratch/a56/jr9959/notebook_run \
-  --sync-down /scratch/a56/jr9959/notebook_run/outputs ./notebook_outputs \
+  --sync-up . /scratch/a56/$USER/notebook_run \
+  --sync-down /scratch/a56/$USER/notebook_run/outputs ./notebook_outputs \
   --env jupyterlab --mem 16GB --ncpus 4 \
   -- python3 analysis.py
 ```
@@ -441,18 +437,18 @@ qxub --remote gadi --dry -- echo "Connection test"
 qxub --remote gadi -vv --dry -- echo "Debug connection"
 
 # Test SSH directly
-ssh -v jr9959@gadi.nci.org.au "echo 'Direct SSH test'"
+ssh -v your_username@gadi.nci.org.au "echo 'Direct SSH test'"
 ```
 
 ### File Sync Issues
 
 ```bash
 # Test file synchronization
-qxub --remote gadi --sync-up test.txt /scratch/a56/jr9959/sync_test/ \
+qxub --remote gadi --sync-up test.txt /scratch/a56/$USER/sync_test/ \
   --dry -- echo "Sync test"
 
 # Check remote file system
-qxub --remote gadi -- ls -la /scratch/a56/jr9959/
+qxub --remote gadi --default -- ls -la /scratch/a56/$USER/
 ```
 
 ### Performance Optimization
@@ -475,13 +471,18 @@ EOF
 # Use specific SSH key for HPC
 ssh-keygen -t ed25519 -f ~/.ssh/hpc_key -C "hpc-access"
 
-# Update qxub config to use specific key
-cat >> ~/.config/qxub/config.yaml << 'EOF'
-remotes:
-  gadi:
-    connection:
-      ssh_key: ~/.ssh/hpc_key
+# Add SSH config for specific key
+cat >> ~/.ssh/config << 'EOF'
+Host gadi
+    HostName gadi.nci.org.au
+    User your_username
+    IdentityFile ~/.ssh/hpc_key
+    ControlMaster auto
+    ControlPersist 10m
 EOF
+
+# qxub will automatically use SSH config
+# No changes needed to qxub config.yaml
 ```
 
 ### Secure File Handling

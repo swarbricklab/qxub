@@ -16,7 +16,7 @@ All history is stored locally and tied to your user account.
 
 ```bash
 # Show the 10 most recent jobs
-qxub history list
+qxub history executions
 ```
 
 **Expected output:**
@@ -79,7 +79,7 @@ Resources:
 └── Efficiency: 25% walltime, 4% memory
 
 Command:
-└── python3 -c "import pandas as pd; print('Hello from history')"
+└── python data_analysis.py
 
 Execution Context:
 ├── Environment: dvc3 (conda)

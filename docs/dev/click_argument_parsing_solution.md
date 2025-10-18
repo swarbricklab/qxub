@@ -5,7 +5,7 @@ Transform CLI from subcommands to unified interface while preserving management 
 
 ```bash
 # Before (1.x)
-qxub conda --env myenv python script.py
+qxub --env myenv -- python script.py
 
 # After (2.x)
 qxub --env myenv -- python script.py

@@ -20,111 +20,80 @@ qxub supports four execution contexts (but only one per job):
 Let's run a Python job in the `dvc3` environment:
 
 ```bash
-qxub --dry --env dvc3 -- python3 -c "
-import sys
-print(f'Python: {sys.version}')
-import pandas as pd
-print(f'Pandas version: {pd.__version__}')
-"
+qxub --dry --env dvc3 -- python check_environment.py
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-144052
-...
-
-cd "/g/data/a56/software/qsub_tools"
-
-# Activate conda environment
-source /g/data/a56/conda/miniconda3/etc/profile.d/conda.sh
-conda activate dvc3
-
-python3 -c "
-import sys
-print(f'Python: {sys.version}')
-import pandas as pd
-print(f'Pandas version: {pd.__version__}')
-"
+� Job command constructed
+�📝 Command to execute: dvc doctor
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
-Notice how qxub automatically:
-- Sources the conda initialization script
-- Activates the specified environment
-- Runs your command in that environment
+To see more details about what PBS script would be generated, use `-v`:
+
+```bash
+qxub -v --dry --env dvc3 -- dvc doctor
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: dvc doctor
+🔧 Full qsub command: qsub -v cmd_b64="ZHZjIGRvY3Rvcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181306/out,err=/scratch/a56/jr9959/qt/20251018_181306/err,quiet=false,env="dvc3" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qconda.pbs
+```
+
+Notice how qxub automatically uses the `qconda.pbs` job script template and passes the conda environment name (`env="dvc3"`) to activate the specified environment.
 
 ### Running the Conda Job
 
 ```bash
-qxub --env dvc3 -- python3 -c "
-import sys, pandas as pd, numpy as np
-print(f'Python: {sys.version.split()[0]}')
-print(f'Pandas: {pd.__version__}')
-print(f'NumPy: {np.__version__}')
-print('All imports successful!')
-"
+qxub --env dvc3 -- dvc doctor
 ```
 
 **Expected output:**
 ```
-🚀 Submitting job...
-📋 Job submitted: 12345689.gadi-pbs (qx-20241017-145052)
-⏳ Job queued, waiting for execution...
-✅ Job started, streaming output...
-
-Python: 3.11.7
-Pandas: 2.1.4
-NumPy: 1.24.3
-All imports successful!
-
-🎉 Job completed successfully (exit code: 0)
+� Job command constructed
+✅ Job submitted successfully! Job ID: 152762000.gadi-pbs
+🚀 Job started running
+DVC version: 3.63.0 (conda)
+---------------------------
+Platform: Python 3.10.0 on Linux-4.18.0-553.62.1.el8.nci.x86_64-x86_64-with-glibc2.28
+Subprojects:
+        dvc_data = 3.16.4
+        dvc_objects = 5.1.0
+        dvc_render = 1.0.1
+        dvc_task = 0.3.0
+        scmrepo = 3.5.2
+Supports:
+        gdrive (pydrive2 = 1.21.3),
+        gs (gcsfs = 2024.2.0),
+        http (aiohttp = 3.9.1, aiohttp-retry = 2.8.3),
+        https (aiohttp = 3.9.1, aiohttp-retry = 2.8.3),
+        s3 (s3fs = 2024.2.0, boto3 = 1.34.34),
+        ssh (sshfs = 2023.10.0)
+Config:
+        Global: /home/913/jr9959/.config/dvc
+        System: /g/data/a56/config/xdg/dvc
+✅ Command completed successfully
+🎉 Job completed successfully
 ```
 
 ### Data Science Example with Resources
 
 ```bash
-# Pandas analysis in a specialized environment
-qxub --env dvc3 --mem 8GB --ncpus 2 -- python3 -c "
-import pandas as pd
-import numpy as np
-print('Creating sample dataset...')
-df = pd.DataFrame(np.random.randn(1000, 4), columns=['A', 'B', 'C', 'D'])
-print(f'Dataset shape: {df.shape}')
-print('Computing statistics...')
-print(df.describe())
-print('Analysis complete!')
-"
+# Combine conda environment with resource requirements
+qxub --env dvc3 --resources mem=8GB,ncpus=2 -- python data_analysis.py
 ```
 
-### R Environment Example
+### Other Environment Examples
 
 ```bash
-# Using the tidyverse environment for R
-qxub --env tidyverse -- Rscript -e "
-library(tidyverse)
-print('R version:')
-print(R.version.string)
-print('Tidyverse loaded successfully')
-data <- mtcars %>%
-  group_by(cyl) %>%
-  summarise(mean_mpg = mean(mpg))
-print(data)
-"
-```
+# R analysis environment
+qxub --env tidyverse -- Rscript analysis.R
 
-### Single-Cell Analysis Environment
-
-```bash
-# Single-cell analysis with specialized packages
-qxub --env sc --mem 16GB -- python3 -c "
-import scanpy as sc
-import pandas as pd
-print('Scanpy version:', sc.__version__)
-print('Single-cell analysis environment ready')
-# Could load and analyze data here
-print('Environment validation complete')
-"
+# Single-cell analysis with high memory
+qxub --env sc --resources mem=16GB -- python scanpy_analysis.py
 ```
 
 ## Environment Modules with `--mod` and `--mods`
@@ -134,77 +103,73 @@ print('Environment validation complete')
 Load a single environment module:
 
 ```bash
-qxub --dry --mod python3/3.11.7 -- python3 -c "
-import sys
-print(f'Python: {sys.version}')
-"
+qxub --dry --mod python3/3.11.7 -- python --version
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-145152
-...
-
-cd "/g/data/a56/software/qsub_tools"
-
-# Load environment modules
-module load python3/3.11.7
-
-python3 -c "
-import sys
-print(f'Python: {sys.version}')
-"
+🔧 Job command constructed
+📝 Command to execute: python --version
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
+
+To see more details, use `-v`:
+
+```bash
+qxub -v --dry --mod python3/3.11.7 -- python --version
+```
+
+**Verbose dry run output:**
+```
+� Job command constructed
+📝 Command to execute: python --version
+🔧 Full qsub command: qsub -v cmd_b64="cHl0aG9uIC0tdmVyc2lvbg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181557/out,err=/scratch/a56/jr9959/qt/20251018_181557/err,quiet=false,mods="python3/3.11.7" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qmod.pbs
+```
+
+Notice how qxub uses the `qmod.pbs` job script template and passes the module list (`mods="python3/3.11.7"`) to load the specified modules.
 
 ### Multiple Modules (`--mods`)
 
 Load multiple modules at once:
 
 ```bash
-qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- python3 -c "
-import sys
-import subprocess
-print(f'Python: {sys.version.split()[0]}')
-result = subprocess.run(['gcc', '--version'], capture_output=True, text=True)
-print('GCC version:', result.stdout.split('\n')[0])
-"
+qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-...
-# Load environment modules
-module load python3/3.11.7 gcc/11.1.0
-...
+� Job command constructed
+📝 Command to execute: python --version
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
+
+To see the full command with multiple modules:
+
+```bash
+qxub -v --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: python --version
+🔧 Full qsub command: qsub -v cmd_b64="cHl0aG9uIC0tdmVyc2lvbg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181632/out,err=/scratch/a56/jr9959/qt/20251018_181632/err,quiet=false,mods="python3/3.11.7 gcc/11.1.0" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qmod.pbs
+```
+
+Notice how the modules are passed as a space-separated list: `mods="python3/3.11.7 gcc/11.1.0"`.
 
 ### Real Module Example
 
 ```bash
-# Load Python and run a simple computation
-qxub --mod python3/3.11.7 -- python3 -c "
-import sys
-import math
-print(f'Python {sys.version.split()[0]} loaded via module')
-print('Computing square roots...')
-for i in [1, 4, 9, 16, 25]:
-    print(f'sqrt({i}) = {math.sqrt(i)}')
-print('Computation complete!')
-"
+# Load Python module and run script
+qxub --mod python3/3.11.7 -- python computation.py
 ```
 
 ### Combining Modules for Compilation
 
 ```bash
 # Example: compiling with GCC (if you had source code)
-qxub --mods gcc/11.1.0,python3/3.11.7 -- bash -c "
-gcc --version | head -1
-python3 --version
-echo 'Development environment ready'
-"
+qxub --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
 ```
 
 ## Singularity Containers with `--sif`
@@ -212,19 +177,30 @@ echo 'Development environment ready'
 qxub supports Singularity containers for reproducible environments:
 
 ```bash
-# Example (if you had a container)
-qxub --dry --sif /path/to/container.sif -- python3 -c "print('In container')"
+qxub --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-...
-# Run in Singularity container
-singularity exec /path/to/container.sif python3 -c "print('In container')"
+� Job command constructed
+📝 Command to execute: echo Hello from container
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
-**Note**: Container examples are not included here as they require specific container files, but the syntax follows the same pattern as other execution contexts.
+To see the full command with Singularity:
+
+```bash
+qxub -v --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: echo Hello from container
+🔧 Full qsub command: qsub -v cmd_b64="ZWNobyBIZWxsbyBmcm9tIGNvbnRhaW5lcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181659/out,err=/scratch/a56/jr9959/qt/20251018_181659/err,quiet=false,sif="/g/data/a56/containers/example.sif" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qsing.pbs
+```
+
+Notice how qxub uses the `qsing.pbs` job script template and passes the container path (`sif="/g/data/a56/containers/example.sif"`) to run commands inside the container.
 
 ## Execution Context Rules and Errors
 
@@ -258,7 +234,7 @@ qxub --mods python3/3.11.7,gcc/11.1.0 -- python3 script.py
 qxub --sif container.sif -- python3 script.py
 
 # ✅ Good: No execution context (uses login environment)
-qxub -- python3 script.py
+qxub --default -- python3 script.py
 ```
 
 ## Choosing the Right Execution Context
@@ -298,13 +274,7 @@ conda env list
 module avail
 
 # Check current environment
-qxub --env dvc3 -- bash -c "
-echo 'Current environment:'
-which python3
-python3 --version
-echo 'Available packages:'
-pip list | grep -E '(pandas|numpy|scipy)' | head -5
-"
+qxub --env dvc3 -- python check_environment.py
 ```
 
 ### Troubleshooting Environment Issues
@@ -312,7 +282,7 @@ pip list | grep -E '(pandas|numpy|scipy)' | head -5
 Use `--dry` and `-v` to debug environment problems:
 
 ```bash
-qxub --dry -v --env nonexistent -- python3 -c "print('test')"
+qxub --dry -v --env nonexistent -- python test.py
 ```
 
 This will show you exactly how qxub tries to activate the environment and where it might fail.
@@ -323,7 +293,7 @@ This will show you exactly how qxub tries to activate the environment and where 
 
 ```bash
 # Using pysam for genomics work
-qxub --env pysam --mem 8GB -- python3 -c "
+qxub --env pysam --resources mem=8GB -- python3 -c "
 import pysam
 import sys
 print(f'Pysam version: {pysam.__version__}')
@@ -336,7 +306,7 @@ print('Genomics environment ready')
 
 ```bash
 # ML training in sc environment
-qxub --env sc --mem 32GB --ncpus 4 --walltime 2:00:00 -- python3 -c "
+qxub --env sc --resources mem=32GB,ncpus=4,walltime=2:00:00 -- python3 -c "
 import scanpy as sc
 import pandas as pd
 import numpy as np
@@ -350,7 +320,7 @@ print('Training could start here...')
 
 ```bash
 # Numerical computation with modules
-qxub --mod python3/3.11.7 --mem 16GB --ncpus 8 -- python3 -c "
+qxub --mod python3/3.11.7 --resources mem=16GB,ncpus=8 -- python3 -c "
 import multiprocessing
 print(f'CPUs available: {multiprocessing.cpu_count()}')
 print('Scientific computing environment ready')
@@ -377,6 +347,6 @@ Execution contexts are fundamental to productive HPC work. They ensure your jobs
 
 **💡 Pro Tips:**
 - Use `--dry` to verify environment activation before submitting
-- Combine execution contexts with appropriate resources (`--mem`, `--ncpus`)
+- Combine execution contexts with appropriate resources (`--resources mem=8GB,ncpus=2`)
 - Keep commonly used environment+resource combinations as aliases
 - Test environment availability locally before using in jobs

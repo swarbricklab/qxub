@@ -43,7 +43,7 @@ set -e
 error_handler() {
     local exit_code=$?
     echo "❌ ERROR: Command failed with exit code $exit_code"
-    echo "💥 Failed command: $BASH_COMMAND"
+    echo "❌ Failed command: $BASH_COMMAND"
     exit $exit_code
 }
 

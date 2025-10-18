@@ -132,8 +132,8 @@ aliases:
 
 # Check specific test failure details
 echo $?  # Non-zero indicates failures
-```
-
+run_dry_test "Test description" \
+  "qxub --env base -- your-command-here"
 ### 2. **Full Testing** (Before releases)
 ```bash
 # Run comprehensive tests (careful - submits jobs!)
@@ -144,9 +144,9 @@ watch qstat -u $USER
 ```
 
 ### 3. **Debugging Failed Tests**
-```bash
-# Run individual commands from failed tests
-qxub conda --env base --dry-run echo "Debug test"
+run_test "Test description" \
+  "qxub --env base -- your-command-here" \
+  0  # Expected exit code
 
 # Check configuration
 qxub config get
@@ -189,11 +189,11 @@ These tests are designed to catch common issues in HPC environments:
 ```bash
 # Add to appropriate test function
 run_dry_test "Test description" \
-    "qxub conda --env base your-command-here"
+    "qxub --env base -- your-command-here"
 
 # For error conditions (should fail)
 run_dry_test "Error test description" \
-    "qxub conda invalid-command" \
+    "qxub --env base -- invalid-command" \
     2  # Expected exit code
 ```
 
@@ -201,7 +201,7 @@ run_dry_test "Error test description" \
 ```bash
 # Add to appropriate test function
 run_test "Test description" \
-    "qxub conda --env base your-command-here" \
+    "qxub --env base -- your-command-here" \
     0  # Expected exit code
 ```
 
@@ -209,9 +209,9 @@ run_test "Test description" \
 
 ### Success Output
 ```
-[INFO] Starting qxub conda dry-run integration tests...
+[INFO] Starting qxub --env dry-run integration tests...
 [TEST] All main PBS options
-Command: qxub --name cli-test --project a56 --queue normal conda --env base echo 'All options test' --dry-run
+Command: qxub --name cli-test --project a56 --queue normal --env base -- echo 'All options test' --dry-run
 [PASS] All main PBS options
 ...
 ========================================
@@ -239,8 +239,8 @@ Failed Test Details:
 Missing environment: Expected exit 2, got 0
 ❌ Some tests failed!
 ```
-
-## Continuous Integration
+[INFO] Starting qxub dry-run integration tests...
+Command: qxub --name cli-test --project a56 --queue normal --env base -- echo 'All options test' --dry-run
 
 These tests can be integrated into CI/CD pipelines:
 

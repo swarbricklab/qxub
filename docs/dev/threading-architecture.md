@@ -614,7 +614,7 @@ The current design scales well because:
 Enable debug logging to trace thread behavior:
 ```bash
 export QXUB_LOG_LEVEL=DEBUG
-qxub conda --env myenv script.py
+qxub --env myenv -- script.py
 ```
 
 Key log messages to watch for:

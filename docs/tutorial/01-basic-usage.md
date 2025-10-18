@@ -1,6 +1,6 @@
 # Basic Usage: Your First qxub Commands
 
-Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between traditional PBS and qxub: **real-time output and simplified submission**.
+Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between t❌ Failed command: python failing_script.pyaditional PBS and qxub: **real-time output and simplified submission**.
 
 ## The qxub Philosophy
 
@@ -11,7 +11,7 @@ Traditional PBS workflow:
 4. Check output files later
 
 qxub workflow:
-1. Run `qxub -- your_command`
+1. Run `qxub --default -- your_command`
 2. Watch output in real-time
 3. Get results immediately
 
@@ -20,7 +20,7 @@ qxub workflow:
 Let's start with something simple - a basic system information command:
 
 ```bash
-qxub -- hostname
+qxub --default -- hostname
 ```
 
 **Expected output:**
@@ -50,7 +50,7 @@ gadi-login-01
 Let's try something that takes a bit longer to really see the streaming in action:
 
 ```bash
-qxub -- bash -c 'for i in {1..10}; do echo "Processing step $i"; sleep 2; done'
+qxub --default -- python analysis.py
 ```
 
 **What you'll see:**
@@ -76,14 +76,7 @@ Notice how each line appears as it's generated - no waiting for the job to finis
 Let's run a simple Python script:
 
 ```bash
-qxub -- python3 -c "
-import sys
-import time
-print(f'Python version: {sys.version}')
-print('Computing something important...')
-time.sleep(3)
-print('Result: 42')
-"
+qxub --default -- python simple_calculation.py
 ```
 
 **Expected output:**
@@ -128,10 +121,10 @@ These defaults mean every job gets:
 
 ## Working with Output and Errors
 
-Let's demonstrate how qxub handles both stdout and stderr:
+Let's demonstrate how qxub handles both stdout and stderr by running a script that writes to both:
 
 ```bash
-qxub -- bash -c 'echo "This goes to stdout"; echo "This goes to stderr" >&2; echo "Back to stdout"'
+qxub --default -- python debug_script.py
 ```
 
 **You'll see both streams in real-time:**
@@ -158,22 +151,16 @@ The output files are still created separately:
 What happens when a command fails? Let's see:
 
 ```bash
-qxub -- bash -c 'echo "Starting..."; sleep 2; exit 1'
+qxub --default -- python failing_script.py
 ```
 
 **Expected output:**
 ```
-🚀 Submitting job...
-📋 Job submitted: 12345682.gadi-pbs (qx-20241017-143452)
-⏳ Job queued, waiting for execution...
-✅ Job started, streaming output...
-
-Starting...
-
-❌ Job failed with exit code: 1
-📊 Walltime used: 00:00:03 / 02:00:00
-💾 Memory used: 0.1GB / 4.0GB
-📁 Outputs: /scratch/a56/jr9959/qxub/qx-20241017-143452_20241017-143452.{out,err,log}
+� Job command constructed
+✅ Job submitted successfully! Job ID: 152754438.gadi-pbs
+❌ ERROR: Command failed with exit code 2
+python: can't open file '/g/data/a56/software/qsub_tools/failing_script.py': [Errno 2] No such file or directory
+� Failed command: python failing_script.py
 ```
 
 qxub clearly reports failures and still provides resource usage information.

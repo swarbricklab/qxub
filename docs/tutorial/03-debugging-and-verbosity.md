@@ -13,31 +13,11 @@ qxub --dry -- hostname
 ```
 
 **Expected output:**
+**Expected dry run output:**
 ```
-🔍 DRY RUN - Would submit the following job:
-
-📋 Job Configuration:
-├── Name: qx-20241017-144052
-├── Queue: normal
-├── Project: a56
-├── Resources: mem=4GB, ncpus=1, walltime=2:00:00
-├── Output: /scratch/a56/jr9959/qxub/qx-20241017-144052_20241017-144052.out
-├── Error: /scratch/a56/jr9959/qxub/qx-20241017-144052_20241017-144052.err
-└── Log: /scratch/a56/jr9959/qxub/qx-20241017-144052_20241017-144052.log
-
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-144052
-#PBS -P a56
-#PBS -q normal
-#PBS -l mem=4GB,ncpus=1,walltime=2:00:00
-#PBS -o /scratch/a56/jr9959/qxub/qx-20241017-144052_20241017-144052.out
-#PBS -e /scratch/a56/jr9959/qxub/qx-20241017-144052_20241017-144052.err
-
-cd "/g/data/a56/software/qsub_tools"
-hostname
-
-🚫 DRY RUN - No job submitted
+� Job command constructed
+📝 Command to execute: hostname
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
 This shows you:
@@ -51,33 +31,32 @@ This shows you:
 Let's see what happens with custom resources:
 
 ```bash
-qxub --dry --mem 8GB --ncpus 2 --walltime 30:00 -- python3 -c "print('Hello world')"
+qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python parallel_script.py
 ```
 
-**Notice the differences:**
+**Expected output:**
 ```
-🔍 DRY RUN - Would submit the following job:
-
-📋 Job Configuration:
-├── Name: qx-20241017-144152
-├── Queue: normal
-├── Project: a56
-├── Resources: mem=8GB, ncpus=2, walltime=0:30:00
-...
-
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-144152
-#PBS -P a56
-#PBS -q normal
-#PBS -l mem=8GB,ncpus=2,walltime=0:30:00
-...
-
-cd "/g/data/a56/software/qsub_tools"
-python3 -c "print('Hello world')"
+� Job command constructed
+� Command to execute: python parallel_script.py
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
-The dry run shows exactly how your resource specifications were interpreted.
+### Verbose Dry Run
+
+For more detail about the PBS submission, use `-v` with `--dry`:
+
+```bash
+qxub -v --dry --default -- echo "Hello"
+```
+
+**Expected output:**
+```
+🔧 Job command constructed
+📝 Command to execute: echo Hello
+🔧 Full qsub command: qsub -v cmd_b64="ZWNobyBIZWxsbw==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_154522/out,err=/scratch/a56/jr9959/qt/20251018_154522/err,quiet=false -N qt -q normal -P a56  -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qdefault.pbs
+```
+
+This shows the exact `qsub` command that would be executed, including all parameters and file paths.
 
 ## Verbosity Levels: Getting More Information
 
@@ -85,71 +64,44 @@ qxub supports multiple verbosity levels to help you understand what's happening:
 
 ### Default Verbosity (Quiet)
 ```bash
-qxub -- echo "Hello"
+qxub --default -- echo "Hello"
 ```
 Shows only essential information during job execution.
 
 ### Verbose (`-v`)
 ```bash
-qxub -v -- echo "Hello"
+qxub --default -v -- echo "Hello"
 ```
 
-**Additional information shown:**
+**Expected output:**
 ```
-🔧 Loading configuration from: /g/data/a56/config/xdg/qxub/config.yaml
-🎯 Platform detected: nci_gadi
-📋 Applying defaults from configuration
-🚀 Submitting job with qsub...
-📋 Job submitted: 12345684.gadi-pbs (qx-20241017-144252)
-🔄 Polling job status every 2 seconds...
-⏳ Job queued, waiting for execution...
-🎬 Job started, monitoring output streams...
-✅ Job started, streaming output...
-
+🔧 Job command constructed
+✅ Job submitted successfully! Job ID: 152755696.gadi-pbs
 Hello
-
-🎉 Job completed successfully (exit code: 0)
-📊 Resource usage analysis...
-📊 Walltime used: 00:00:03 / 02:00:00
-💾 Memory used: 0.1GB / 4.0GB
-📁 Output files created successfully
+✅ Command completed successfully
+🎉 Job completed successfully
 ```
 
 ### Very Verbose (`-vv`)
 ```bash
-qxub -vv -- echo "Hello"
+qxub -vv --default -- echo "Hello"
 ```
 
-**Even more detailed output:**
+**Expected output:**
 ```
-🔧 Loading user configuration from: ~/.config/qxub/config.yaml (not found)
-🔧 Loading system configuration from: /g/data/a56/config/xdg/qxub/config.yaml
-🔧 Configuration loaded successfully
-🎯 Hostname: gadi-login-01
-🎯 Platform search paths: ['/g/data/a56/config/xdg/qxub/platforms', ...]
-🎯 Platform detected: nci_gadi (from /g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml)
-📋 Template variables: {user: jr9959, project: a56, timestamp: 20241017-144352}
-📋 Resolving output paths...
-📋 Creating job script at: /tmp/qxub_12345685_script.pbs
-🚀 PBS command: qsub /tmp/qxub_12345685_script.pbs
-📋 Job submitted: 12345685.gadi-pbs (qx-20241017-144352)
-🔄 Starting job monitoring thread...
-🔄 Starting output streaming threads...
-⏳ Job status: Q (queued)
-⏳ Job status: R (running)
-🎬 Output streaming started
-✅ Job started, streaming output...
-
+INFO: Options: -N qt -q normal -P a56  -o qt.log
+INFO: Submission command: qsub -v cmd_b64="ZWNobyBIZWxsbw==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_154333/out,err=/scratch/a56/jr9959/qt/20251018_154333/err,quiet=false -N qt -q normal -P a56  -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qdefault.pbs
+🔧 Job command constructed
+✅ Job submitted successfully! Job ID: 152755741.gadi-pbs
 Hello
-
-🎉 Job status: C (completed)
-🎉 Job completed successfully (exit code: 0)
-📊 Parsing PBS job log for resource usage...
-📊 Walltime used: 00:00:03 / 02:00:00
-💾 Memory used: 0.1GB / 4.0GB
-🧹 Cleaning up temporary files...
-📁 Output files created successfully
+✅ Command completed successfully
+🎉 Job completed successfully
+INFO: Job 152755741.gadi-pbs completed with status F
+INFO: Waiting for PBS cleanup and getting exit status...
+INFO: Job 152755741.gadi-pbs exit status: 0
 ```
+
+Shows detailed internal operations including config loading, platform detection, job monitoring threads, and cleanup steps. Use for troubleshooting qxub itself.
 
 ## Common Debugging Scenarios
 
@@ -171,7 +123,7 @@ The dry run will show you the working directory and environment. You might need:
 If jobs are rejected or queued indefinitely:
 
 ```bash
-qxub --dry --mem 500GB --ncpus 48 --walltime 72:00:00 -- echo "test"
+qxub --dry --resources mem=500GB,ncpus=48,walltime=72:00:00 -- echo "test"
 ```
 
 The dry run might reveal:
@@ -190,7 +142,7 @@ qxub --dry -- pwd
 This shows the working directory in the PBS script. If you need to run somewhere else:
 
 ```bash
-qxub --dry -- bash -c 'cd /scratch/a56/jr9959 && pwd'
+qxub --dry -- ./run_in_scratch.sh
 ```
 
 ### 4. Environment Problems
@@ -212,14 +164,14 @@ qxub provides helpful error messages with suggestions:
 
 ### Invalid Resource Format
 ```bash
-qxub --mem 4g -- echo "test"  # Wrong format
+qxub --resources mem=4g -- echo "test"  # Wrong format
 ```
 
 **Error output:**
 ```
 ❌ Error: Invalid memory format '4g'
 💡 Hint: Use formats like '4GB', '4000MB', or '4096MB'
-💡 Examples: --mem 8GB, --mem 2000MB
+💡 Examples: --resources mem=8GB,ncpus=2
 ```
 
 ### Unknown Queue
@@ -272,7 +224,7 @@ When things go wrong, follow this process:
 
 5. **Test with minimal options**: Strip down to basics
    ```bash
-   qxub -- [simple version of command]
+   qxub --default -- [simple version of command]
    ```
 
 ## Getting Help
