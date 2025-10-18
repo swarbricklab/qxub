@@ -51,7 +51,7 @@ This shows you:
 Let's see what happens with custom resources:
 
 ```bash
-qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python3 -c "print('Hello world')"
+qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python parallel_script.py
 ```
 
 **Notice the differences:**
@@ -74,7 +74,7 @@ qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python3 -c "print('Hell
 ...
 
 cd "/g/data/a56/software/qsub_tools"
-python3 -c "print('Hello world')"
+python parallel_script.py
 ```
 
 The dry run shows exactly how your resource specifications were interpreted.

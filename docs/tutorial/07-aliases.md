@@ -78,7 +78,7 @@ qxub r -- Rscript my_analysis.R
 qxub sc -- python3 scanpy_analysis.py
 
 # Quick test with express queue
-qxub test -- python3 -c "print('Quick test')"
+qxub test -- python test_script.py
 
 # High-memory job automatically uses hugemem queue
 qxub bigmem -- python3 memory_intensive.py

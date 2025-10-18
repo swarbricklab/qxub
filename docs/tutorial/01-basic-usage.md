@@ -50,7 +50,7 @@ gadi-login-01
 Let's try something that takes a bit longer to really see the streaming in action:
 
 ```bash
-qxub --default -- bash -c 'for i in {1..10}; do echo "Processing step $i"; sleep 2; done'
+qxub --default -- python analysis.py
 ```
 
 **What you'll see:**
@@ -128,10 +128,10 @@ These defaults mean every job gets:
 
 ## Working with Output and Errors
 
-Let's demonstrate how qxub handles both stdout and stderr:
+Let's demonstrate how qxub handles both stdout and stderr by running a script that writes to both:
 
 ```bash
-qxub -- bash -c 'echo "This goes to stdout"; echo "This goes to stderr" >&2; echo "Back to stdout"'
+qxub --default -- python debug_script.py
 ```
 
 **You'll see both streams in real-time:**
@@ -158,7 +158,7 @@ The output files are still created separately:
 What happens when a command fails? Let's see:
 
 ```bash
-qxub -- bash -c 'echo "Starting..."; sleep 2; exit 1'
+qxub --default -- python failing_script.py
 ```
 
 **Expected output:**

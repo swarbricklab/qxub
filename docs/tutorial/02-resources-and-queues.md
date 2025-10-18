@@ -29,9 +29,9 @@ qxub accepts various memory formats:
 
 ```bash
 # Different ways to specify 8GB of memory
-qxub --dry --resources mem=8GB -- python3 -c "print('8GB job')"
-qxub --dry --resources mem=8000MB -- python3 -c "print('8000MB job')"
-qxub --dry ---resources mem=8192MB -- python3 -c "print('8192MB job')"
+qxub --dry --resources mem=8GB -- python analysis.py
+qxub --dry --resources mem=8000MB -- python analysis.py
+qxub --dry --resources mem=8192MB -- python analysis.py
 ```
 
 ### CPU Specification

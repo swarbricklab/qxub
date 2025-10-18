@@ -213,7 +213,7 @@ qxub supports Singularity containers for reproducible environments:
 
 ```bash
 # Example (if you had a container)
-qxub --dry --sif /path/to/container.sif -- python3 -c "print('In container')"
+qxub --dry --sif /path/to/container.sif -- python analysis.py
 ```
 
 **Expected dry run output:**
@@ -221,7 +221,7 @@ qxub --dry --sif /path/to/container.sif -- python3 -c "print('In container')"
 📝 PBS Script Preview:
 ...
 # Run in Singularity container
-singularity exec /path/to/container.sif python3 -c "print('In container')"
+singularity exec /path/to/container.sif python analysis.py
 ```
 
 **Note**: Container examples are not included here as they require specific container files, but the syntax follows the same pattern as other execution contexts.
@@ -312,7 +312,7 @@ pip list | grep -E '(pandas|numpy|scipy)' | head -5
 Use `--dry` and `-v` to debug environment problems:
 
 ```bash
-qxub --dry -v --env nonexistent -- python3 -c "print('test')"
+qxub --dry -v --env nonexistent -- python test.py
 ```
 
 This will show you exactly how qxub tries to activate the environment and where it might fail.

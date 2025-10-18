@@ -79,7 +79,7 @@ Resources:
 └── Efficiency: 25% walltime, 4% memory
 
 Command:
-└── python3 -c "import pandas as pd; print('Hello from history')"
+└── python data_analysis.py
 
 Execution Context:
 ├── Environment: dvc3 (conda)
