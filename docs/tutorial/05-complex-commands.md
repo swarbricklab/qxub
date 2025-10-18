@@ -2,6 +2,45 @@
 
 Now that you're comfortable with basic qxub usage and execution contexts, it's time to tackle more complex commands. This section covers shell quoting, variable substitution, multi-line scripts, and the powerful `--cmd` option.
 
+## Before You Start: Do You Really Need This?
+
+**Most users should skip this tutorial!** Instead of complex inline commands, consider:
+
+### 1. Use Script Files (Recommended)
+
+For complex logic, create a script file and run it:
+
+```bash
+# ✅ Simple and maintainable
+qxub --env myenv -- python analysis.py
+qxub --default -- ./process_data.sh
+qxub --mods gcc/11.1.0 -- ./compile_and_run.sh
+```
+
+### 2. Test Complex Commands First
+
+If you really need inline commands, test them carefully:
+
+```bash
+# Test your command logic locally first
+cmd='for i in {1..3}; do echo "Processing $i"; done'
+echo "$cmd"  # See how the shell interprets it
+eval "$cmd"  # Test it works
+
+# Then use --dry to verify the PBS script
+qxub --dry --default -- bash -c "$cmd"
+```
+
+### 3. When to Use This Tutorial
+
+Only proceed if you need to:
+- Handle complex quoting in automated scripts
+- Use shell variables that must be evaluated at job runtime
+- Build commands dynamically with variable substitution
+- Debug why your complex command isn't working as expected
+
+**If you just want to run a complex analysis, write a script file instead!**
+
 ## Understanding Command Processing
 
 qxub processes your command in several steps:
