@@ -38,10 +38,7 @@ qxub --dry --resources mem=8192MB -- python analysis.py
 
 ```bash
 # Request 4 CPUs for parallel processing
-qxub --dry --resources ncpus=4 -- python3 -c "
-import multiprocessing
-print(f'CPUs available: {multiprocessing.cpu_count()}')
-"
+qxub --dry --resources ncpus=4 -- python parallel_analysis.py
 ```
 
 ### Walltime Specification
@@ -50,16 +47,16 @@ qxub accepts flexible walltime formats:
 
 ```bash
 # Various walltime formats
-qxub --dry --resources walltime=30:00 -- echo "30 minutes"       # MM:SS
-qxub --dry --resources walltime=1:30:00 -- echo "1.5 hours"      # H:MM:SS
-qxub --dry resources walltime=24:00:00 -- echo "24 hours"      # H:MM:SS
+qxub --dry --default --resources walltime=30:00 -- echo "30 minutes"       # MM:SS
+qxub --dry --default --resources walltime=1:30:00 -- echo "1.5 hours"      # H:MM:SS
+qxub --dry --default --resources walltime=24:00:00 -- echo "24 hours"      # H:MM:SS
 ```
 
 ### Combining Resources
 
 ```bash
 # A job that needs more resources
-qxub --dry --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
+qxub --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
 ```
 
 **Expected dry run output:**
@@ -78,7 +75,7 @@ One of qxub's most powerful features is automatic queue selection with `--queue 
 
 ```bash
 # Let qxub choose the best queue
-qxub --dry --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
+qxub --dry --default --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
 ```
 
 **Expected output:**

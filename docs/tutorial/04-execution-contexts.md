@@ -20,12 +20,7 @@ qxub supports four execution contexts (but only one per job):
 Let's run a Python job in the `dvc3` environment:
 
 ```bash
-qxub --dry --env dvc3 -- python3 -c "
-import sys
-print(f'Python: {sys.version}')
-import pandas as pd
-print(f'Pandas version: {pd.__version__}')
-"
+qxub --dry --env dvc3 -- python check_environment.py
 ```
 
 **Expected dry run output:**
@@ -163,13 +158,7 @@ print(f'Python: {sys.version}')
 Load multiple modules at once:
 
 ```bash
-qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- python3 -c "
-import sys
-import subprocess
-print(f'Python: {sys.version.split()[0]}')
-result = subprocess.run(['gcc', '--version'], capture_output=True, text=True)
-print('GCC version:', result.stdout.split('\n')[0])
-"
+qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- ./compile_project.sh
 ```
 
 **Expected dry run output:**

@@ -112,10 +112,10 @@ Create aliases in your personal configuration:
 
 ```bash
 # Create a user alias for machine learning
-qxub config alias set ml main --env dvc3 --mem 32GB --ncpus 8 --walltime 4:00:00
+qxub config alias set ml --env dvc3 --resources mem=32GB,ncpus=8,walltime=4:00:00
 
 # Create an alias for quick data exploration
-qxub config alias set explore main --env dvc3 --mem 4GB --ncpus 1 --walltime 30:00
+qxub config alias set explore --env dvc3 --resources mem=4GB,ncpus=1,walltime=30:00
 ```
 
 ### View Your Custom Aliases

@@ -16,7 +16,7 @@ All history is stored locally and tied to your user account.
 
 ```bash
 # Show the 10 most recent jobs
-qxub history list
+qxub history executions
 ```
 
 **Expected output:**
