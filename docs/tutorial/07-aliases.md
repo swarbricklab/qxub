@@ -150,22 +150,18 @@ Aliases can have multiple sub-commands for different variations:
 
 ```bash
 # Create different variations of data analysis
-qxub config alias set analysis small --env dvc3 --mem 4GB --ncpus 2 --walltime 1:00:00
-qxub config alias set analysis medium --env dvc3 --mem 16GB --ncpus 4 --walltime 4:00:00
-qxub config alias set analysis large --env dvc3 --mem 64GB --ncpus 8 --walltime 8:00:00 --queue hugemem
+qxub config alias set analysis small --env dvc3 --resources mem=4GB,ncpus=2,walltime=1:00:00
+qxub config alias set analysis large --env dvc3 --resources mem=64GB,ncpus=8,walltime=8:00:00 --queue hugemem
 ```
 
 ### Using Sub-aliases
 
 ```bash
 # Small analysis
-qxub analysis small -- python3 quick_analysis.py
-
-# Medium analysis
-qxub analysis medium -- python3 standard_analysis.py
+qxub analysis small -- python quick_analysis.py
 
 # Large analysis (automatically uses hugemem queue)
-qxub analysis large -- python3 big_analysis.py
+qxub analysis large -- python big_analysis.py
 ```
 
 ### View Hierarchical Aliases
@@ -177,9 +173,8 @@ qxub config alias show analysis
 **Expected output:**
 ```
 📋 Alias: analysis
-├── small: --env dvc3 --mem 4GB --ncpus 2 --walltime 1:00:00
-├── medium: --env dvc3 --mem 16GB --ncpus 4 --walltime 4:00:00
-└── large: --env dvc3 --mem 64GB --ncpus 8 --walltime 8:00:00 --queue hugemem
+├── small: --env dvc3 --resources mem=4GB,ncpus=2,walltime=1:00:00
+└── large: --env dvc3 --resources mem=64GB,ncpus=8,walltime=8:00:00 --queue hugemem
 ```
 
 ## Project-Level Aliases

@@ -28,10 +28,8 @@ These defaults work well for:
 qxub accepts various memory formats:
 
 ```bash
-# Different ways to specify 8GB of memory
+# Request 8GB of memory (also accepts MB: mem=8000MB)
 qxub --dry --resources mem=8GB -- python analysis.py
-qxub --dry --resources mem=8000MB -- python analysis.py
-qxub --dry --resources mem=8192MB -- python analysis.py
 ```
 
 ### CPU Specification
@@ -46,10 +44,8 @@ qxub --dry --resources ncpus=4 -- python parallel_analysis.py
 qxub accepts flexible walltime formats:
 
 ```bash
-# Various walltime formats
-qxub --dry --default --resources walltime=30:00 -- echo "30 minutes"       # MM:SS
-qxub --dry --default --resources walltime=1:30:00 -- echo "1.5 hours"      # H:MM:SS
-qxub --dry --default --resources walltime=24:00:00 -- echo "24 hours"      # H:MM:SS
+# Walltime formats: MM:SS or H:MM:SS
+qxub --dry --default --resources walltime=1:30:00 -- python long_analysis.py
 ```
 
 ### Combining Resources
@@ -135,17 +131,11 @@ You can also specify queues directly:
 ### Standard Queues
 
 ```bash
-# Standard production queue
-qxub --dry --queue normal --resources mem=8GB -- echo "Normal queue"
+# Specify queue directly
+qxub --dry --queue express --resources mem=8GB,walltime=30:00 -- python analysis.py
 
-# Fast queue with higher priority (costs more SUs)
-qxub --dry --queue express --resources mem=8GB,walltime=30:00 -- echo "Express queue"
-
-# Large shared-memory queue
-qxub --dry --queue normalsl --resources ncpus=16 -- echo "Shared memory queue"
-
-# High-memory queue
-qxub --dry --queue hugemem --resources mem=128GB -- echo "Huge memory queue"
+# High-memory jobs typically use hugemem queue
+qxub --dry --queue hugemem --resources mem=128GB -- python big_analysis.py
 ```
 
 ### Understanding Queue Characteristics

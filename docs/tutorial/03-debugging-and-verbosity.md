@@ -116,40 +116,7 @@ Hello
 ```
 
 ### Very Verbose (`-vv`)
-```bash
-qxub -vv -- echo "Hello"
-```
-
-**Even more detailed output:**
-```
-🔧 Loading user configuration from: ~/.config/qxub/config.yaml (not found)
-🔧 Loading system configuration from: /g/data/a56/config/xdg/qxub/config.yaml
-🔧 Configuration loaded successfully
-🎯 Hostname: gadi-login-01
-🎯 Platform search paths: ['/g/data/a56/config/xdg/qxub/platforms', ...]
-🎯 Platform detected: nci_gadi (from /g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml)
-📋 Template variables: {user: jr9959, project: a56, timestamp: 20241017-144352}
-📋 Resolving output paths...
-📋 Creating job script at: /tmp/qxub_12345685_script.pbs
-🚀 PBS command: qsub /tmp/qxub_12345685_script.pbs
-📋 Job submitted: 12345685.gadi-pbs (qx-20241017-144352)
-🔄 Starting job monitoring thread...
-🔄 Starting output streaming threads...
-⏳ Job status: Q (queued)
-⏳ Job status: R (running)
-🎬 Output streaming started
-✅ Job started, streaming output...
-
-Hello
-
-🎉 Job status: C (completed)
-🎉 Job completed successfully (exit code: 0)
-📊 Parsing PBS job log for resource usage...
-📊 Walltime used: 00:00:03 / 02:00:00
-💾 Memory used: 0.1GB / 4.0GB
-🧹 Cleaning up temporary files...
-📁 Output files created successfully
-```
+Shows detailed internal operations including config loading, platform detection, job monitoring threads, and cleanup steps. Use for troubleshooting qxub itself.
 
 ## Common Debugging Scenarios
 

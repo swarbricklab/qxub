@@ -52,13 +52,7 @@ Notice how qxub automatically:
 ### Running the Conda Job
 
 ```bash
-qxub --env dvc3 -- python3 -c "
-import sys, pandas as pd, numpy as np
-print(f'Python: {sys.version.split()[0]}')
-print(f'Pandas: {pd.__version__}')
-print(f'NumPy: {np.__version__}')
-print('All imports successful!')
-"
+qxub --env dvc3 -- python check_environment.py
 ```
 
 **Expected output:**
@@ -79,47 +73,18 @@ All imports successful!
 ### Data Science Example with Resources
 
 ```bash
-# Pandas analysis in a specialized environment
-qxub --env dvc3 --resources mem=8GB,ncpus=2 -- python3 -c "
-import pandas as pd
-import numpy as np
-print('Creating sample dataset...')
-df = pd.DataFrame(np.random.randn(1000, 4), columns=['A', 'B', 'C', 'D'])
-print(f'Dataset shape: {df.shape}')
-print('Computing statistics...')
-print(df.describe())
-print('Analysis complete!')
-"
+# Combine conda environment with resource requirements
+qxub --env dvc3 --resources mem=8GB,ncpus=2 -- python data_analysis.py
 ```
 
-### R Environment Example
+### Other Environment Examples
 
 ```bash
-# Using the tidyverse environment for R
-qxub --env tidyverse -- Rscript -e "
-library(tidyverse)
-print('R version:')
-print(R.version.string)
-print('Tidyverse loaded successfully')
-data <- mtcars %>%
-  group_by(cyl) %>%
-  summarise(mean_mpg = mean(mpg))
-print(data)
-"
-```
+# R analysis environment
+qxub --env tidyverse -- Rscript analysis.R
 
-### Single-Cell Analysis Environment
-
-```bash
-# Single-cell analysis with specialized packages
-qxub --env sc --resources mem=16GB -- python3 -c "
-import scanpy as sc
-import pandas as pd
-print('Scanpy version:', sc.__version__)
-print('Single-cell analysis environment ready')
-# Could load and analyze data here
-print('Environment validation complete')
-"
+# Single-cell analysis with high memory
+qxub --env sc --resources mem=16GB -- python scanpy_analysis.py
 ```
 
 ## Environment Modules with `--mod` and `--mods`
@@ -173,16 +138,8 @@ module load python3/3.11.7 gcc/11.1.0
 ### Real Module Example
 
 ```bash
-# Load Python and run a simple computation
-qxub --mod python3/3.11.7 -- python3 -c "
-import sys
-import math
-print(f'Python {sys.version.split()[0]} loaded via module')
-print('Computing square roots...')
-for i in [1, 4, 9, 16, 25]:
-    print(f'sqrt({i}) = {math.sqrt(i)}')
-print('Computation complete!')
-"
+# Load Python module and run script
+qxub --mod python3/3.11.7 -- python computation.py
 ```
 
 ### Combining Modules for Compilation
