@@ -76,14 +76,7 @@ Notice how each line appears as it's generated - no waiting for the job to finis
 Let's run a simple Python script:
 
 ```bash
-qxub -- python3 -c "
-import sys
-import time
-print(f'Python version: {sys.version}')
-print('Computing something important...')
-time.sleep(3)
-print('Result: 42')
-"
+qxub --default -- python simple_calculation.py
 ```
 
 **Expected output:**

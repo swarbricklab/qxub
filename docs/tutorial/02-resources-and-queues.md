@@ -203,22 +203,14 @@ print('Analysis complete!')
 
 ```bash
 # ML training with multiple cores
-qxub --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python3 -c "
-print('Training ML model with 8 cores and 32GB RAM...')
-import time; time.sleep(3)
-print('Model training complete!')
-"
+qxub --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python train_model.py
 ```
 
 ### Quick Test with Express Queue
 
 ```bash
 # Fast turnaround for debugging
-qxub --queue express --resources walltime=15:00 -- python3 -c "
-print('Quick test in express queue')
-import sys
-print(f'Python: {sys.version}')
-"
+qxub --queue express --resources walltime=15:00 -- python quick_test.py
 ```
 
 ## Resource Validation and Warnings

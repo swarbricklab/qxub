@@ -261,12 +261,8 @@ EOF
 
 # Submit with different resource requirements
 parallel --colsep ',' 'job_id=$(qxub --terse --name "{1}-job" \
-    --resources mem={2},ncpus={3},walltime=2:00:00 py -- python3 -c "
-print(\"Running {1} analysis with {2} RAM and {3} CPUs\")
-import time
-time.sleep(10)
-print(\"{1} analysis completed\")
-"); echo "Submitted {1}: $job_id"' :::: /tmp/job_specs.txt
+    --resources mem={2},ncpus={3},walltime=2:00:00 py -- python analysis_{1}.py \
+    ); echo "Submitted {1}: $job_id"' :::: /tmp/job_specs.txt
 ```
 
 ## Pattern 5: Custom R Script for Job Management
