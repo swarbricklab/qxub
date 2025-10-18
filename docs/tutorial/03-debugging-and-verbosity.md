@@ -190,7 +190,7 @@ qxub --dry -- pwd
 This shows the working directory in the PBS script. If you need to run somewhere else:
 
 ```bash
-qxub --dry -- bash -c 'cd /scratch/a56/jr9959 && pwd'
+qxub --dry -- ./run_in_scratch.sh
 ```
 
 ### 4. Environment Problems

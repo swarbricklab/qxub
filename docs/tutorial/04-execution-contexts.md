@@ -200,11 +200,7 @@ print('Computation complete!')
 
 ```bash
 # Example: compiling with GCC (if you had source code)
-qxub --mods gcc/11.1.0,python3/3.11.7 -- bash -c "
-gcc --version | head -1
-python3 --version
-echo 'Development environment ready'
-"
+qxub --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
 ```
 
 ## Singularity Containers with `--sif`
@@ -298,13 +294,7 @@ conda env list
 module avail
 
 # Check current environment
-qxub --env dvc3 -- bash -c "
-echo 'Current environment:'
-which python3
-python3 --version
-echo 'Available packages:'
-pip list | grep -E '(pandas|numpy|scipy)' | head -5
-"
+qxub --env dvc3 -- python check_environment.py
 ```
 
 ### Troubleshooting Environment Issues
