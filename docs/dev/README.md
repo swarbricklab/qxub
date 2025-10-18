@@ -1,65 +1,52 @@
 # qxub Developer Documentation
 
-Technical documentation for developers working on qxub v2.3.2.
+Welcome to the qxub developer documentation! This section provides detailed technical information for developers working on or extending qxub.
 
-## Core Architecture
+## Threading System Documentation
 
-### Threading System
-qxub uses multi-threaded architecture for real-time job monitoring:
-- **OutputCoordinator**: Central synchronization hub for job monitoring
-- **Signal handling**: Ctrl+C cleanup with `_signal_handler()` and global `_CURRENT_JOB_ID`
-- **Thread responsibilities**: Monitor thread, STDOUT/STDERR tail, spinner display
-- **Graceful shutdown**: Automatic job cleanup via `qdel` on interruption
+qxub uses a sophisticated multi-threaded architecture to provide real-time job monitoring with clean output streaming. Understanding this system is crucial for debugging issues and making modifications.
 
-See: [threading-architecture.md](threading-architecture.md)
+### [📚 Threading Architecture](threading-architecture.md)
+**Complete technical guide** to qxub's threading system:
+- **OutputCoordinator**: Central thread synchronization hub
+- **Thread Responsibilities**: Monitor, STDOUT/STDERR tail, spinner
+- **Signal Flow**: Event-based coordination mechanisms
+- **Exit Code Propagation**: How job exit codes flow through threads
+- **Graceful Shutdown**: Ctrl-C handling and resource cleanup
+- **Performance**: Resource usage and scalability characteristics
 
-### Configuration System
-- **Hierarchical precedence**: CLI args > User config > System config > Defaults
-- **Template variables**: `{user}`, `{project}`, `{timestamp}` for dynamic substitution
-- **Alias system**: Hierarchical structure with main/subcommand/target sections
+### [📊 Threading Diagrams](threading-diagrams.md)
+**Visual representations** of thread interactions:
+- **State Diagrams**: Thread lifecycle and state transitions
+- **Sequence Diagrams**: Message flow between components
+- **Event Timeline**: Timing of signals and coordination
+- **Control Flow**: Different execution scenarios (success, failure, interruption)
+- **Memory Layout**: Resource usage patterns
 
-See: [config-and-alias-system-design.md](config-and-alias-system-design.md), [config_schema.md](config_schema.md)
+### [🔧 Threading Troubleshooting](threading-troubleshooting.md)
+**Practical debugging guide** for threading issues:
+- **Common Problems**: Hanging processes, wrong exit codes, missing output
+- **Diagnostic Tools**: Debug logging, thread inspection, performance analysis
+- **Testing Strategies**: Unit testing, integration testing, stress testing
+- **Emergency Procedures**: Kill hung processes, clean up orphaned jobs
+- **Prevention**: Best practices for thread-safe development
 
-### Platform System
-- **Platform definitions**: YAML files describing HPC system capabilities
-- **Queue selection**: `--queue auto` for intelligent, cost-optimized selection
-- **Resource validation**: Platform-aware constraint checking
+## System Design Documentation
 
-See: [platform_schema.md](platform_schema.md)
+### [⚙️ Config and Alias System Design](config-and-alias-system-design.md)
+**Architecture documentation** for configuration and alias systems:
+- **Configuration Hierarchy**: File precedence and inheritance
+- **Alias System**: Hierarchical structure and execution flow
+- **Template Variables**: Dynamic value substitution
+- **Validation**: Option validation and error handling
 
-### CLI Architecture
-- **Unified interface**: `qxub --env myenv -- command` replaces subcommands
-- **Custom Click group**: `QxubGroup` handles execution vs management commands
-- **Protected arguments**: Commands after `--` handled specially
+## Quick Reference
 
-See: [click_argument_parsing_solution.md](click_argument_parsing_solution.md)
-
-### Remote Execution
-- **SSH-based**: Submit jobs to remote HPC systems from local machine
-- **Platform inheritance**: Remote systems use local platform definitions
-- **Output streaming**: Real-time output from remote jobs
-
-See: [remote_execution.md](remote_execution.md)
-
-## Debug Commands
+### Essential Debugging Commands
 ```bash
 # Enable debug logging for threading issues
 export QXUB_LOG_LEVEL=DEBUG
-qxub --env myenv -- python script.py
-
-# Test dry-run without job submission
-qxub --dry-run --env myenv -- python script.py
-
-# Check configuration hierarchy
-qxub config files
-```
-
-## Key Files
-- `qxub/cli.py` - Main CLI entry point and execution contexts
-- `qxub/config_manager.py` - Configuration loading and template resolution
-- `qxub/platform.py` - Platform abstraction and queue selection
-- `qxub/scheduler.py` - PBS interaction and job monitoring
-- `qxub/remote_executor.py` - SSH-based remote execution
+qxub conda --env myenv script.py
 
 # Check thread status
 ps aux | grep qxub

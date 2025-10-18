@@ -20,11 +20,6 @@ qxub -- python script.py                    # Direct submission
 # Add PBS options before --
 qxub -l mem=16GB --queue normal --env myenv -- python script.py
 
-# Cost-optimized auto queue selection (recommended!)
-qxub --queue auto -l mem=1200GB --env myenv -- python big_job.py    # → megamem (58% cheaper!)
-qxub --queue auto -l ngpus=1 --env pytorch -- python train.py      # → gpuvolta
-qxub --queue auto -l ncpus=5000 --env myenv -- python parallel.py  # → normalsr
-
 # Preview without running
 qxub --dry --env myenv -- python script.py
 ```
@@ -40,16 +35,10 @@ qxub --dry --env myenv -- python script.py
 | `--env` | Conda environment | `--env pytorch` |
 | `--mod` | Environment module | `--mod python3` |
 | `--sif` | Singularity container | `--sif container.sif` |
-| `--cmd` | Complex command (alternative to `--`) | `--cmd "echo \"Hello ${USER}\""` |
-| `-l` | PBS resources | `-l mem=16GB,ncpus=8` |
-| `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
+| `-l` | PBS resources | `-l mem=16GB` |
+| `--queue` | PBS queue | `--queue normal` |
 | `--name` | Job name | `--name myjob` |
 | `--terse` | Terse output: emit job ID only | `--terse` |
-| `--remote` | Execute on remote HPC system via SSH | `--remote gadi` |
-
-## Output Display
-- **Local execution**: Interactive spinners and overwriting progress messages
-- **Remote SSH execution**: Clean line-by-line output (spinners auto-disabled)
 
 ## Parallel Job Execution (v2.3)
 ```bash
