@@ -25,49 +25,58 @@ qxub --dry --env dvc3 -- python check_environment.py
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-144052
-...
-
-cd "/g/data/a56/software/qsub_tools"
-
-# Activate conda environment
-source /g/data/a56/conda/miniconda3/etc/profile.d/conda.sh
-conda activate dvc3
-
-python3 -c "
-import sys
-print(f'Python: {sys.version}')
-import pandas as pd
-print(f'Pandas version: {pd.__version__}')
-"
+� Job command constructed
+�📝 Command to execute: dvc doctor
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
-Notice how qxub automatically:
-- Sources the conda initialization script
-- Activates the specified environment
-- Runs your command in that environment
+To see more details about what PBS script would be generated, use `-v`:
+
+```bash
+qxub -v --dry --env dvc3 -- dvc doctor
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: dvc doctor
+🔧 Full qsub command: qsub -v cmd_b64="ZHZjIGRvY3Rvcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181306/out,err=/scratch/a56/jr9959/qt/20251018_181306/err,quiet=false,env="dvc3" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qconda.pbs
+```
+
+Notice how qxub automatically uses the `qconda.pbs` job script template and passes the conda environment name (`env="dvc3"`) to activate the specified environment.
 
 ### Running the Conda Job
 
 ```bash
-qxub --env dvc3 -- python check_environment.py
+qxub --env dvc3 -- dvc doctor
 ```
 
 **Expected output:**
 ```
-🚀 Submitting job...
-📋 Job submitted: 12345689.gadi-pbs (qx-20241017-145052)
-⏳ Job queued, waiting for execution...
-✅ Job started, streaming output...
-
-Python: 3.11.7
-Pandas: 2.1.4
-NumPy: 1.24.3
-All imports successful!
-
-🎉 Job completed successfully (exit code: 0)
+� Job command constructed
+✅ Job submitted successfully! Job ID: 152762000.gadi-pbs
+🚀 Job started running
+DVC version: 3.63.0 (conda)
+---------------------------
+Platform: Python 3.10.0 on Linux-4.18.0-553.62.1.el8.nci.x86_64-x86_64-with-glibc2.28
+Subprojects:
+        dvc_data = 3.16.4
+        dvc_objects = 5.1.0
+        dvc_render = 1.0.1
+        dvc_task = 0.3.0
+        scmrepo = 3.5.2
+Supports:
+        gdrive (pydrive2 = 1.21.3),
+        gs (gcsfs = 2024.2.0),
+        http (aiohttp = 3.9.1, aiohttp-retry = 2.8.3),
+        https (aiohttp = 3.9.1, aiohttp-retry = 2.8.3),
+        s3 (s3fs = 2024.2.0, boto3 = 1.34.34),
+        ssh (sshfs = 2023.10.0)
+Config:
+        Global: /home/913/jr9959/.config/dvc
+        System: /g/data/a56/config/xdg/dvc
+✅ Command completed successfully
+🎉 Job completed successfully
 ```
 
 ### Data Science Example with Resources
@@ -94,46 +103,60 @@ qxub --env sc --resources mem=16GB -- python scanpy_analysis.py
 Load a single environment module:
 
 ```bash
-qxub --dry --mod python3/3.11.7 -- python3 -c "
-import sys
-print(f'Python: {sys.version}')
-"
+qxub --dry --mod python3/3.11.7 -- python --version
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-#!/bin/bash
-#PBS -N qx-20241017-145152
-...
-
-cd "/g/data/a56/software/qsub_tools"
-
-# Load environment modules
-module load python3/3.11.7
-
-python3 -c "
-import sys
-print(f'Python: {sys.version}')
-"
+🔧 Job command constructed
+📝 Command to execute: python --version
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
+
+To see more details, use `-v`:
+
+```bash
+qxub -v --dry --mod python3/3.11.7 -- python --version
+```
+
+**Verbose dry run output:**
+```
+� Job command constructed
+📝 Command to execute: python --version
+🔧 Full qsub command: qsub -v cmd_b64="cHl0aG9uIC0tdmVyc2lvbg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181557/out,err=/scratch/a56/jr9959/qt/20251018_181557/err,quiet=false,mods="python3/3.11.7" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qmod.pbs
+```
+
+Notice how qxub uses the `qmod.pbs` job script template and passes the module list (`mods="python3/3.11.7"`) to load the specified modules.
 
 ### Multiple Modules (`--mods`)
 
 Load multiple modules at once:
 
 ```bash
-qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- ./compile_project.sh
+qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-...
-# Load environment modules
-module load python3/3.11.7 gcc/11.1.0
-...
+� Job command constructed
+📝 Command to execute: python --version
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
+
+To see the full command with multiple modules:
+
+```bash
+qxub -v --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: python --version
+🔧 Full qsub command: qsub -v cmd_b64="cHl0aG9uIC0tdmVyc2lvbg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181632/out,err=/scratch/a56/jr9959/qt/20251018_181632/err,quiet=false,mods="python3/3.11.7 gcc/11.1.0" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qmod.pbs
+```
+
+Notice how the modules are passed as a space-separated list: `mods="python3/3.11.7 gcc/11.1.0"`.
 
 ### Real Module Example
 
@@ -154,19 +177,30 @@ qxub --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
 qxub supports Singularity containers for reproducible environments:
 
 ```bash
-# Example (if you had a container)
-qxub --dry --sif /path/to/container.sif -- python analysis.py
+qxub --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
 ```
 
 **Expected dry run output:**
 ```
-📝 PBS Script Preview:
-...
-# Run in Singularity container
-singularity exec /path/to/container.sif python analysis.py
+� Job command constructed
+📝 Command to execute: echo Hello from container
+Dry run - job would be submitted (use -v to see full qsub command)
 ```
 
-**Note**: Container examples are not included here as they require specific container files, but the syntax follows the same pattern as other execution contexts.
+To see the full command with Singularity:
+
+```bash
+qxub -v --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
+```
+
+**Verbose dry run output:**
+```
+🔧 Job command constructed
+📝 Command to execute: echo Hello from container
+🔧 Full qsub command: qsub -v cmd_b64="ZWNobyBIZWxsbyBmcm9tIGNvbnRhaW5lcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181659/out,err=/scratch/a56/jr9959/qt/20251018_181659/err,quiet=false,sif="/g/data/a56/containers/example.sif" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qsing.pbs
+```
+
+Notice how qxub uses the `qsing.pbs` job script template and passes the container path (`sif="/g/data/a56/containers/example.sif"`) to run commands inside the container.
 
 ## Execution Context Rules and Errors
 
