@@ -75,7 +75,7 @@ def main():
         elif exit_code == -1:
             status = "⏰ TIMEOUT"
         elif exit_code == -2:
-            status = "💥 ERROR"
+            status = "❌ ERROR"
         else:
             status = "❌ FAILED"
 

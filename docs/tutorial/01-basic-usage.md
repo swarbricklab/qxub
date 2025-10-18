@@ -1,6 +1,6 @@
 # Basic Usage: Your First qxub Commands
 
-Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between traditional PBS and qxub: **real-time output and simplified submission**.
+Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between t❌ Failed command: python failing_script.pyaditional PBS and qxub: **real-time output and simplified submission**.
 
 ## The qxub Philosophy
 
