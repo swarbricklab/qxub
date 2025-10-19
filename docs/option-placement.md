@@ -1,17 +1,31 @@
 # Option Placement
 
-qxub supports two command specification methods:
+qxub exec supports two comma## Wrong Examples
+
+```bash
+# ❌ qxub options after --
+qxub exec -- python script.py --env myenv
+
+# ❌ Both --cmd and -- together
+qxub exec --env myenv --cmd "echo hello" -- echo world
+
+# ❌ Missing -- (old CLI syntax)
+qxub --env myenv python script.py
+
+# ❌ Mixed placement
+qxub --env myenv python script.py --queue normal
+```n methods:
 
 ## Method 1: Traditional `--` Separator
 
 ```bash
-qxub [QXUB_OPTIONS] -- [YOUR_COMMAND]
+qxub exec [OPTIONS] -- [YOUR_COMMAND]
 ```
 
 ## Method 2: `--cmd` Option
 
 ```bash
-qxub [QXUB_OPTIONS] --cmd "YOUR_COMMAND"
+qxub exec [OPTIONS] --cmd "YOUR_COMMAND"
 ```
 
 Use `--cmd` for complex commands with variables, quotes, or special characters.
@@ -20,39 +34,46 @@ Use `--cmd` for complex commands with variables, quotes, or special characters.
 
 ```bash
 # ✅ Traditional separator - simple commands
-qxub --env myenv --queue normal -l mem=16GB -- python script.py
+qxub exec --env myenv --queue normal -l mem=16GB -- python script.py
 
 # ✅ --cmd option - complex commands with variables
-qxub --env myenv --cmd "python script.py --input ${HOME}/data.txt"
-qxub --env myenv --cmd 'echo "Job ${{PBS_JOBID}} on ${{HOSTNAME}}"'
+qxub exec --env myenv --cmd "python script.py --input ${HOME}/data.txt"
+qxub exec --env myenv --cmd 'echo "Job ${{PBS_JOBID}} on ${{HOSTNAME}}"'
 
 # ✅ Smart quotes - clean handling of nested quotes
-qxub --env myenv --cmd "find /data -exec echo \"Found: {}\" \;"
-qxub --env myenv --cmd "sh -c \"echo \\\"User: ${USER}\\\"\""
+qxub exec --env myenv --cmd "find /data -exec echo \"Found: {}\" \;"
+qxub exec --env myenv --cmd "sh -c \"echo \\\"User: ${USER}\\\"\""
 
 # ✅ Execution context options
-qxub --env pytorch -- python train.py
-qxub --mod python3 -- python analysis.py
-qxub --sif container.sif -- blastn -query input.fa
+qxub exec --env pytorch -- python train.py
+qxub exec --mod python3 -- python analysis.py
+qxub exec --sif container.sif -- blastn -query input.fa
+
+# ✅ Shortcuts - automatic detection
+qxub exec -- python train.py    # Auto-detects 'python' shortcut
+qxub exec -- gcc --version      # Auto-detects 'gcc' shortcut
+
+# ✅ Explicit shortcuts
+qxub exec --shortcut python -- script.py
 
 # ✅ PBS options
-qxub -l mem=32GB -l ncpus=8 --queue auto -- python script.py
+qxub exec -l mem=32GB -l ncpus=8 --queue auto -- python script.py
 ```
 
 ## Wrong Examples
 
 ```bash
 # ❌ qxub options after --
-qxub -- python script.py --env myenv
+qxub exec -- python script.py --env myenv
 
 # ❌ Both --cmd and -- together
-qxub --env myenv --cmd "echo hello" -- echo world
+qxub exec --env myenv --cmd "echo hello" -- echo world
 
 # ❌ Missing --
-qxub --env myenv python script.py
+qxub exec --env myenv python script.py
 
 # ❌ Mixed placement
-qxub --env myenv python script.py --queue normal
+qxub exec --env myenv python script.py --queue normal
 ```
 
 ## Why This Matters
@@ -64,7 +85,7 @@ The `--` separator tells qxub where its options end and your command begins. Thi
 Everything after `--` is passed directly to your command:
 
 ```bash
-qxub --env myenv -- python script.py --input data.csv --output results.json
+qxub exec --env myenv -- python script.py --input data.csv --output results.json
 ```
 
 Here `--input` and `--output` belong to your Python script, not qxub.
