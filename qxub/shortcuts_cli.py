@@ -25,8 +25,8 @@ def shortcuts_cli():
     pass
 
 
-@shortcuts_cli.command()
-@click.argument("name")
+@shortcuts_cli.command(name="set")
+@click.argument("command_prefix")
 @click.option("--env", help="Conda environment for execution")
 @click.option("--mod", multiple=True, help="Environment module to load (repeatable)")
 @click.option("--mods", help="Comma-separated list of environment modules")
@@ -34,30 +34,34 @@ def shortcuts_cli():
 @click.option("--bind", help="Singularity bind mounts")
 @click.option("-l", "--resources", multiple=True, help="PBS resource requirements")
 @click.option("-q", "--queue", help="PBS queue name")
-@click.option("-N", "--name", "job_name", help="PBS job name")
+@click.option("-N", "--job-name", help="PBS job name")
 @click.option("-P", "--project", help="PBS project code")
 @click.option("--template", help="Job script template")
 @click.option("--pre", help="Command to run before main command")
 @click.option("--post", help="Command to run after main command")
 @click.option("--cmd", help="Default command to execute (can be overridden)")
 @click.option("--description", help="Human-readable description of the shortcut")
-def set(name: str, **options):
+def set_shortcut(command_prefix: str, **options):
     """
     Create or update a shortcut.
 
-    Creates a shortcut with the specified name and configuration. The shortcut
-    will store execution context (conda env, modules, etc.) and PBS settings
-    for quick reuse.
+    Creates a shortcut for the specified command or command prefix.
+    The shortcut will store execution context (conda env, modules, etc.)
+    and PBS settings that will be automatically applied when you run
+    matching commands.
 
     Examples:
-        # Create a Python data science shortcut
-        qxub shortcut set "python-ds" --env datascience --queue express
+        # Create a Python shortcut (matches 'python', 'python3', 'python script.py', etc.)
+        qxub shortcut set "python" --env datascience --queue express
 
-        # Create a Jupyter shortcut with resource requirements
+        # Create a Jupyter shortcut (matches 'jupyter', 'jupyter lab', etc.)
         qxub shortcut set "jupyter" --env jupyter -l "mem=16GB,walltime=4:00:00"
 
-        # Create a DVC shortcut with modules
-        qxub shortcut set "dvc doctor" --mod python3 --mod dvc --cmd "dvc doctor"
+        # Create a DVC shortcut (matches 'dvc', 'dvc doctor', 'dvc add', etc.)
+        qxub shortcut set "dvc" --mod python3 --mod dvc
+
+        # Create a specific command shortcut (matches 'dvc doctor' exactly)
+        qxub shortcut set "dvc doctor" --mod python3 --mod dvc
 
         # Create a Singularity ML shortcut
         qxub shortcut set "tensorflow" --sif /path/to/tf.sif --bind /data:/mnt
@@ -118,17 +122,18 @@ def set(name: str, **options):
         )
 
     # Save shortcut
-    shortcut_manager.add_shortcut(name, definition)
+    shortcut_manager.add_shortcut(command_prefix, definition)
 
     # Show confirmation
     context_desc = _get_execution_context_description(definition)
-    click.echo(f"✅ Shortcut '{name}' saved successfully")
+    click.echo(f"✅ Shortcut '{command_prefix}' saved successfully")
     click.echo(f"   Context: {context_desc}")
     if definition.get("cmd"):
         click.echo(f"   Command: {definition['cmd']}")
 
     # Show usage example
-    click.echo(f"\n💡 Usage: qxub exec --shortcut '{name}' -- [command]")
+    click.echo(f"\n💡 Usage: qxub exec -- {command_prefix} [additional args]")
+    click.echo(f"💡 Or explicit: qxub exec --shortcut '{command_prefix}' -- [command]")
 
 
 @shortcuts_cli.command()
@@ -138,12 +143,14 @@ def list():
 
     if not shortcuts:
         click.echo("No shortcuts defined yet.")
-        click.echo("\n💡 Create one with: qxub shortcut set <name> --env <environment>")
+        click.echo(
+            "\n💡 Create one with: qxub shortcut set <command_prefix> --env <environment>"
+        )
         return
 
     # Create table
     table = Table(title="Available Shortcuts")
-    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Command Prefix", style="cyan", no_wrap=True)
     table.add_column("Context", style="green")
     table.add_column("Command", style="yellow")
     table.add_column("Description", style="dim")
@@ -157,8 +164,9 @@ def list():
     console.print(table)
 
     click.echo(
-        f"\n💡 Usage: qxub exec --shortcut <name> -- [command] or qxub exec -- <name> [args]"
+        f"\n💡 Usage: qxub exec -- <command_prefix> [args] (automatic detection)"
     )
+    click.echo(f"💡 Or explicit: qxub exec --shortcut <command_prefix> -- [command]")
 
 
 @shortcuts_cli.command()
@@ -218,9 +226,8 @@ def show(name: str):
         console.print(syntax)
 
     # Usage example
-    click.echo(
-        f"\n💡 Usage: qxub exec --shortcut '{name}' -- [command] or qxub exec -- {name} [args]"
-    )
+    click.echo(f"\n💡 Usage: qxub exec -- {name} [args] (automatic detection)")
+    click.echo(f"💡 Or explicit: qxub exec --shortcut '{name}' -- [command]")
 
 
 @shortcuts_cli.command()

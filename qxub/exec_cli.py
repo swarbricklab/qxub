@@ -237,9 +237,6 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
                 elif key == "project" and not options["project"]:
                     options["project"] = value
 
-            # Update command to be the remaining arguments after shortcut match
-            command = tuple(remaining_args)
-
             click.echo(f"🎯 Found shortcut '{shortcut_name}' for command")
         # If no shortcut found, continue with default execution
 
