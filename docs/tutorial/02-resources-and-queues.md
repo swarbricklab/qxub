@@ -29,14 +29,14 @@ qxub accepts various memory formats:
 
 ```bash
 # Request 8GB of memory (also accepts MB: mem=8000MB)
-qxub --dry --resources mem=8GB -- python analysis.py
+qxub exec --dry --resources mem=8GB -- python analysis.py
 ```
 
 ### CPU Specification
 
 ```bash
 # Request 4 CPUs for parallel processing
-qxub --dry --resources ncpus=4 -- python parallel_analysis.py
+qxub exec --dry --resources ncpus=4 -- python parallel_analysis.py
 ```
 
 ### Walltime Specification
@@ -45,14 +45,14 @@ qxub accepts flexible walltime formats:
 
 ```bash
 # Walltime formats: MM:SS or H:MM:SS
-qxub --dry --default --resources walltime=1:30:00 -- python long_analysis.py
+qxub exec --dry --default --resources walltime=1:30:00 -- python long_analysis.py
 ```
 
 ### Combining Resources
 
 ```bash
 # A job that needs more resources
-qxub --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
+qxub exec --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
 ```
 
 **Expected dry run output:**
@@ -71,7 +71,7 @@ One of qxub's most powerful features is automatic queue selection with `--queue 
 
 ```bash
 # Let qxub choose the best queue
-qxub --dry --default --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
+qxub exec --dry --default --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -- echo "Auto queue"
 ```
 
 **Expected output:**
@@ -92,7 +92,7 @@ qxub --dry --default --queue auto --resources mem=8GB,ncpus=2,walltime=1:00:00 -
 
 ```bash
 # High memory automatically selects appropriate queue
-qxub --dry --queue auto --resources mem=64GB -- echo "Big memory job"
+qxub exec --dry --queue auto --resources mem=64GB -- echo "Big memory job"
 ```
 
 **Expected output:**
@@ -116,7 +116,7 @@ qxub --dry --queue auto --resources mem=64GB -- echo "Big memory job"
 
 ```bash
 # Many CPUs might trigger normalsl selection
-qxub --dry --queue auto --resources ncpus=32,walltime=2:00:00 -- echo "Many CPU job"
+qxub exec --dry --queue auto --resources ncpus=32,walltime=2:00:00 -- echo "Many CPU job"
 ```
 
 qxub analyzes:
@@ -132,10 +132,10 @@ You can also specify queues directly:
 
 ```bash
 # Specify queue directly
-qxub --dry --queue express --resources mem=8GB,walltime=30:00 -- python analysis.py
+qxub exec --dry --queue express --resources mem=8GB,walltime=30:00 -- python analysis.py
 
 # High-memory jobs typically use hugemem queue
-qxub --dry --queue hugemem --resources mem=128GB -- python big_analysis.py
+qxub exec --dry --queue hugemem --resources mem=128GB -- python big_analysis.py
 ```
 
 ### Understanding Queue Characteristics
@@ -189,7 +189,7 @@ hugemem:
 
 ```bash
 # Typical pandas/analysis job
-qxub --queue auto --resources mem=16GB,ncpus=2,walltime=2:00:00 -- python3 -c "
+qxub exec --queue auto --resources mem=16GB,ncpus=2,walltime=2:00:00 -- python3 -c "
 import pandas as pd
 import numpy as np
 print('Running data analysis...')
@@ -203,14 +203,14 @@ print('Analysis complete!')
 
 ```bash
 # ML training with multiple cores
-qxub --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python train_model.py
+qxub exec --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python train_model.py
 ```
 
 ### Quick Test with Express Queue
 
 ```bash
 # Fast turnaround for debugging
-qxub --queue express --resources walltime=15:00 -- python quick_test.py
+qxub exec --queue express --resources walltime=15:00 -- python quick_test.py
 ```
 
 ## Resource Validation and Warnings
@@ -220,7 +220,7 @@ qxub validates your resource requests:
 ### Over-allocation Warning
 
 ```bash
-qxub --dry --resources mem=200GB --queue normal -- echo "Too much memory"
+qxub exec --dry --resources mem=200GB --queue normal -- echo "Too much memory"
 ```
 
 **Expected warning:**
@@ -233,7 +233,7 @@ qxub --dry --resources mem=200GB --queue normal -- echo "Too much memory"
 ### Walltime vs CPU Rules
 
 ```bash
-qxub --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "Large job"
+qxub exec --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "Large job"
 ```
 
 **Expected warning:**
@@ -249,17 +249,17 @@ qxub --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "Large 
 
 ```bash
 # Start small for testing
-qxub --dry --resources mem=4GB,walltime=30:00 -- python3 my_script.py
+qxub exec --dry --resources mem=4GB,walltime=30:00 -- python3 my_script.py
 
 # Scale up after confirming it works
-qxub --dry --resources mem=16GB,walltime=2:00:00 -- python3 my_script.py
+qxub exec --dry --resources mem=16GB,walltime=2:00:00 -- python3 my_script.py
 ```
 
 ### 2. Use Auto Queue Selection
 
 ```bash
 # Let qxub optimize for you
-qxub --queue auto --resource mem=8GB,ncpus=4 -- my_analysis.py
+qxub exec --queue auto --resource mem=8GB,ncpus=4 -- my_analysis.py
 ```
 
 ### 3. Match Resources to Workload
@@ -272,7 +272,7 @@ qxub --queue auto --resource mem=8GB,ncpus=4 -- my_analysis.py
 
 ```bash
 # Better to overestimate slightly than underestimate
-qxub --resource walltime=1:30:00 -- long_running_task.py  # If you think it takes 1 hour
+qxub exec --resource walltime=1:30:00 -- long_running_task.py  # If you think it takes 1 hour
 ```
 
 ## Monitoring Resource Usage
@@ -280,7 +280,7 @@ qxub --resource walltime=1:30:00 -- long_running_task.py  # If you think it take
 After jobs complete, qxub shows actual usage:
 
 ```bash
-qxub --resources mem=8GB,walltime=1:00:00 -- python3 -c "
+qxub exec --resources mem=8GB,walltime=1:00:00 -- python3 -c "
 import time
 print('Working...')
 time.sleep(10)

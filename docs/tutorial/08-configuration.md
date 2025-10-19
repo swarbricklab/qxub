@@ -306,7 +306,7 @@ EOF
 
 ```bash
 # Test how your config changes affect job submission
-qxub --dry -- echo "Testing config"
+qxub exec --dry -- echo "Testing config"
 ```
 
 ### Verify Template Expansion
@@ -411,7 +411,7 @@ qxub -vv --dry -- echo "test"
 qxub config get templates
 
 # Test template in dry run
-qxub --dry --name "test-{timestamp}" -- echo "test"
+qxub exec --dry --name "test-{timestamp}" -- echo "test"
 ```
 
 ## Key Takeaways

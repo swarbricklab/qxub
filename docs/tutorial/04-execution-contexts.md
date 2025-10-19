@@ -20,7 +20,7 @@ qxub supports four execution contexts (but only one per job):
 Let's run a Python job in the `dvc3` environment:
 
 ```bash
-qxub --dry --env dvc3 -- python check_environment.py
+qxub exec --dry --env dvc3 -- python check_environment.py
 ```
 
 **Expected dry run output:**
@@ -48,7 +48,7 @@ Notice how qxub automatically uses the `qconda.pbs` job script template and pass
 ### Running the Conda Job
 
 ```bash
-qxub --env dvc3 -- dvc doctor
+qxub exec --env dvc3 -- dvc doctor
 ```
 
 **Expected output:**
@@ -83,17 +83,17 @@ Config:
 
 ```bash
 # Combine conda environment with resource requirements
-qxub --env dvc3 --resources mem=8GB,ncpus=2 -- python data_analysis.py
+qxub exec --env dvc3 --resources mem=8GB,ncpus=2 -- python data_analysis.py
 ```
 
 ### Other Environment Examples
 
 ```bash
 # R analysis environment
-qxub --env tidyverse -- Rscript analysis.R
+qxub exec --env tidyverse -- Rscript analysis.R
 
 # Single-cell analysis with high memory
-qxub --env sc --resources mem=16GB -- python scanpy_analysis.py
+qxub exec --env sc --resources mem=16GB -- python scanpy_analysis.py
 ```
 
 ## Environment Modules with `--mod` and `--mods`
@@ -103,7 +103,7 @@ qxub --env sc --resources mem=16GB -- python scanpy_analysis.py
 Load a single environment module:
 
 ```bash
-qxub --dry --mod python3/3.11.7 -- python --version
+qxub exec --dry --mod python3/3.11.7 -- python --version
 ```
 
 **Expected dry run output:**
@@ -133,7 +133,7 @@ Notice how qxub uses the `qmod.pbs` job script template and passes the module li
 Load multiple modules at once:
 
 ```bash
-qxub --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
+qxub exec --dry --mods python3/3.11.7,gcc/11.1.0 -- python --version
 ```
 
 **Expected dry run output:**
@@ -162,14 +162,14 @@ Notice how the modules are passed as a space-separated list: `mods="python3/3.11
 
 ```bash
 # Load Python module and run script
-qxub --mod python3/3.11.7 -- python computation.py
+qxub exec --mod python3/3.11.7 -- python computation.py
 ```
 
 ### Combining Modules for Compilation
 
 ```bash
 # Example: compiling with GCC (if you had source code)
-qxub --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
+qxub exec --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
 ```
 
 ## Singularity Containers with `--sif`
@@ -177,7 +177,7 @@ qxub --mods gcc/11.1.0,python3/3.11.7 -- ./compile_project.sh
 qxub supports Singularity containers for reproducible environments:
 
 ```bash
-qxub --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
+qxub exec --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from container"
 ```
 
 **Expected dry run output:**
@@ -208,7 +208,7 @@ Notice how qxub uses the `qsing.pbs` job script template and passes the containe
 
 ```bash
 # This will fail - mixing conda and modules
-qxub --env dvc3 --mod python3/3.11.7 -- echo "This fails"
+qxub exec --env dvc3 --mod python3/3.11.7 -- echo "This fails"
 ```
 
 **Expected error:**
@@ -222,19 +222,19 @@ qxub --env dvc3 --mod python3/3.11.7 -- echo "This fails"
 
 ```bash
 # ✅ Good: Conda only
-qxub --env dvc3 -- python3 script.py
+qxub exec --env dvc3 -- python3 script.py
 
 # ✅ Good: Single module only
-qxub --mod python3/3.11.7 -- python3 script.py
+qxub exec --mod python3/3.11.7 -- python3 script.py
 
 # ✅ Good: Multiple modules only
-qxub --mods python3/3.11.7,gcc/11.1.0 -- python3 script.py
+qxub exec --mods python3/3.11.7,gcc/11.1.0 -- python3 script.py
 
 # ✅ Good: Container only
-qxub --sif container.sif -- python3 script.py
+qxub exec --sif container.sif -- python3 script.py
 
 # ✅ Good: No execution context (uses login environment)
-qxub --default -- python3 script.py
+qxub exec --default -- python3 script.py
 ```
 
 ## Choosing the Right Execution Context
@@ -274,7 +274,7 @@ conda env list
 module avail
 
 # Check current environment
-qxub --env dvc3 -- python check_environment.py
+qxub exec --env dvc3 -- python check_environment.py
 ```
 
 ### Troubleshooting Environment Issues
@@ -282,7 +282,7 @@ qxub --env dvc3 -- python check_environment.py
 Use `--dry` and `-v` to debug environment problems:
 
 ```bash
-qxub --dry -v --env nonexistent -- python test.py
+qxub exec --dry -v --env nonexistent -- python test.py
 ```
 
 This will show you exactly how qxub tries to activate the environment and where it might fail.
@@ -293,7 +293,7 @@ This will show you exactly how qxub tries to activate the environment and where 
 
 ```bash
 # Using pysam for genomics work
-qxub --env pysam --resources mem=8GB -- python3 -c "
+qxub exec --env pysam --resources mem=8GB -- python3 -c "
 import pysam
 import sys
 print(f'Pysam version: {pysam.__version__}')
@@ -306,7 +306,7 @@ print('Genomics environment ready')
 
 ```bash
 # ML training in sc environment
-qxub --env sc --resources mem=32GB,ncpus=4,walltime=2:00:00 -- python3 -c "
+qxub exec --env sc --resources mem=32GB,ncpus=4,walltime=2:00:00 -- python3 -c "
 import scanpy as sc
 import pandas as pd
 import numpy as np
@@ -320,7 +320,7 @@ print('Training could start here...')
 
 ```bash
 # Numerical computation with modules
-qxub --mod python3/3.11.7 --resources mem=16GB,ncpus=8 -- python3 -c "
+qxub exec --mod python3/3.11.7 --resources mem=16GB,ncpus=8 -- python3 -c "
 import multiprocessing
 print(f'CPUs available: {multiprocessing.cpu_count()}')
 print('Scientific computing environment ready')

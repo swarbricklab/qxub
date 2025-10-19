@@ -1,63 +1,113 @@
-# Aliases: Command Shortcuts and Workflow Optimization
+# Shortcuts and Aliases: Two Powerful Systems for Command Optimization
 
-Aliases are one of qxub's most powerful features, allowing you to save complex command patterns as simple shortcuts. This section covers using the built-in aliases, creating your own, and managing alias hierarchies.
+qxub provides two complementary systems for optimizing your workflow:
 
-## Understanding qxub Aliases
+1. **Shortcuts** - Modern command-prefix based system with automatic detection
+2. **Aliases** - Traditional configuration-based system for predefined workflows
 
-Aliases in qxub are pre-configured combinations of:
-- Execution environments (`--env`, `--mod`, etc.)
-- Resource specifications (`--resources mem=8GB,ncpus=2,walltime=1:00:00`)
-- Queue selections
-- Any other qxub options
+This section covers both systems, when to use each, and how they work together.
 
-They're organized hierarchically and can be overridden at different configuration levels.
+## Understanding the Two Systems
 
-## Using Built-in Aliases
+### Shortcuts (New System)
+- **Automatic detection**: `qxub exec -- python script.py` automatically uses 'python' shortcut
+- **Command-prefix based**: Matches the first word of your command
+- **JSON storage**: Stored in `~/.config/qxub/shortcuts.json`
+- **Modern interface**: Managed with `qxub shortcut` commands
 
-The system configuration already includes several ready-made aliases. Let's explore them:
+### Aliases (Legacy System)
+- **Explicit invocation**: `qxub alias quick -- python script.py`
+- **Configuration-based**: Defined in YAML config files
+- **Hierarchical**: Support for complex nested configurations
+- **Legacy interface**: Managed with `qxub config alias` commands
 
-### View Available Aliases
+## Using Shortcuts (Recommended for New Workflows)
+
+### View Available Shortcuts
 
 ```bash
-qxub config alias list
+qxub shortcut list
 ```
 
 **Expected output:**
 ```
-📋 Available Aliases:
-
-py (Python Data Science):
-└── main: --env dvc3 --resources mem=8GB,ncpus=2,walltime=1:00:00
-
-r (R Analysis):
-└── main: --env tidyverse --resources mem=8GB,ncpus=2,walltime=1:00:00
-
-sc (Single-cell Analysis):
-└── main: --env sc --resources mem=16GB,ncpus=4,walltime=2:00:00
-
-bio (Bioinformatics):
-└── main: --env pysam --resources mem=8GB,ncpus=4,walltime=2:00:00
-
-bigmem (High Memory Jobs):
-└── main: --resources mem=64GB,ncpus=8,walltime=4:00:00 --queue hugemem
-
-test (Quick Testing):
-└── main: --resources mem=2GB,ncpus=1,walltime=0:15:00 --queue express
-
-parallel (Parallel Processing):
-└── main: --resources mem=4GB,ncpus=8,walltime=2:00:00
+                             Available Shortcuts
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Command Prefix ┃ Context              ┃ Command   ┃ Description            ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ python         │ conda: base          │ (dynamic) │ Python with base conda │
+│                │                      │           │ environment            │
+│ echo           │ default              │ (dynamic) │ Simple echo test       │
+│ gcc            │ default              │ (dynamic) │ GCC compiler           │
+└────────────────┴──────────────────────┴───────────┴────────────────────────┘
 ```
 
-### Using Simple Aliases
+### Using Shortcuts Automatically
 
-Replace long resource specifications with short aliases:
+Shortcuts work seamlessly - just run your command normally:
 
 ```bash
-# Instead of this long command:
-qxub --env dvc3 --resources mem=8GB,ncpus=2,walltime=1:00:00 -- python3 my_analysis.py
+# These automatically detect and use shortcuts:
+qxub exec -- python script.py        # Uses 'python' shortcut (conda: base)
+qxub exec -- echo "Hello world"      # Uses 'echo' shortcut (default execution)
+qxub exec -- gcc -o program source.c # Uses 'gcc' shortcut (default execution)
 
-# Use this simple alias:
-qxub py -- python3 my_analysis.py
+# See what shortcut would be used:
+qxub exec --dry -- python script.py
+```
+
+### Creating Shortcuts
+
+```bash
+# Create a shortcut for PyTorch development
+qxub shortcut set "pytorch" --env pytorch --queue gpuvolta --resource ngpus=1 --description "PyTorch GPU training"
+
+# Create a shortcut for data analysis
+qxub shortcut set "pandas" --env analytics --resource mem=16GB --description "Pandas data analysis"
+
+# Use them automatically:
+qxub exec -- pytorch train.py
+qxub exec -- pandas analyze.py
+```
+
+## Using Aliases (Legacy System)
+
+### View Available Aliases
+
+```bash
+qxub alias list
+```
+
+**Expected output:**
+```
+Available aliases:
+  • quick: conda (env: base) - (requires command args)
+  • bigmem: conda (env: scipy) - (requires command args)
+  • gpu: conda (env: tensorflow) - (requires command args)
+  • parallel: conda (env: mpi) - (requires command args)
+```
+
+### Using Aliases Explicitly
+
+Aliases require explicit invocation with the `qxub alias` command:
+
+```bash
+# Use aliases with explicit commands:
+qxub alias quick -- python script.py
+qxub alias bigmem -- python memory_intensive.py
+qxub alias gpu -- python train_model.py
+qxub alias parallel -- mpirun -n 8 parallel_app
+```
+
+### Combining Aliases with Additional Options
+
+You can override alias settings:
+
+```bash
+# Use alias but override specific settings
+qxub alias quick --queue express -- python test.py
+qxub alias bigmem --resource mem=64GB -- python bigger_job.py
+qxub alias gpu --job-name my-training -- python train.py
 ```
 
 **Expected output:**
@@ -68,43 +118,7 @@ qxub py -- python3 my_analysis.py
 ...
 ```
 
-### More Alias Examples
-
-```bash
-# R analysis with appropriate resources
-qxub r -- Rscript my_analysis.R
-
-# Single-cell analysis with high memory
-qxub sc -- python3 scanpy_analysis.py
-
-# Quick test with express queue
-qxub test -- python test_script.py
-
-# High-memory job automatically uses hugemem queue
-qxub bigmem -- python3 memory_intensive.py
-
-# Parallel processing with 8 CPUs
-qxub parallel -- python3 parallel_analysis.py
-```
-
-### Combining Aliases with Additional Options
-
-You can override or extend alias settings:
-
-```bash
-# Use py alias but with more memory
-qxub py --mem 16GB -- python3 big_analysis.py
-
-# Use test alias but with different walltime
-qxub test --walltime 30:00 -- python3 longer_test.py
-
-# Use sc alias but with different queue
-qxub sc --queue normal -- python3 sc_analysis.py
-```
-
-**The alias provides the base configuration, and your additional options override specific settings.**
-
-## Creating Your Own Aliases
+## Creating Your Own Aliases (Legacy System)
 
 ### User-Level Aliases
 
@@ -112,41 +126,78 @@ Create aliases in your personal configuration:
 
 ```bash
 # Create a user alias for machine learning
-qxub config alias set ml --env dvc3 --resources mem=32GB,ncpus=8,walltime=4:00:00
+qxub config set aliases.ml.env "pytorch"
+qxub config set aliases.ml.queue "gpuvolta"
+qxub config set aliases.ml.resources '["mem=32GB", "ncpus=12", "ngpus=1"]'
 
 # Create an alias for quick data exploration
-qxub config alias set explore --env dvc3 --resources mem=4GB,ncpus=1,walltime=30:00
-```
-
-### View Your Custom Aliases
-
-```bash
-qxub config alias show ml
-```
-
-**Expected output:**
-```
-📋 Alias: ml
-└── main: --env dvc3 --mem 32GB --ncpus 8 --walltime 4:00:00
-
-🔍 Origin: User configuration (~/.config/qxub/config.yaml)
+qxub config set aliases.explore.env "base"
+qxub config set aliases.explore.resources '["mem=4GB", "ncpus=1", "walltime=30:00"]'
 ```
 
 ### Using Custom Aliases
 
 ```bash
 # Use your machine learning alias
-qxub ml -- python3 train_model.py
+qxub alias ml -- python train_model.py
 
 # Use your exploration alias
-qxub explore -- python3 explore_data.py
+qxub alias explore -- python explore_data.py
 ```
 
-## Hierarchical Aliases
+## When to Use Each System
 
-Aliases can have multiple sub-commands for different variations:
+### Use Shortcuts When:
+- ✅ You want **automatic detection** based on command names
+- ✅ You prefer **modern JSON storage** and management
+- ✅ You want **command-prefix based workflows** (e.g., all `python` commands use the same context)
+- ✅ You're starting new workflows and want the **latest features**
 
-### Creating Sub-aliases
+### Use Aliases When:
+- ✅ You have **complex hierarchical configurations**
+- ✅ You want **explicit control** over when optimizations are applied
+- ✅ You're working with **existing alias-based workflows**
+- ✅ You need **configuration-file based management**
+
+## Advanced Workflows Combining Both Systems
+
+You can use both systems together for maximum flexibility:
+
+```bash
+# Create shortcuts for automatic detection
+qxub shortcut set "python" --env base
+qxub shortcut set "jupyter" --env datascience --resource mem=8GB
+
+# Create aliases for specific workflows
+qxub config set aliases.gpu-train.env "pytorch"
+qxub config set aliases.gpu-train.queue "gpuvolta"
+qxub config set aliases.gpu-train.resources '["ngpus=1", "ncpus=12"]'
+
+# Use shortcuts automatically:
+qxub exec -- python analyze.py           # Auto-detects python shortcut
+qxub exec -- jupyter notebook           # Auto-detects jupyter shortcut
+
+# Use aliases explicitly for specific workflows:
+qxub alias gpu-train -- python train_model.py
+```
+
+## Best Practices
+
+### For Shortcuts:
+- Use **descriptive command prefixes** that match your actual commands
+- Create shortcuts for **commonly used command patterns**
+- Keep shortcuts **simple and focused** on execution context
+
+### For Aliases:
+- Use aliases for **complex multi-step workflows**
+- Leverage **configuration hierarchy** for team vs personal settings
+- Use **meaningful alias names** that describe the workflow purpose
+
+### General Guidelines:
+- **Start with shortcuts** for new workflows - they're more intuitive
+- **Keep aliases** for existing complex configurations
+- **Document your shortcuts and aliases** for team members
+- **Use overrides sparingly** - if you override often, create a new shortcut/alias
 
 ```bash
 # Create different variations of data analysis
@@ -399,25 +450,39 @@ Include `.qxub/config.yaml` in your project repository so team members can use t
 
 ## Key Takeaways
 
-1. **Built-in aliases**: Start with system-provided shortcuts (`py`, `r`, `sc`, etc.)
-2. **Custom aliases**: Create shortcuts for your common workflows
-3. **Hierarchical organization**: Use sub-aliases for variations
-4. **Configuration hierarchy**: Project > User > System precedence
-5. **Always test**: Use `--dry` to verify alias behavior
+1. **Two systems available**: Shortcuts (modern, automatic) and Aliases (legacy, explicit)
+2. **Shortcuts for new workflows**: Use `qxub exec --` with automatic command detection
+3. **Aliases for complex configurations**: Use `qxub alias` for explicit workflow management
+4. **Both can coexist**: Use shortcuts for daily commands, aliases for special workflows
+5. **Start simple**: Begin with built-in shortcuts and aliases before creating custom ones
+
+## Migration Strategy
+
+If you're transitioning from aliases to shortcuts:
+
+```bash
+# Old alias approach:
+qxub alias python -- python script.py
+
+# New shortcut approach:
+qxub shortcut set "python" --env base
+qxub exec -- python script.py  # Automatic detection
+```
 
 ## Next Steps
 
-Now that you understand aliases:
+Now that you understand both systems:
 - **[Configuration](08-configuration.md)** - Understand the full configuration system
-- **[Parallel Execution](09-parallel-execution.md)** - Use aliases in parallel job patterns
+- **[Parallel Execution](09-parallel-execution.md)** - Use shortcuts and aliases in parallel job patterns
 
-Aliases are essential for efficient qxub usage. They eliminate repetitive typing and ensure consistent resource allocation across your workflows.
+Both shortcuts and aliases are essential for efficient qxub usage. Shortcuts provide modern automatic detection, while aliases offer explicit control for complex workflows.
 
 ---
 
 **💡 Pro Tips:**
-- Use `qxub config alias list --show-origin` to understand where aliases come from
-- Create project-specific aliases in `.qxub/config.yaml` for team sharing
-- Test new aliases with `--dry` before relying on them
-- Use hierarchical aliases (e.g., `analysis small`, `analysis large`) for related workflows
-- Override alias settings when needed: `qxub py --mem 16GB -- script.py`
+- **Shortcuts**: Use `qxub shortcut list` to see available shortcuts
+- **Aliases**: Use `qxub alias list` to see available aliases
+- **Testing**: Use `--dry` with both systems to preview behavior
+- **Overrides**: Both systems support command-line overrides
+- **Documentation**: Use `qxub shortcut show` and `qxub config alias show` for details
+- **Team sharing**: Shortcuts use JSON files, aliases use YAML config files

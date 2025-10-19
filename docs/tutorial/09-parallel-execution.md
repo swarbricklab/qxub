@@ -19,10 +19,10 @@ The key is the `--terse` flag, which makes qxub output only the job ID, perfect 
 
 ```bash
 # Normal qxub output (verbose)
-qxub --default -- echo "Hello World"
+qxub exec --default -- echo "Hello World"
 
 # Terse output (just job ID)
-qxub --default --terse -- echo "Hello World"
+qxub exec --default --terse -- echo "Hello World"
 ```
 
 **Terse output:**
@@ -36,13 +36,13 @@ qxub --default --terse -- echo "Hello World"
 
 ```bash
 # Capture job ID in a variable
-JOB_ID=$(qxub --terse -- echo "Test job")
+JOB_ID=$(qxub exec --terse -- echo "Test job")
 echo "Submitted job: $JOB_ID"
 
 # Capture multiple job IDs
 JOB_IDS=()
 for i in {1..5}; do
-    JOB_ID=$(qxub --terse py -- python3 -c "
+    JOB_ID=$(qxub exec --terse py -- python3 -c "
 import time
 print(f'Processing item {i}')
 time.sleep(10)
@@ -63,7 +63,7 @@ echo "All jobs submitted: ${JOB_IDS[@]}"
 # Submit jobs for different parameters
 JOBS=()
 for param in 0.1 0.5 1.0 2.0 5.0; do
-    JOB_ID=$(qxub --terse --name "param-$param" py -- python3 -c "
+    JOB_ID=$(qxub exec --terse --name "param-$param" py -- python3 -c "
 import numpy as np
 import time
 
@@ -98,7 +98,7 @@ done
 JOBS=()
 for file in /tmp/sample_data/*.txt; do
     basename=$(basename "$file" .txt)
-    JOB_ID=$(qxub --terse --name "process-$basename" py -- python3 -c "
+    JOB_ID=$(qxub exec --terse --name "process-$basename" py -- python3 -c "
 import os
 import time
 
@@ -137,7 +137,7 @@ JOBS=()
 while IFS= read -r filename; do
     [[ -z "$filename" ]] && continue  # Skip empty lines
 
-    JOB_ID=$(qxub --terse --name "analyze-$filename" sc -- python3 -c "
+    JOB_ID=$(qxub exec --terse --name "analyze-$filename" sc -- python3 -c "
 import time
 import os
 
@@ -173,7 +173,7 @@ done
 find /tmp/analysis/raw -name "*.csv" -print0 | \
 xargs -0 -I {} bash -c '
     basename=$(basename "{}" .csv)
-    job_id=$(qxub --terse --name "process-$basename" py -- python3 -c "
+    job_id=$(qxub exec --terse --name "process-$basename" py -- python3 -c "
 import pandas as pd
 import time
 import os
@@ -205,7 +205,7 @@ JOBS=()
 find /scratch/a56/$USER -name "*.fastq" -size +100M 2>/dev/null | head -3 | \
 while read fastq_file; do
     basename=$(basename "$fastq_file" .fastq)
-    JOB_ID=$(qxub --terse --name "bigfile-$basename" \
+    JOB_ID=$(qxub exec --terse --name "bigfile-$basename" \
         --resources mem=32GB,ncpus=8,walltime=4:00:00 \
         --env pysam -- python3 -c "
 import time
@@ -237,7 +237,7 @@ done
 echo -e "0.1\n0.5\n1.0\n2.0\n5.0" > /tmp/parameters.txt
 
 # Use GNU parallel to submit qxub jobs
-parallel -j 3 'job_id=$(qxub --terse --name "param-{}" py -- python3 -c "
+parallel -j 3 'job_id=$(qxub exec --terse --name "param-{}" py -- python3 -c "
 import numpy as np
 import time
 
@@ -260,7 +260,7 @@ large,32GB,8,analysis_large.py
 EOF
 
 # Submit with different resource requirements
-parallel --colsep ',' 'job_id=$(qxub --terse --name "{1}-job" \
+parallel --colsep ',' 'job_id=$(qxub exec --terse --name "{1}-job" \
     --resources mem={2},ncpus={3},walltime=2:00:00 py -- python analysis_{1}.py \
     ); echo "Submitted {1}: $job_id"' :::: /tmp/job_specs.txt
 ```
@@ -289,7 +289,7 @@ params <- tibble(
 submit_job <- function(sample_id, replicate, condition) {
     job_name <- paste0("analysis-", sample_id, "-rep", replicate)
 
-    cmd <- paste0('qxub --terse --name "', job_name, '" ',
+    cmd <- paste0('qxub exec --terse --name "', job_name, '" ',
                   '--env tidyverse --resources mem=8GB,ncpus=2 -- Rscript -e "
                   sample_id <- \\"', sample_id, '\\"
                   replicate <- ', replicate, '
@@ -409,7 +409,7 @@ Efficiency:
 # Submit jobs and wait for completion
 JOBS=()
 for i in {1..5}; do
-    JOB_ID=$(qxub --terse test -- python3 -c "
+    JOB_ID=$(qxub exec --terse test -- python3 -c "
 import time
 print(f'Job {i} starting')
 time.sleep($((RANDOM % 20 + 10)))  # 10-30 seconds
@@ -434,7 +434,7 @@ submit_and_monitor() {
 
     # Submit jobs
     for param in 1 2 3 4 5; do
-        local job_id=$(qxub --terse --name "job-$param" py -- python3 -c "
+        local job_id=$(qxub exec --terse --name "job-$param" py -- python3 -c "
 import time
 import random
 import sys
@@ -489,7 +489,7 @@ submit_parameter_sweep() {
 
     for i in "${!params[@]}"; do
         local param="${params[$i]}"
-        local job_id=$(qxub --terse --name "sweep-$i-param-$param" py -- python3 -c "
+        local job_id=$(qxub exec --terse --name "sweep-$i-param-$param" py -- python3 -c "
 import numpy as np
 import time
 
@@ -531,7 +531,7 @@ submit_parameter_sweep
 echo "Stage 1: Data preprocessing"
 PREPROCESS_JOBS=()
 for dataset in A B C; do
-    JOB_ID=$(qxub --terse --name "preprocess-$dataset" py -- python3 -c "
+    JOB_ID=$(qxub exec --terse --name "preprocess-$dataset" py -- python3 -c "
 import time
 dataset = '$dataset'
 print(f'Preprocessing dataset {dataset}')
@@ -548,7 +548,7 @@ qxub monitor --wait-for-completion "${PREPROCESS_JOBS[@]}"
 echo "Stage 2: Analysis"
 ANALYSIS_JOBS=()
 for dataset in A B C; do
-    JOB_ID=$(qxub --terse --name "analyze-$dataset" sc -- python3 -c "
+    JOB_ID=$(qxub exec --terse --name "analyze-$dataset" sc -- python3 -c "
 import time
 dataset = '$dataset'
 print(f'Analyzing preprocessed dataset {dataset}')
@@ -563,7 +563,7 @@ qxub monitor --wait-for-completion "${ANALYSIS_JOBS[@]}"
 
 # Stage 3: Summary report
 echo "Stage 3: Generating summary report"
-SUMMARY_JOB=$(qxub --terse --name "summary-report" py -- python3 -c "
+SUMMARY_JOB=$(qxub exec --terse --name "summary-report" py -- python3 -c "
 import time
 print('Generating summary report from all analyses')
 time.sleep(3)
