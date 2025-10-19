@@ -28,11 +28,10 @@ See: [config-and-alias-system-design.md](config-and-alias-system-design.md), [co
 See: [platform_schema.md](platform_schema.md)
 
 ### CLI Architecture
-- **Unified interface**: `qxub --env myenv -- command` replaces subcommands
-- **Custom Click group**: `QxubGroup` handles execution vs management commands
-- **Protected arguments**: Commands after `--` handled specially
-
-See: [click_argument_parsing_solution.md](click_argument_parsing_solution.md)
+- **Standard Click interface**: Clean modular design with `qxub exec` subcommand
+- **Execution contexts**: `--env`, `--mod/--mods`, `--sif`, `--default` for different environments
+- **Management commands**: Preserved as separate subcommands (`config`, `alias`, `history`, etc.)
+- **Comprehensive PBS options**: All PBS features accessible via `qxub exec`
 
 ### Remote Execution
 - **SSH-based**: Submit jobs to remote HPC systems from local machine
@@ -55,7 +54,9 @@ qxub config files
 ```
 
 ## Key Files
-- `qxub/cli.py` - Main CLI entry point and execution contexts
+- `qxub/cli.py` - Clean main CLI entry point with standard Click interface
+- `qxub/exec_cli.py` - Comprehensive execution subcommand with all PBS options
+- `qxub/execution_context.py` - Unified execution logic for all environment types
 - `qxub/config_manager.py` - Configuration loading and template resolution
 - `qxub/platform.py` - Platform abstraction and queue selection
 - `qxub/scheduler.py` - PBS interaction and job monitoring
