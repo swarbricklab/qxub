@@ -13,7 +13,6 @@ from .history_cli import history
 from .monitor_cli import monitor_cli
 from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resources_cli import resources
-from .shortcuts_cli import shortcuts_cli
 
 
 @click.group(invoke_without_command=True)
@@ -57,7 +56,7 @@ def qxub(ctx, version):
 # Register all subcommands
 qxub.add_command(exec_cli)
 qxub.add_command(config_cli)
-qxub.add_command(alias_cli)
+qxub.add_command(alias_cli)  # Deprecated - use qxub exec --alias instead
 qxub.add_command(history)
 qxub.add_command(monitor_cli)
 qxub.add_command(resources)
@@ -65,4 +64,4 @@ qxub.add_command(platform_cli)
 qxub.add_command(select_queue_cmd)
 qxub.add_command(validate_cmd)
 qxub.add_command(estimate_cmd)
-qxub.add_command(shortcuts_cli)
+# shortcuts_cli moved to qxub config shortcut

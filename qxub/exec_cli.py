@@ -80,9 +80,10 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--post", help="Command to run after the main command")
 @click.option("--cmd", help="Command to execute (alternative to positional arguments)")
 @click.option("--shortcut", help="Use a predefined shortcut for execution settings")
+@click.option("--alias", help="Use a predefined alias for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, shortcut, **options):
+def exec_cli(ctx, command, cmd, shortcut, alias, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -112,6 +113,11 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
         qxub exec --shortcut myshortcut -- additional args
         qxub exec -- myshortcut-command args  # automatic shortcut matching
 
+    \b
+    Aliases:
+        qxub exec --alias myalias -- additional args
+        qxub exec --alias myalias  # if alias has default command
+
     Commands can be specified either after -- or using --cmd:
 
     \b
@@ -128,12 +134,73 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
         # Split the command string into components
         command = tuple(cmd.split())
     elif not command:
+        # Commands are required unless using an alias with a default command
+        if not alias:
+            raise click.ClickException(
+                "Must specify a command either after -- or using --cmd"
+            )
+
+    # Check for conflicting execution modes
+    if shortcut and alias:
         raise click.ClickException(
-            "Must specify a command either after -- or using --cmd"
+            "Cannot specify both --shortcut and --alias. Use only one."
         )
 
+    # Handle alias processing
+    if alias:
+        from .config_manager import config_manager
+
+        alias_def = config_manager.get_alias(alias)
+        if not alias_def:
+            available_aliases = config_manager.list_aliases()
+            click.echo(f"❌ Alias '{alias}' not found")
+            if available_aliases:
+                click.echo("💡 Available aliases:")
+                for alias_name in sorted(available_aliases):
+                    click.echo(f"  • {alias_name}")
+            else:
+                click.echo("💡 No aliases defined yet.")
+                click.echo("💡 Create one with: qxub config alias set <name> [options]")
+            ctx.exit(2)
+
+        # Apply alias settings to options (CLI options override alias settings)
+        # This is simplified - in a real implementation you'd need to handle the hierarchical alias structure
+        main_def = alias_def.get("main", {})
+        target_def = alias_def.get("target", {})
+
+        for key, value in main_def.items():
+            if key == "env" and not options["env"]:
+                options["env"] = value
+            elif key == "mod" and not options["mod"]:
+                options["mod"] = (value,) if isinstance(value, str) else tuple(value)
+            elif key == "mods" and not options["mods"]:
+                options["mods"] = value
+            elif key == "sif" and not options["sif"]:
+                options["sif"] = value
+            elif key == "queue" and not options["queue"]:
+                options["queue"] = value
+            elif key == "resources" and not options["resources"]:
+                if isinstance(value, (list, tuple)):
+                    options["resources"] = tuple(value)
+                else:
+                    options["resources"] = (value,)
+            elif key == "project" and not options["project"]:
+                options["project"] = value
+            elif key == "template" and not options["template"]:
+                options["template"] = value
+            elif key == "pre" and not options["pre"]:
+                options["pre"] = value
+            elif key == "post" and not options["post"]:
+                options["post"] = value
+
+        # Handle default command from alias
+        if target_def.get("cmd") and not cmd and not command:
+            command = tuple(target_def["cmd"].split())
+
+        click.echo(f"🎯 Using alias '{alias}'")
+
     # Handle shortcut processing
-    if shortcut:
+    elif shortcut:
         from .shortcut_manager import ShortcutManager
 
         shortcut_manager = ShortcutManager()
