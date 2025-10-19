@@ -46,9 +46,9 @@ class ExecutionContext:
 
     def get_default_template(self) -> str:
         """Get the default template for this execution context."""
-        from .cli import _get_template
+        from .templates import get_template
 
-        return _get_template(self.template_type)
+        return get_template(self.template_type)
 
     def build_submission_vars(
         self,
