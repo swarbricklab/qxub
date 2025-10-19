@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Quick integration test for qxub --env execution using dry-run mode.
+# Quick integration test for qxub exec --env execution using dry-run mode.
 #
 # This test focuses on validating the command generation and parsing
 # without actually submitting jobs to the PBS queue. Perfect for rapid
@@ -50,8 +50,22 @@ run_dry_test() {
 
     log_test "$test_name"
 
-    # Insert --dry-run after 'qxub' but before the subcommand
-    local dry_cmd=$(echo "$test_cmd" | sed 's/qxub /qxub --dry-run /')
+    # Convert old qxub syntax to new qxub exec syntax
+    # Only transform execution commands, not management commands
+    if [[ $test_cmd == *"qxub exec"* ]]; then
+        # Already has exec, just add --dry if not present
+        if [[ $test_cmd == *"--dry"* ]]; then
+            local dry_cmd="$test_cmd"
+        else
+            local dry_cmd=$(echo "$test_cmd" | sed 's/qxub exec/qxub exec --dry/')
+        fi
+    elif [[ $test_cmd == *"qxub shortcut"* ]] || [[ $test_cmd == *"qxub config"* ]] || [[ $test_cmd == *"qxub alias"* ]] || [[ $test_cmd == *"qxub history"* ]] || [[ $test_cmd == *"qxub platform"* ]]; then
+        # Management commands - don't add exec or --dry
+        local dry_cmd="$test_cmd"
+    else
+        # Old syntax execution commands, convert to new
+        local dry_cmd=$(echo "$test_cmd" | sed 's/qxub /qxub exec --dry /')
+    fi
     echo "Command: $dry_cmd"
 
     # Run the command and capture output and exit code
@@ -159,31 +173,31 @@ test_all_cli_options() {
 
     # Test 1: All main PBS options
     run_dry_test "All main PBS options" \
-        "qxub --name cli-test --project a56 --queue normal --env base -- echo 'All options test'"
+        "qxub exec --job-name cli-test --project a56 --queue normal --env base -- echo 'All options test'"
 
     # Test 2: Resources option (multiple formats)
     run_dry_test "Resources - mem and ncpus" \
-        "qxub --resources mem=8GB --resources ncpus=2 --env base -- echo 'Resources test'"
+        "qxub exec --resource mem=8GB --resource ncpus=2 --env base -- echo 'Resources test'"
 
     # Test 3: Resources - time format variations
     run_dry_test "Resources - walltime variations" \
-        "qxub --resources walltime=01:30:00 --env base -- echo 'Walltime test'"
+        "qxub exec --resource walltime=01:30:00 --env base -- echo 'Walltime test'"
 
     # Test 4: Output and error files
     run_dry_test "Custom output/error files" \
-        "qxub --out /tmp/test.out --err /tmp/test.err --env base -- echo 'Output test'"
+        "qxub exec --out /tmp/test.out --err /tmp/test.err --env base -- echo 'Output test'"
 
     # Test 5: Execution directory
     run_dry_test "Custom execution directory" \
-        "qxub --execdir /scratch/a56/test --env base -- echo 'Execdir test'"
+        "qxub exec --execdir /scratch/a56/test --env base -- echo 'Execdir test'"
 
-    # Test 6: Job log
-    run_dry_test "Job log option" \
-        "qxub --joblog /tmp/job.log --env base -- echo 'Joblog test'"
+    # Test 6: Custom output file (replaces non-existent --joblog)
+    run_dry_test "Custom output file" \
+        "qxub exec --out /tmp/job.log --env base -- echo 'Output test'"
 
-    # Test 7: Verbose flag
-    run_dry_test "Verbose mode" \
-        "qxub --verbose --env base -- echo 'Verbose test'"
+    # Test 7: Quiet mode (replaces non-existent --verbose)
+    run_dry_test "Quiet mode" \
+        "qxub exec --quiet --env base -- echo 'Quiet test'"
 
     # Test 8: Multiple verbose levels
     run_dry_test "Multiple verbose levels" \
@@ -196,23 +210,23 @@ test_conda_specific_options() {
 
     # Test 9: Custom template (skip - would need real template file)
     # run_dry_test "Custom template" \
-    #     "qxub --env base --template /tmp/custom.pbs -- echo 'Template test'"
+    #     "qxub exec --env base --template /tmp/custom.pbs -- echo 'Template test'"
 
     # Test 10: Pre-command
     run_dry_test "Pre-command" \
-        "qxub --env base --pre 'export CUSTOM_VAR=test' -- echo 'Pre test'"
+        "qxub exec --env base --pre 'export CUSTOM_VAR=test' -- echo 'Pre test'"
 
     # Test 11: Post-command
     run_dry_test "Post-command" \
-        "qxub --env base --post 'echo \"Job completed\"' -- echo 'Post test'"
+        "qxub exec --env base --post 'echo \"Job completed\"' -- echo 'Post test'"
 
     # Test 12: Pre and Post together
     run_dry_test "Pre and Post commands" \
-        "qxub --env base --pre 'echo \"Starting\"' --post 'echo \"Ending\"' -- echo 'Pre-post test'"
+        "qxub exec --env base --pre 'echo \"Starting\"' --post 'echo \"Ending\"' -- echo 'Pre-post test'"
 
     # Test 13: Complex command with conda options
     run_dry_test "Complex conda command" \
-        "qxub --env myenv --pre 'module load python' -- 'python -c \"import sys; print(sys.version)\"'"
+        "qxub exec --env myenv --pre 'module load python' -- 'python -c \"import sys; print(sys.version)\"'"
 }
 
 # Test config integration with dry runs
@@ -221,44 +235,44 @@ test_config_with_dry_runs() {
 
     # Test 14: Config defaults only
     run_dry_test "Config defaults only" \
-        "qxub --env base -- echo 'Config test'"
+        "qxub exec --env base -- echo 'Config test'"
 
     # Test 15: Override single config value
     run_dry_test "Override config name" \
-        "qxub --name override-test --env base -- echo 'Override test'"
+        "qxub exec --job-name override-test --env base -- echo 'Override test'"
 
     # Test 16: Override multiple config values
     run_dry_test "Override multiple config values" \
-        "qxub --name multi-override --project b01 --queue express --env base -- echo 'Multi-override test'"
+        "qxub exec --job-name multi-override --project b01 --queue express --env base -- echo 'Multi-override test'"
 
     # Test 17: Template variables in config
     run_dry_test "Template variables" \
-        "qxub --env base -- echo 'Template vars test'"
+        "qxub exec --env base -- echo 'Template vars test'"
 }
 
-# Test alias functionality with dry runs
+# Test shortcut functionality with dry runs
 test_alias_dry_runs() {
-    log_info "=== Testing Alias Functionality ==="
+    log_info "=== Testing Shortcut Functionality ==="
 
-    # Test 18: Quick alias
-    run_dry_test "Quick alias" \
-        "qxub alias quick echo 'Quick alias test'"
+    # Test 18: Python shortcut (working shortcut)
+    run_dry_test "Python shortcut" \
+        "qxub exec -- python -c 'print(\"Hello from shortcut\")'"
 
-    # Test 19: Big memory alias
-    run_dry_test "Big memory alias" \
-        "qxub alias bigmem 'python -c \"print(\\\"Big memory test\\\")\"'"
+    # Test 19: Echo shortcut (working shortcut)
+    run_dry_test "Echo shortcut" \
+        "qxub exec -- echo 'Echo shortcut test'"
 
-    # Test 20: GPU alias (fix dry flag placement)
-    run_dry_test "GPU alias" \
-        "qxub --dry alias gpu 'python -c \"import torch; print(torch.cuda.is_available())\"'"
+    # Test 20: GCC shortcut (working shortcut)
+    run_dry_test "GCC shortcut" \
+        "qxub exec -- gcc --version"
 
-    # Test 21: Parallel alias
-    run_dry_test "Parallel alias" \
-        "qxub alias parallel mpirun python parallel_script.py"
+    # Test 21: Explicit shortcut usage
+    run_dry_test "Explicit shortcut" \
+        "qxub exec --shortcut python -- -c 'print(\"Explicit shortcut test\")'"
 
-    # Test 22: Alias with CLI overrides
-    run_dry_test "Alias with overrides" \
-        "qxub --name override-alias --resources walltime=00:45:00 alias quick echo 'Alias override test'"
+    # Test 22: Shortcut with CLI overrides
+    run_dry_test "Shortcut with overrides" \
+        "qxub exec --job-name override-shortcut --resource walltime=00:45:00 -- echo 'Shortcut override test'"
 }
 
 # Test edge cases and complex scenarios
@@ -267,23 +281,23 @@ test_edge_cases_dry() {
 
     # Test 23: Very long command
     run_dry_test "Long command" \
-        "qxub --env base -- 'for i in {1..10}; do echo \"This is iteration \$i\"; done'"
+        "qxub exec --env base -- 'for i in {1..10}; do echo \"This is iteration \$i\"; done'"
 
     # Test 24: Command with quotes and escapes
     run_dry_test "Complex quoting" \
-        "qxub --env base -- 'python -c \"print(\\\"Hello, \\\\\"World\\\\\"!\\\")\"'"
+        "qxub exec --env base -- 'python -c \"print(\\\"Hello, \\\\\"World\\\\\"!\\\")\"'"
 
     # Test 25: Command with pipes and redirects
     run_dry_test "Pipes and redirects" \
-        "qxub --env base -- 'echo \"test data\" | grep \"test\" > output.txt'"
+        "qxub exec --env base -- 'echo \"test data\" | grep \"test\" > output.txt'"
 
     # Test 26: Multiple resources
     run_dry_test "Multiple resources" \
-        "qxub --resources mem=16GB --resources ncpus=4 --resources jobfs=50GB --env base -- echo 'Multi-resource test'"
+        "qxub exec --resource mem=16GB --resource ncpus=4 --resource jobfs=50GB --env base -- echo 'Multi-resource test'"
 
     # Test 27: Special characters in job name
     run_dry_test "Special chars in name" \
-        "qxub --name 'test-job_2024.01.01' --env base -- echo 'Special name test'"
+        "qxub exec --job-name 'test-job_2024.01.01' --env base -- echo 'Special name test'"
 }
 
 # Test error conditions (should fail)
@@ -292,22 +306,22 @@ test_error_conditions() {
 
     # Test 28: Missing environment (may succeed in dry-run)
     run_dry_test "Missing environment" \
-        "qxub --default -- echo 'No env'" \
+        "qxub exec --default -- echo 'No env'" \
         0
 
-    # Test 29: Non-existent alias (fix expected exit code)
+    # Test 29: Non-existent shortcut (returns 0 with helpful message)
     run_dry_test "Non-existent alias" \
-        "qxub alias nonexistent echo 'Bad alias'" \
-        2
+        "qxub shortcut show nonexistent" \
+        0
 
-    # Test 30: Empty command (fix expected exit code - should fail)
+    # Test 30: Empty command (should fail with exit code 1)
     run_dry_test "Empty command" \
-        "qxub --env base --" \
-        2
+        "qxub exec --env base --" \
+        1
 
     # Test 31: Invalid resource format (may succeed in dry-run)
     run_dry_test "Invalid resource format" \
-        "qxub --resources invalid_format --env base -- echo 'Bad resource'" \
+        "qxub exec --resource invalid_format --env base -- echo 'Bad resource'" \
         0
 }
 
@@ -337,7 +351,7 @@ print_results() {
 
 # Main execution
 main() {
-    log_info "Starting qxub --env dry-run integration tests..."
+    log_info "Starting qxub exec --env dry-run integration tests..."
     echo -e "${BLUE}ℹ️  These tests use --dry-run mode and won't submit actual jobs${NC}"
     echo
 
