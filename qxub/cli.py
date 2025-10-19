@@ -13,7 +13,7 @@ from .history_cli import history
 from .monitor_cli import monitor_cli
 from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resources_cli import resources
-from .run_cli import run_cli
+from .shortcuts_cli import shortcuts_cli
 
 
 @click.group(invoke_without_command=True)
@@ -65,4 +65,4 @@ qxub.add_command(platform_cli)
 qxub.add_command(select_queue_cmd)
 qxub.add_command(validate_cmd)
 qxub.add_command(estimate_cmd)
-qxub.add_command(run_cli)
+qxub.add_command(shortcuts_cli)

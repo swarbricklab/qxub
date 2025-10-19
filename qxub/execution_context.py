@@ -8,6 +8,7 @@ and execute_default functions.
 
 import base64
 import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -65,7 +66,9 @@ class ExecutionContext:
         # Base submission variables
         out = Path(ctx_obj["out"])
         err = Path(ctx_obj["err"])
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={ctx_obj["execdir"]},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
+        # Default to current working directory if execdir is None
+        exec_dir = ctx_obj["execdir"] or os.getcwd()
+        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
 
         # Context-specific variables
         if self.context_type == "conda":
@@ -175,12 +178,21 @@ def execute_unified(
             logging.debug("Failed to log execution history: %s", e)
         return
 
-    # Submit job and handle monitoring
+    # Submit job
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+
+    # Handle terse mode - emit only job ID and return immediately
+    if ctx_obj.get("terse", False):
+        click.echo(job_id)
+        logging.info("Terse mode: emitted job ID %s and exiting", job_id)
+        return
 
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
-        click.echo(f"🚀 Job submitted successfully! Job ID: {job_id}")
+        from .scheduler import print_status
+
+        success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
+        print_status(success_msg, final=True)
 
     # Log execution to history system
     try:
@@ -198,6 +210,41 @@ def execute_unified(
         )
     except Exception as e:
         logging.debug("Failed to log job resources: %s", e)
+
+    # Exit if in quiet mode (no monitoring)
+    if ctx_obj["quiet"]:
+        logging.info("Exiting in quiet mode")
+        return
+
+    # Start concurrent monitoring of job and log files
+    # Stream log files to STDOUT/STDERR as appropriate
+    import sys
+    from pathlib import Path
+
+    out = Path(ctx_obj["out"])
+    err = Path(ctx_obj["err"])
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    err.parent.mkdir(parents=True, exist_ok=True)
+    out.touch()
+    err.touch()
+
+    # Start job monitoring and get coordinator for signaling
+    from .execution import start_job_monitoring
+
+    coordinator, wait_for_completion = start_job_monitoring(
+        job_id, out, err, quiet=ctx_obj["quiet"]
+    )
+
+    # Signal that submission messages are complete - spinner can start now
+    coordinator.signal_submission_complete()
+
+    try:
+        exit_status = wait_for_completion()
+        # Exit with the job's exit status
+        sys.exit(exit_status)
+    finally:
+        pass  # Cleanup handled in start_job_monitoring signal handler
 
 
 # Convenience functions for creating execution contexts

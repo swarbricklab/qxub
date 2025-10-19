@@ -29,21 +29,22 @@ The shortcuts system is a new feature introduced in qxub v2.4.0 to complement th
   - Automatic config directory creation
   - Comprehensive error handling
 
-#### run_cli (`qxub/run_cli.py`)
-- **Purpose**: `qxub run` command implementation for shortcut execution
+#### exec_cli (`qxub/exec_cli.py`)
+- **Purpose**: Integrated shortcut execution within the main `qxub exec` command
 - **Features**:
-  - Shortcut execution with command override capability
-  - Alias integration via `--alias` flag
-  - CLI option precedence (CLI > shortcut > alias > defaults)
-  - Pass-through of all qxub execution options
+  - Shortcut execution via `--shortcut <name>` option
+  - Automatic shortcut detection based on command prefix matching
+  - CLI option precedence (CLI > shortcut > defaults)
+  - Full integration with all execution contexts (conda, modules, singularity)
 
-#### Configuration Commands (`qxub/config_cli.py`)
-- **Purpose**: Management interface for shortcuts
+#### Configuration Commands (`qxub/shortcuts_cli.py`)
+- **Purpose**: Management interface for shortcuts via `qxub shortcut` subcommand
 - **Commands**:
-  - `qxub config shortcut list` - List all shortcuts
-  - `qxub config shortcut show <name>` - Show shortcut details
-  - `qxub config shortcut set <name> <command>` - Create/update shortcuts
-  - `qxub config shortcut delete <name>` - Remove shortcuts
+  - `qxub shortcut list` - List all shortcuts with rich table display
+  - `qxub shortcut show <name>` - Show shortcut details with context descriptions
+  - `qxub shortcut set <name> [OPTIONS]` - Create/update shortcuts with execution context
+  - `qxub shortcut delete <name>` - Remove shortcuts
+  - `qxub shortcut rename <old> <new>` - Rename shortcuts
 
 ### Storage Format
 
@@ -64,7 +65,7 @@ The key innovation is using command strings (or prefixes) as dictionary keys for
 }
 ```
 
-**Key Design**: The dictionary key IS the command (or command prefix). When a user types `qxub run python analyze.py`, the system looks up "python analyze.py" directly in the dictionary for instant matching.
+**Key Design**: The dictionary key IS the command (or command prefix). When a user types `qxub exec -- python analyze.py`, the system looks up "python" in the shortcuts dictionary for automatic matching, or the user can explicitly specify `--shortcut python` for named shortcut usage.
 
 ### Configuration Hierarchy
 
@@ -105,7 +106,7 @@ The key innovation is using command strings (or prefixes) as dictionary keys for
 
 #### CLI Integration
 - [ ] Fix missing `validate_execution_context` import in `cli.py`
-- [ ] Resolve `qxub run` command registration issue
+- [x] Integrate shortcuts into `qxub exec` command (completed)
 - [ ] Complete installation and testing
 
 ### ❌ Pending Implementation
@@ -132,17 +133,20 @@ The key innovation is using command strings (or prefixes) as dictionary keys for
 ### Basic Shortcut Creation and Execution
 
 ```bash
-# Create shortcuts using command strings as keys
-qxub config shortcut set "python analyze.py" --alias ml-gpu
+# Create shortcuts using command names as keys
+qxub shortcut set "python" --env data-science --resources mem=8GB
 
-# Run the shortcut - matches exactly (note the -- separator)
-qxub run -- python analyze.py
+# Run using automatic shortcut detection
+qxub exec -- python analyze.py
+
+# Or explicitly specify the shortcut
+qxub exec --shortcut python -- analyze.py
 
 # Prefix matching for convenience
-qxub config shortcut set "pytest"
+qxub shortcut set "pytest" --env testing
 
 # This matches the "pytest" shortcut
-qxub run -- pytest tests/unit/
+qxub exec -- pytest tests/unit/
 ```
 
 ### Advanced Shortcut with Alias Integration
@@ -152,10 +156,10 @@ qxub run -- pytest tests/unit/
 qxub config shortcut set "python train_model.py" --alias ml-gpu
 
 # Run with combined shortcut + alias configuration
-qxub run -- python train_model.py
+qxub exec -- python train_model.py
 
-# Override specific options while keeping shortcut/alias config
-qxub run --queue express -- python train_model.py
+# Override queue setting from shortcut
+qxub exec --queue express -- python train_model.py
 ```
 
 ### Shortcut Management
@@ -190,7 +194,7 @@ Chose JSON over YAML for shortcuts to avoid parsing overhead during command look
 qxub config shortcut set "python analyze.py" --alias ml-env
 
 # The shortcut would match and user can add parameters
-qxub run -- python analyze.py --input /data/file1.csv --output /results/
+qxub exec -- python analyze.py --input /data/file1.csv --output /results/
 ```
 
 ### Workflow Shortcuts
@@ -199,7 +203,7 @@ qxub run -- python analyze.py --input /data/file1.csv --output /results/
 qxub config shortcut set "snakemake --profile pbs" --alias compute-cluster
 
 # Run the workflow shortcut
-qxub run -- snakemake --profile pbs --jobs 20
+qxub exec -- snakemake --profile pbs --jobs 20
 ```
 
 ### Integration with External Tools
@@ -209,8 +213,8 @@ qxub config shortcut set "snakemake" --alias compute-intensive
 qxub config shortcut set "jupyter lab" --alias interactive
 
 # Run these shortcuts with additional parameters
-qxub run -- snakemake --jobs 10 analysis.smk
-qxub run -- jupyter lab --port 8888 --no-browser
+qxub exec -- snakemake --jobs 10 analysis.smk
+qxub exec -- jupyter lab --port 8888 --no-browser
 ```
 
 ## Migration Path

@@ -13,23 +13,50 @@ from .config_manager import config_manager
 from .execution_context import ExecutionContext, execute_unified
 
 
+def _get_shortcut_context_description(definition: dict) -> str:
+    """Get human-readable description of execution context."""
+    if definition.get("env"):
+        return f"conda: {definition['env']}"
+    elif definition.get("mod"):
+        return f"module: {definition['mod']}"
+    elif definition.get("mods"):
+        return f"modules: {definition['mods']}"
+    elif definition.get("sif"):
+        return f"singularity: {definition['sif']}"
+    else:
+        return "default"
+
+
 @click.command(name="exec")
 @click.option(
     "-l",
     "--resource",
-    help="PBS resource specification (e.g., 'walltime=1:00:00,mem=4GB')",
+    help="PBS resource specification (e.g., 'walltime=1:00:00,mem=4GB') (default: configured)",
 )
-@click.option("-q", "--queue", help="PBS queue name")
-@click.option("-N", "--job-name", help="PBS job name")
-@click.option("-P", "--project", help="PBS project code")
+@click.option("-q", "--queue", help="PBS queue name (default: configured or normal)")
+@click.option(
+    "-N", "--job-name", help="PBS job name (default: configured or qx-{timestamp})"
+)
+@click.option(
+    "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
+)
 @click.option("-v", "--variable", multiple=True, help="PBS environment variables")
 @click.option(
     "--dry", is_flag=True, help="Show what would be executed without submitting"
 )
 @click.option("--quiet", is_flag=True, help="Suppress output")
-@click.option("--out", help="Output file path")
-@click.option("--err", help="Error file path")
-@click.option("--execdir", help="Execution directory")
+@click.option(
+    "--out",
+    help="Output file path (default: configured or {log_dir}/{name}_{timestamp}.out)",
+)
+@click.option(
+    "--err",
+    help="Error file path (default: configured or {log_dir}/{name}_{timestamp}.err)",
+)
+@click.option(
+    "--execdir",
+    help="Execution directory (default: directory from which qxub was executed)",
+)
 @click.option("--email", help="Email address for PBS notifications")
 @click.option("--email-opts", help="PBS email options (e.g., 'abe')")
 @click.option("--after", help="Job dependency (run after specified job)")
@@ -58,9 +85,10 @@ from .execution_context import ExecutionContext, execute_unified
 @click.option("--pre", help="Command to run before the main command")
 @click.option("--post", help="Command to run after the main command")
 @click.option("--cmd", help="Command to execute (alternative to positional arguments)")
+@click.option("--shortcut", help="Use a predefined shortcut for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, **options):
+def exec_cli(ctx, command, cmd, shortcut, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -85,6 +113,11 @@ def exec_cli(ctx, command, cmd, **options):
         qxub exec --default -- echo "hello world"
         qxub exec -- echo "hello world"  # default is implicit
 
+    \b
+    Shortcuts:
+        qxub exec --shortcut myshortcut -- additional args
+        qxub exec -- myshortcut-command args  # automatic shortcut matching
+
     Commands can be specified either after -- or using --cmd:
 
     \b
@@ -104,6 +137,111 @@ def exec_cli(ctx, command, cmd, **options):
         raise click.ClickException(
             "Must specify a command either after -- or using --cmd"
         )
+
+    # Handle shortcut processing
+    if shortcut:
+        from .shortcut_manager import ShortcutManager
+
+        shortcut_manager = ShortcutManager()
+        shortcut_def = shortcut_manager.get_shortcut(shortcut)
+
+        if not shortcut_def:
+            available_shortcuts = shortcut_manager.list_shortcuts()
+            click.echo(f"❌ Shortcut '{shortcut}' not found")
+            if available_shortcuts:
+                click.echo("💡 Available shortcuts:")
+                for name, definition in sorted(available_shortcuts.items()):
+                    context = _get_shortcut_context_description(definition)
+                    click.echo(f"  • {name}: {context}")
+            else:
+                click.echo("💡 No shortcuts defined yet.")
+                click.echo(
+                    "💡 Create one with: qxub shortcut set <name> --env <env> [options]"
+                )
+            ctx.exit(2)
+
+        # Apply shortcut settings to options (CLI options override shortcut settings)
+        for key, value in shortcut_def.items():
+            # Map shortcut keys to option keys
+            if key == "env" and not options["env"]:
+                options["env"] = value
+            elif key == "mod" and not options["mod"]:
+                options["mod"] = (value,) if isinstance(value, str) else tuple(value)
+            elif key == "mods" and not options["mods"]:
+                options["mods"] = value
+            elif key == "sif" and not options["sif"]:
+                options["sif"] = value
+            elif key == "queue" and not options["queue"]:
+                options["queue"] = value
+            elif key == "resources" and not options["resource"]:
+                # Convert shortcut resources to the expected format
+                if isinstance(value, (list, tuple)):
+                    options["resource"] = (
+                        value[0] if len(value) == 1 else ",".join(value)
+                    )
+                else:
+                    options["resource"] = value
+            elif key == "project" and not options["project"]:
+                options["project"] = value
+            elif key == "template" and not options["template"]:
+                options["template"] = value
+            elif key == "pre" and not options["pre"]:
+                options["pre"] = value
+            elif key == "post" and not options["post"]:
+                options["post"] = value
+            elif key == "bind" and not options["bind"]:
+                options["bind"] = value
+
+        click.echo(f"🎯 Using shortcut '{shortcut}'")
+    elif not any(
+        [
+            options["env"],
+            options["mod"],
+            options["mods"],
+            options["sif"],
+            options["default"],
+        ]
+    ):
+        # No shortcut and no explicit execution context - check for command-based shortcut matching
+        from .shortcut_manager import ShortcutManager
+
+        shortcut_manager = ShortcutManager()
+        shortcut_match = shortcut_manager.find_shortcut(list(command))
+
+        if shortcut_match:
+            shortcut_name = shortcut_match["name"]
+            shortcut_def = shortcut_match["definition"]
+            remaining_args = shortcut_match["remaining_args"]
+
+            # Apply shortcut settings (CLI options still override)
+            for key, value in shortcut_def.items():
+                if key == "env" and not options["env"]:
+                    options["env"] = value
+                elif key == "mod" and not options["mod"]:
+                    options["mod"] = (
+                        (value,) if isinstance(value, str) else tuple(value)
+                    )
+                elif key == "mods" and not options["mods"]:
+                    options["mods"] = value
+                elif key == "sif" and not options["sif"]:
+                    options["sif"] = value
+                elif key == "queue" and not options["queue"]:
+                    options["queue"] = value
+                elif key == "resources" and not options["resource"]:
+                    if isinstance(value, (list, tuple)):
+                        options["resource"] = (
+                            value[0] if len(value) == 1 else ",".join(value)
+                        )
+                    else:
+                        options["resource"] = value
+                elif key == "project" and not options["project"]:
+                    options["project"] = value
+
+            # Update command to be the remaining arguments after shortcut match
+            command = tuple(remaining_args)
+
+            click.echo(f"🎯 Found shortcut '{shortcut_name}' for command")
+        # If no shortcut found, continue with default execution
 
     # Validate execution contexts
     execution_contexts = [
@@ -138,15 +276,20 @@ def exec_cli(ctx, command, cmd, **options):
         execution_context = ExecutionContext("default", None, "default")
 
     # Extract PBS-specific options for processing
+    # Convert resources from single option to tuple as expected by config system
+    resources_tuple = ()
+    if options["resource"]:
+        resources_tuple = (options["resource"],)
+
     params = {
-        "resources": (options["resource"],) if options["resource"] else (),
+        "resources": resources_tuple,
         "queue": options["queue"],
         "name": options["job_name"],
         "project": options["project"],
         "variable": options["variable"],
         "out": options["out"],
         "err": options["err"],
-        "joblog": None,  # Will be set by defaults
+        "joblog": None,  # Will be set by config system
         "execdir": options["execdir"],
         "email": options["email"],
         "email_opts": options["email_opts"],
