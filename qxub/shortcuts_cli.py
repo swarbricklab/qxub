@@ -32,9 +32,9 @@ def shortcuts_cli():
 @click.option("--mods", help="Comma-separated list of environment modules")
 @click.option("--sif", help="Singularity container image")
 @click.option("--bind", help="Singularity bind mounts")
-@click.option("-l", "--resources", multiple=True, help="PBS resource requirements")
+@click.option("-l", "--resources", help="PBS resource requirements")
 @click.option("-q", "--queue", help="PBS queue name")
-@click.option("-N", "--job-name", help="PBS job name")
+@click.option("-N", "--name", help="PBS job name")
 @click.option("-P", "--project", help="PBS project code")
 @click.option("--template", help="Job script template")
 @click.option("--pre", help="Command to run before main command")
@@ -93,11 +93,11 @@ def set_shortcut(command_prefix: str, **options):
 
     # PBS options
     if options["resources"]:
-        definition["resources"] = list(options["resources"])
+        definition["resources"] = [options["resources"]]
     if options["queue"]:
         definition["queue"] = options["queue"]
-    if options["job_name"]:
-        definition["name"] = options["job_name"]
+    if options["name"]:
+        definition["name"] = options["name"]
     if options["project"]:
         definition["project"] = options["project"]
 

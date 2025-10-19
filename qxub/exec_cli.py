@@ -30,12 +30,13 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.command(name="exec")
 @click.option(
     "-l",
-    "--resource",
+    "--resources",
+    multiple=True,
     help="PBS resource specification (e.g., 'walltime=1:00:00,mem=4GB') (default: configured)",
 )
 @click.option("-q", "--queue", help="PBS queue name (default: configured or normal)")
 @click.option(
-    "-N", "--job-name", help="PBS job name (default: configured or qx-{timestamp})"
+    "-N", "--name", help="PBS job name (default: configured or qx-{timestamp})"
 )
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
@@ -53,21 +54,14 @@ def _get_shortcut_context_description(definition: dict) -> str:
     "--err",
     help="Error file path (default: configured or {log_dir}/{name}_{timestamp}.err)",
 )
+@click.option("--execdir", help="Execution directory (default: current directory)")
 @click.option(
-    "--execdir",
-    help="Execution directory (default: directory from which qxub was executed)",
+    "--email", help="Email address for PBS notifications (default: configured)"
 )
-@click.option("--email", help="Email address for PBS notifications")
-@click.option("--email-opts", help="PBS email options (e.g., 'abe')")
-@click.option("--after", help="Job dependency (run after specified job)")
-@click.option("--afterok", help="Job dependency (run after successful completion)")
-@click.option("--afternotok", help="Job dependency (run after failed completion)")
-@click.option("--afterany", help="Job dependency (run after any completion)")
-@click.option("--hold", is_flag=True, help="Submit job in held state")
-@click.option("--array", help="Job array specification")
-@click.option("--priority", help="Job priority")
-@click.option("--checkpoint", help="Checkpoint options")
-@click.option("--interactive", is_flag=True, help="Interactive job")
+@click.option(
+    "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
+)
+@click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
 @click.option("--env", help="Conda environment name for execution")
 @click.option(
     "--mod",
@@ -173,14 +167,12 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
                 options["sif"] = value
             elif key == "queue" and not options["queue"]:
                 options["queue"] = value
-            elif key == "resources" and not options["resource"]:
+            elif key == "resources" and not options["resources"]:
                 # Convert shortcut resources to the expected format
                 if isinstance(value, (list, tuple)):
-                    options["resource"] = (
-                        value[0] if len(value) == 1 else ",".join(value)
-                    )
+                    options["resources"] = tuple(value)
                 else:
-                    options["resource"] = value
+                    options["resources"] = (value,)
             elif key == "project" and not options["project"]:
                 options["project"] = value
             elif key == "template" and not options["template"]:
@@ -227,15 +219,16 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
                     options["sif"] = value
                 elif key == "queue" and not options["queue"]:
                     options["queue"] = value
-                elif key == "resources" and not options["resource"]:
+                elif key == "resources" and not options["resources"]:
                     if isinstance(value, (list, tuple)):
-                        options["resource"] = (
-                            value[0] if len(value) == 1 else ",".join(value)
-                        )
+                        options["resources"] = tuple(value)
                     else:
-                        options["resource"] = value
+                        options["resources"] = (value,)
                 elif key == "project" and not options["project"]:
                     options["project"] = value
+
+            # For shortcuts, keep the full original command (don't strip the prefix)
+            # The shortcut defines the execution context, not the command itself
 
             click.echo(f"🎯 Found shortcut '{shortcut_name}' for command")
         # If no shortcut found, continue with default execution
@@ -273,15 +266,10 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
         execution_context = ExecutionContext("default", None, "default")
 
     # Extract PBS-specific options for processing
-    # Convert resources from single option to tuple as expected by config system
-    resources_tuple = ()
-    if options["resource"]:
-        resources_tuple = (options["resource"],)
-
     params = {
-        "resources": resources_tuple,
+        "resources": options["resources"],
         "queue": options["queue"],
-        "name": options["job_name"],
+        "name": options["name"],
         "project": options["project"],
         "variable": options["variable"],
         "out": options["out"],
@@ -290,15 +278,7 @@ def exec_cli(ctx, command, cmd, shortcut, **options):
         "execdir": options["execdir"],
         "email": options["email"],
         "email_opts": options["email_opts"],
-        "after": options["after"],
-        "afterok": options["afterok"],
-        "afternotok": options["afternotok"],
-        "afterany": options["afterany"],
-        "hold": options["hold"],
         "array": options["array"],
-        "priority": options["priority"],
-        "checkpoint": options["checkpoint"],
-        "interactive": options["interactive"],
         "dry": options["dry"],
         "quiet": options["quiet"],
     }
