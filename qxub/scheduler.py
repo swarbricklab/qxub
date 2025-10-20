@@ -145,6 +145,57 @@ def print_status(message, final=False):
             print(f"{message}", file=devnull, flush=True)
 
 
+class SimpleSpinner:
+    """Simple non-threaded spinner for single-thread job monitoring."""
+
+    def __init__(self, quiet=False):
+        self.quiet = quiet or self._is_remote_ssh()
+        self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        self.current_char_index = 0
+
+    def _is_remote_ssh(self):
+        """Detect if we're running in a remote SSH session where spinners don't work well."""
+        import os
+
+        # Check for SSH environment variables that indicate remote execution
+        ssh_indicators = [
+            os.environ.get("SSH_CLIENT"),
+            os.environ.get("SSH_CONNECTION"),
+            os.environ.get("SSH_TTY"),
+        ]
+
+        # For now, allow spinners in SSH sessions for better UX
+        # TODO: Make this configurable if needed
+        return False  # any(ssh_indicators)
+
+    def show_next_frame(self):
+        """Show the next frame of the spinner animation."""
+        if self.quiet:
+            return
+
+        char = self.spinner_chars[self.current_char_index % len(self.spinner_chars)]
+        try:
+            with open("/dev/tty", "w") as tty:
+                print(f"\r{char}", end="", flush=True, file=tty)
+        except (OSError, IOError):
+            # Ignore if /dev/tty not available
+            pass
+
+        self.current_char_index += 1
+
+    def clear(self):
+        """Clear the spinner line."""
+        if self.quiet:
+            return
+
+        try:
+            with open("/dev/tty", "w") as tty:
+                print("\r ", end="", flush=True, file=tty)
+        except (OSError, IOError):
+            # Ignore if /dev/tty not available
+            pass
+
+
 class JobSpinner:  # pylint: disable=too-many-instance-attributes
     """Context manager for displaying a spinner during job operations."""
 
@@ -1333,10 +1384,15 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
     job_started_notified = False
 
     # 4. Spinner while waiting for job to start - check status files every 0.5 seconds
-    with JobSpinner("", show_message=False, quiet=quiet):
+    spinner = SimpleSpinner(quiet=quiet)
+    try:
         while True:
+            # Show spinner frame
+            spinner.show_next_frame()
+
             # Check for job started (more frequent polling for responsiveness)
             if not job_started_notified and job_started_file.exists():
+                spinner.clear()  # Clear spinner before showing message
                 if not quiet:
                     print_status("🚀 Job started", final=True)
                     job_started_notified = True
@@ -1344,6 +1400,7 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
 
             # Check if job finished without running (rare but possible)
             if final_exit_code_file.exists():
+                spinner.clear()  # Clear spinner before showing message
                 logging.info("Job %s completed before starting", job_id)
                 exit_status = read_exit_status_from_file(final_exit_code_file)
 
@@ -1357,6 +1414,8 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
                 return exit_status
 
             time.sleep(0.5)  # Check every 500ms for good responsiveness
+    finally:
+        spinner.clear()  # Always clear spinner when exiting
 
     # 6. Stream job output
     exit_status = stream_job_output_with_status_files(
