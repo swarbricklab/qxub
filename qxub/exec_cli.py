@@ -6,6 +6,8 @@ options and contexts (conda, modules, singularity, default) into a single
 comprehensive interface.
 """
 
+import logging
+
 import click
 
 from .config_handler import process_job_options
@@ -41,11 +43,15 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
 )
-@click.option("-v", "--variable", multiple=True, help="PBS environment variables")
 @click.option(
-    "--dry", is_flag=True, help="Show what would be executed without submitting"
+    "--dry",
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be executed without submitting",
 )
 @click.option("--quiet", is_flag=True, help="Suppress output")
+@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
+@click.option("--debug", is_flag=True, help="Enable debug output")
 @click.option(
     "--out",
     help="Output file path (default: configured or {log_dir}/{name}_{timestamp}.out)",
@@ -83,7 +89,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--alias", help="Use a predefined alias for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, shortcut, alias, **options):
+def exec_cli(ctx, command, cmd, shortcut, alias, verbose, debug, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -124,6 +130,16 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
         qxub exec --env myenv -- python script.py arg1 arg2
         qxub exec --env myenv --cmd "python script.py arg1 arg2"
     """
+    # Set up logging verbosity
+    if debug:
+        logging.basicConfig(level=logging.DEBUG)
+    elif verbose:
+        logging.basicConfig(level=logging.INFO)
+    elif options.get("quiet"):
+        logging.basicConfig(level=logging.ERROR)
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
     # Handle command specification
     if cmd and command:
         raise click.ClickException(
@@ -329,7 +345,6 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
         "queue": options["queue"],
         "name": options["name"],
         "project": options["project"],
-        "variable": options["variable"],
         "out": options["out"],
         "err": options["err"],
         "joblog": None,  # Will be set by config system
@@ -339,6 +354,8 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
         "array": options["array"],
         "dry": options["dry"],
         "quiet": options["quiet"],
+        "verbose": verbose,
+        "debug": debug,
     }
 
     # Process configuration using the existing config system
