@@ -751,10 +751,10 @@ def monitor_files(
     # Determine status directory based on output file location
     status_dir = pathlib.Path(out_file).parent / "status"
 
-    # Status files to monitor
-    job_started_file = status_dir / "job_started"
-    main_started_file = status_dir / "main_started"
-    final_exit_code_file = status_dir / "final_exit_code"
+    # Status files to monitor (using job ID directly for uniqueness)
+    job_started_file = status_dir / f"job_started_{job_id}"
+    main_started_file = status_dir / f"main_started_{job_id}"
+    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
 
     # Track job state
     job_started_notified = False
@@ -818,6 +818,9 @@ def monitor_files(
 
                 if coordinator:
                     coordinator.job_exit_status = exit_status
+                    # Signal shutdown to stop tail threads
+                    coordinator.signal_shutdown()
+
                 return exit_status
 
             # Sleep much shorter than qstat polling - we want responsive file detection
@@ -913,11 +916,16 @@ def tail(log_file, destination, coordinator=None):
 
     try:
         with open(log_file, "r", encoding="utf-8") as f:
-            for line in tailer.follow(f):
+            # First, read any existing content in the file
+            while True:
+                line = f.readline()
+                if not line:  # No more existing content
+                    break
+
                 # Check if we should shutdown
                 if coordinator and coordinator.should_shutdown():
                     logging.debug(f"Tail {destination} shutdown requested")
-                    break
+                    return
 
                 # Signal that output has started on first line
                 if not output_started and coordinator:
@@ -942,7 +950,43 @@ def tail(log_file, destination, coordinator=None):
                     coordinator.signal_spinner_cleared()
                     output_started = True
 
-                print(line.rstrip(), file=sys.stderr if is_err else sys.stdout)
+                print(
+                    line.rstrip(), file=sys.stderr if is_err else sys.stdout, flush=True
+                )
+
+            # Now follow for any new content (for longer-running jobs)
+            for line in tailer.follow(f):
+                # Check if we should shutdown
+                if coordinator and coordinator.should_shutdown():
+                    logging.debug(f"Tail {destination} shutdown requested")
+                    break
+
+                # Signal that output has started on first line (if we didn't already)
+                if not output_started and coordinator:
+                    coordinator.signal_output_started()
+                    # Clear any leftover spinner characters before streaming output
+                    import os
+
+                    is_remote_ssh = any(
+                        [
+                            os.environ.get("SSH_CLIENT"),
+                            os.environ.get("SSH_CONNECTION"),
+                            os.environ.get("SSH_TTY"),
+                        ]
+                    )
+
+                    if not is_remote_ssh:  # Only clear spinner in local contexts
+                        try:
+                            with open("/dev/tty", "w") as tty:
+                                print("\r", end="", flush=True, file=tty)
+                        except (OSError, IOError):
+                            pass  # Ignore if /dev/tty is not available
+                    coordinator.signal_spinner_cleared()
+                    output_started = True
+
+                print(
+                    line.rstrip(), file=sys.stderr if is_err else sys.stdout, flush=True
+                )
 
             # If we exit the loop normally, we've reached EOF
             if coordinator:
@@ -1017,6 +1061,12 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
         try:
             # Wait for job monitoring to complete or shutdown signal
             monitor_thread.join()
+
+            # Wait for tail threads to finish after shutdown signal
+            # Give them a reasonable timeout since they should exit quickly once signaled
+            out_thread.join(timeout=5)
+            err_thread.join(timeout=5)
+
             return coordinator.job_exit_status or 0
         finally:
             # Restore original signal handler

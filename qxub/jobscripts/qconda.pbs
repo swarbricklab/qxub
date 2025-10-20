@@ -45,9 +45,9 @@ error_handler() {
     local exit_code=$?
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
-    # Write error exit code to status
-    echo "$exit_code" > "$STATUS_DIR/final_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+        # Write error exit code to status
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     exit $exit_code
 }
 
@@ -59,8 +59,8 @@ STATUS_DIR="${out%/*}/status"
 mkdir -p "$STATUS_DIR"
 
 # Signal job started with timestamp and job ID
-echo "$(date -Iseconds)" > "$STATUS_DIR/job_started"
-echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started"
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "🚀 Job started at $(date -Iseconds)"
 
 # Activate conda environment
@@ -99,8 +99,8 @@ if [ -n "$pre_cmd" ]; then
 
     if [ $PRE_EXIT_CODE -ne 0 ]; then
         echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
-        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
         exit $PRE_EXIT_CODE
     fi
     echo "✅ Pre-command completed"
@@ -108,7 +108,7 @@ fi
 
 # Run main command
 echo "🚀 Running main command: $cmd"
-echo "$(date -Iseconds)" > "$STATUS_DIR/main_started"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
 
 if [ "$quiet" = "true" ]; then
     # In quiet mode, let output go to default joblog (no redirection)
@@ -127,8 +127,8 @@ echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
 
 if [ $MAIN_EXIT_CODE -ne 0 ]; then
     echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     exit $MAIN_EXIT_CODE
 fi
 echo "✅ Main command completed"
@@ -146,15 +146,15 @@ if [ -n "$post_cmd" ]; then
 
     if [ $POST_EXIT_CODE -ne 0 ]; then
         echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
-        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
         exit $POST_EXIT_CODE
     fi
     echo "✅ Post-command completed"
-    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 else
     # No post-command, main command exit code is final
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 fi
