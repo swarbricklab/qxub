@@ -104,6 +104,42 @@ class ShortcutManager:
         self._ensure_cache_loaded()
         return self._shortcuts_cache.copy() if self._shortcuts_cache else {}
 
+    def list_shortcuts_with_origin(self) -> Dict[str, Dict[str, Any]]:
+        """List all available shortcuts with origin information."""
+        shortcuts_with_origin = {}
+
+        # Load system shortcuts first
+        if self._system_shortcuts_file.exists():
+            try:
+                with open(self._system_shortcuts_file, "r", encoding="utf-8") as f:
+                    system_shortcuts = json.load(f)
+                    if isinstance(system_shortcuts, dict):
+                        for name, definition in system_shortcuts.items():
+                            shortcuts_with_origin[name] = {
+                                "definition": definition,
+                                "origin": "system",
+                                "file": str(self._system_shortcuts_file),
+                            }
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Load user shortcuts (higher precedence - overwrites system)
+        if self._user_shortcuts_file.exists():
+            try:
+                with open(self._user_shortcuts_file, "r", encoding="utf-8") as f:
+                    user_shortcuts = json.load(f)
+                    if isinstance(user_shortcuts, dict):
+                        for name, definition in user_shortcuts.items():
+                            shortcuts_with_origin[name] = {
+                                "definition": definition,
+                                "origin": "user",
+                                "file": str(self._user_shortcuts_file),
+                            }
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        return shortcuts_with_origin
+
     def get_shortcut(self, name: str) -> Optional[Dict[str, Any]]:
         """Get specific shortcut by name."""
         self._ensure_cache_loaded()

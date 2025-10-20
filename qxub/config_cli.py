@@ -940,7 +940,6 @@ def shortcut_config():
 @click.option("--pre", help="Command to run before main command")
 @click.option("--post", help="Command to run after main command")
 @click.option("--cmd", help="Default command to execute (can be overridden)")
-@click.option("--description", help="Human-readable description of the shortcut")
 @click.option(
     "--user", "user_config", is_flag=True, help="Set shortcut in user config (default)"
 )
@@ -1021,8 +1020,6 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     # Command and metadata
     if options["cmd"]:
         definition["cmd"] = options["cmd"]
-    if options["description"]:
-        definition["description"] = options["description"]
 
     # Validate we have at least some configuration
     if not definition:
@@ -1086,25 +1083,42 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
 
 
 @shortcut_config.command()
-def list():
+@click.option(
+    "--show-origin", is_flag=True, help="Show origin (user/system) for each shortcut"
+)
+def list(show_origin: bool):
     """List all available shortcuts."""
     from .shortcut_manager import shortcut_manager
 
-    shortcuts = shortcut_manager.list_shortcuts()
+    if show_origin:
+        shortcuts_data = shortcut_manager.list_shortcuts_with_origin()
+        if not shortcuts_data:
+            click.echo("No shortcuts defined yet.")
+            click.echo(
+                "\n💡 Create one with: qxub config shortcut set <command_prefix> --env <environment>"
+            )
+            return
 
-    if not shortcuts:
-        click.echo("No shortcuts defined yet.")
-        click.echo(
-            "\n💡 Create one with: qxub config shortcut set <command_prefix> --env <environment>"
-        )
-        return
+        # Create table with origin information
+        table = Table(title="Available Shortcuts")
+        table.add_column("Command Prefix", style="cyan", no_wrap=True)
+        table.add_column("Context", style="green")
+        table.add_column("Command", style="yellow")
+        table.add_column("Origin", style="dim")
+    else:
+        shortcuts = shortcut_manager.list_shortcuts()
+        if not shortcuts:
+            click.echo("No shortcuts defined yet.")
+            click.echo(
+                "\n💡 Create one with: qxub config shortcut set <command_prefix> --env <environment>"
+            )
+            return
 
-    # Create table
-    table = Table(title="Available Shortcuts")
-    table.add_column("Command Prefix", style="cyan", no_wrap=True)
-    table.add_column("Context", style="green")
-    table.add_column("Command", style="yellow")
-    table.add_column("Description", style="dim")
+        # Create table without origin information
+        table = Table(title="Available Shortcuts")
+        table.add_column("Command Prefix", style="cyan", no_wrap=True)
+        table.add_column("Context", style="green")
+        table.add_column("Command", style="yellow")
 
     def _get_execution_context_description(definition: dict) -> str:
         """Get human-readable description of execution context."""
@@ -1125,11 +1139,18 @@ def list():
         else:
             return "default"
 
-    for name, definition in sorted(shortcuts.items()):
-        context = _get_execution_context_description(definition)
-        cmd = definition.get("cmd", "(dynamic)")
-        description = definition.get("description", "")
-        table.add_row(name, context, cmd, description)
+    if show_origin:
+        for name, data in sorted(shortcuts_data.items()):
+            definition = data["definition"]
+            origin = data["origin"]
+            context = _get_execution_context_description(definition)
+            cmd = definition.get("cmd", "(dynamic)")
+            table.add_row(name, context, cmd, origin)
+    else:
+        for name, definition in sorted(shortcuts.items()):
+            context = _get_execution_context_description(definition)
+            cmd = definition.get("cmd", "(dynamic)")
+            table.add_row(name, context, cmd)
 
     console.print(table)
 
