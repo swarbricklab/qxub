@@ -50,8 +50,12 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Show what would be executed without submitting",
 )
 @click.option("--quiet", is_flag=True, help="Suppress output")
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")
-@click.option("--debug", is_flag=True, help="Enable debug output")
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help="Increase verbosity (use -v, -vv, -vvv for more detail)",
+)
 @click.option(
     "--out",
     help="Output file path (default: configured or {log_dir}/{name}_{timestamp}.out)",
@@ -89,7 +93,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--alias", help="Use a predefined alias for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, shortcut, alias, verbose, debug, **options):
+def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -130,15 +134,14 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, debug, **options):
         qxub exec --env myenv -- python script.py arg1 arg2
         qxub exec --env myenv --cmd "python script.py arg1 arg2"
     """
-    # Set up logging verbosity
-    if debug:
-        logging.basicConfig(level=logging.DEBUG)
-    elif verbose:
-        logging.basicConfig(level=logging.INFO)
-    elif options.get("quiet"):
-        logging.basicConfig(level=logging.ERROR)
+    # Set up logging verbosity using the count-based system
+    from .config_manager import setup_logging
+
+    if options.get("quiet"):
+        # Override verbose count when quiet is specified
+        setup_logging(verbosity=0)  # ERROR level
     else:
-        logging.basicConfig(level=logging.WARNING)
+        setup_logging(verbosity=verbose)
 
     # Handle command specification
     if cmd and command:
@@ -355,7 +358,6 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, debug, **options):
         "dry": options["dry"],
         "quiet": options["quiet"],
         "verbose": verbose,
-        "debug": debug,
     }
 
     # Process configuration using the existing config system
