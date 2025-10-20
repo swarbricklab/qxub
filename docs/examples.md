@@ -322,3 +322,48 @@ qxub exec --dry --env myenv --cmd 'echo "User ${USER} job ${{PBS_JOBID}}"'
 qxub exec --terse --dry --env myenv -- python script.py
 # DRY_RUN
 ```
+
+## Performance and Monitoring
+
+### File-Based Job Monitoring (v3.0+)
+
+Starting with v3.0, qxub uses file-based monitoring for significantly improved performance:
+
+```bash
+# File-based monitoring is now the default (15x faster completion detection)
+qxub exec --env myenv -- python long_job.py
+
+# Optional: Force legacy qstat polling (not recommended)
+QXUB_USE_QSTAT_MONITORING=true qxub exec --env myenv -- python job.py
+```
+
+**Performance improvements:**
+- **2-second response time** for job completion detection (vs 30-second qstat polling)
+- **Reduced PBS scheduler load** by eliminating frequent qstat calls
+- **Background resource collection** with 60-second delay for detailed statistics
+- **Real-time status files** in `<output_dir>/status/` for external monitoring
+
+**Status file monitoring:**
+```bash
+# Status files created automatically in job output directory
+ls /scratch/$USER/qt/*/status/
+# job_started       - Job began execution
+# main_started      - Main command started
+# pre_exit_code     - Pre-command result
+# main_exit_code    - Main command result
+# post_exit_code    - Post-command result
+# final_exit_code   - Final job result
+```
+
+**External monitoring example:**
+```bash
+# Monitor job progress externally
+JOB_DIR="/scratch/a56/user/qt/20251020_194025"
+while [ ! -f "$JOB_DIR/status/final_exit_code" ]; do
+    if [ -f "$JOB_DIR/status/main_started" ]; then
+        echo "Job is running main command..."
+    fi
+    sleep 5
+done
+echo "Job completed with exit code: $(head -n1 $JOB_DIR/status/final_exit_code)"
+```
