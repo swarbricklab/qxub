@@ -597,7 +597,15 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
     "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"
 )
 @click.option("--sif", help="Singularity container (for sing subcommand)")
-def set_alias(alias_name: str, **kwargs):
+@click.option(
+    "--user", "user_config", is_flag=True, help="Set alias in user config (default)"
+)
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Set alias in system config (requires appropriate permissions)",
+)
+def set_alias(alias_name: str, user_config: bool, system: bool, **kwargs):
     """Create or update an alias."""
     # Remove None values
     alias_def = {k: v for k, v in kwargs.items() if v is not None}
@@ -639,10 +647,23 @@ def set_alias(alias_name: str, **kwargs):
         if subcommand_opts:
             alias_def[subcommand] = subcommand_opts
 
+    # Check for mutually exclusive scope options
+    if user_config and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system. Choose one scope."
+        )
+
     try:
-        # Set the alias in user config
-        config_manager.set_user_config_value(f"aliases.{alias_name}", alias_def)
-        click.echo(f"✅ Set alias '{alias_name}'")
+        # Set the alias with appropriate scope
+        if system:
+            config_manager.set_system_config_value(f"aliases.{alias_name}", alias_def)
+            scope_desc = "(system-wide)"
+        else:
+            # Default to user config
+            config_manager.set_user_config_value(f"aliases.{alias_name}", alias_def)
+            scope_desc = "(user config)"
+
+        click.echo(f"✅ Set alias '{alias_name}' {scope_desc}")
 
         # Show the created alias
         click.echo("📋 Alias definition:")
@@ -650,6 +671,13 @@ def set_alias(alias_name: str, **kwargs):
         syntax = Syntax(yaml_str, "yaml", theme="monokai")
         console.print(syntax)
 
+    except (PermissionError, OSError) as e:
+        if "Permission denied" in str(e) or "Read-only file system" in str(e):
+            click.echo(f"❌ Permission denied writing to config file: {e}")
+            click.echo("💡 Hint: Use 'sudo' for system-wide configuration")
+        else:
+            click.echo(f"❌ Error writing config file: {e}")
+        raise click.Abort()
     except Exception as e:
         click.echo(f"❌ Error creating alias: {e}")
         raise click.Abort()
@@ -913,7 +941,15 @@ def shortcut_config():
 @click.option("--post", help="Command to run after main command")
 @click.option("--cmd", help="Default command to execute (can be overridden)")
 @click.option("--description", help="Human-readable description of the shortcut")
-def set_shortcut(command_prefix: str, **options):
+@click.option(
+    "--user", "user_config", is_flag=True, help="Set shortcut in user config (default)"
+)
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Set shortcut in system config (requires appropriate permissions)",
+)
+def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options):
     """
     Create or update a shortcut.
 
@@ -994,8 +1030,29 @@ def set_shortcut(command_prefix: str, **options):
             "Shortcut must specify at least one option (execution context, PBS settings, etc.)"
         )
 
-    # Save shortcut
-    shortcut_manager.add_shortcut(command_prefix, definition)
+    # Check for mutually exclusive scope options
+    if user_config and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system. Choose one scope."
+        )
+
+    # Save shortcut with appropriate scope
+    try:
+        if system:
+            shortcut_manager.add_system_shortcut(command_prefix, definition)
+            scope_desc = "(system-wide)"
+        else:
+            # Default to user config
+            shortcut_manager.add_shortcut(command_prefix, definition)
+            scope_desc = "(user config)"
+    except (PermissionError, OSError) as e:
+        if "Permission denied" in str(e) or "Read-only file system" in str(e):
+            raise click.ClickException(
+                f"❌ Permission denied writing to system config: {e}\n"
+                f"💡 Hint: Use 'sudo' for system-wide configuration"
+            )
+        else:
+            raise click.ClickException(f"❌ Error writing system config: {e}")
 
     # Show confirmation
     def _get_execution_context_description(definition: dict) -> str:
@@ -1018,7 +1075,7 @@ def set_shortcut(command_prefix: str, **options):
             return "default"
 
     context_desc = _get_execution_context_description(definition)
-    click.echo(f"✅ Shortcut '{command_prefix}' saved successfully")
+    click.echo(f"✅ Shortcut '{command_prefix}' saved successfully {scope_desc}")
     click.echo(f"   Context: {context_desc}")
     if definition.get("cmd"):
         click.echo(f"   Command: {definition['cmd']}")

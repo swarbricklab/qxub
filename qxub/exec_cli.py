@@ -148,8 +148,6 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
 
     # Handle alias processing
     if alias:
-        from .config_manager import config_manager
-
         alias_def = config_manager.get_alias(alias)
         if not alias_def:
             available_aliases = config_manager.list_aliases()
@@ -164,11 +162,8 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
             ctx.exit(2)
 
         # Apply alias settings to options (CLI options override alias settings)
-        # This is simplified - in a real implementation you'd need to handle the hierarchical alias structure
-        main_def = alias_def.get("main", {})
-        target_def = alias_def.get("target", {})
-
-        for key, value in main_def.items():
+        # Aliases use flat structure, unlike shortcuts which have hierarchical structure
+        for key, value in alias_def.items():
             if key == "env" and not options["env"]:
                 options["env"] = value
             elif key == "mod" and not options["mod"]:
@@ -192,10 +187,6 @@ def exec_cli(ctx, command, cmd, shortcut, alias, **options):
                 options["pre"] = value
             elif key == "post" and not options["post"]:
                 options["post"] = value
-
-        # Handle default command from alias
-        if target_def.get("cmd") and not cmd and not command:
-            command = tuple(target_def["cmd"].split())
 
         click.echo(f"🎯 Using alias '{alias}'")
 

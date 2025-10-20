@@ -140,6 +140,40 @@ class ShortcutManager:
         # Invalidate cache
         self._shortcuts_cache = None
 
+    def add_system_shortcut(self, name: str, definition: Dict[str, Any]) -> None:
+        """
+        Add or update a shortcut in system config.
+
+        Args:
+            name: Shortcut name (command to match)
+            definition: Shortcut settings (env, resources, etc.)
+
+        Raises:
+            PermissionError: If no write permissions to system config
+        """
+        # Ensure system config directory exists
+        self._system_shortcuts_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing system shortcuts
+        system_shortcuts = {}
+        if self._system_shortcuts_file.exists():
+            try:
+                with open(self._system_shortcuts_file, "r", encoding="utf-8") as f:
+                    system_shortcuts = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                # File exists but is invalid - start fresh
+                pass
+
+        # Add/update shortcut
+        system_shortcuts[name] = definition
+
+        # Save back to file
+        with open(self._system_shortcuts_file, "w", encoding="utf-8") as f:
+            json.dump(system_shortcuts, f, indent=2, sort_keys=True)
+
+        # Invalidate cache
+        self._shortcuts_cache = None
+
     def remove_shortcut(self, name: str) -> bool:
         """
         Remove a shortcut from user config.
