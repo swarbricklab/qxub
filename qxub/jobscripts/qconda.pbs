@@ -45,11 +45,23 @@ error_handler() {
     local exit_code=$?
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
+    # Write error exit code to status
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
     exit $exit_code
 }
 
 # Set up error trap
 trap 'error_handler' ERR
+
+# Create status directory for file-based monitoring
+STATUS_DIR="${out%/*}/status"
+mkdir -p "$STATUS_DIR"
+
+# Signal job started with timestamp and job ID
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started"
+echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started"
+echo "🚀 Job started at $(date -Iseconds)"
 
 # Activate conda environment
 echo "🔄 Activating conda environment: $env"
@@ -77,26 +89,72 @@ fi
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Running pre-command: $pre_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+
     bash -c "$pre_cmd"
+    PRE_EXIT_CODE=$?
+
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+
+    if [ $PRE_EXIT_CODE -ne 0 ]; then
+        echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+        exit $PRE_EXIT_CODE
+    fi
     echo "✅ Pre-command completed"
 fi
 
 # Run main command
 echo "🚀 Running main command: $cmd"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started"
+
 if [ "$quiet" = "true" ]; then
     # In quiet mode, let output go to default joblog (no redirection)
     echo "================== COMMAND OUTPUT START =================="
     bash -c "$cmd"
+    MAIN_EXIT_CODE=$?
     echo "=================== COMMAND OUTPUT END ==================="
 else
     # Normal mode: redirect to separate out/err files
     bash -c "$cmd" > "$out" 2> "$err"
+    MAIN_EXIT_CODE=$?
+fi
+
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+
+if [ $MAIN_EXIT_CODE -ne 0 ]; then
+    echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+    exit $MAIN_EXIT_CODE
 fi
 echo "✅ Main command completed"
 
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
     echo "🏁 Running post-command: $post_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+
     bash -c "$post_cmd"
+    POST_EXIT_CODE=$?
+
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+
+    if [ $POST_EXIT_CODE -ne 0 ]; then
+        echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+        exit $POST_EXIT_CODE
+    fi
     echo "✅ Post-command completed"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
+else
+    # No post-command, main command exit code is final
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code"
 fi

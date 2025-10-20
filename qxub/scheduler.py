@@ -5,6 +5,8 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
 import logging
+import os
+import pathlib
 import shlex
 import signal
 import subprocess
@@ -733,6 +735,171 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
                 time.sleep(5)
 
 
+def monitor_files(
+    job_id, out_file, err_file, quiet=False, coordinator=None, success_msg=None
+):
+    """
+    Monitors for job completion by watching status files instead of polling qstat.
+    This is much more efficient as it uses filesystem notifications rather than
+    30-second qstat polling that creates load on the PBS scheduler.
+    """
+    import os
+    import pathlib
+
+    logging.debug("Starting file-based job monitoring")
+
+    # Determine status directory based on output file location
+    status_dir = pathlib.Path(out_file).parent / "status"
+
+    # Status files to monitor
+    job_started_file = status_dir / "job_started"
+    main_started_file = status_dir / "main_started"
+    final_exit_code_file = status_dir / "final_exit_code"
+
+    # Track job state
+    job_started_notified = False
+    job_running_notified = False
+
+    # Wait for job submission to complete before starting
+    if coordinator:
+        coordinator.wait_for_submission_complete()
+
+    logging.debug("Starting file-based monitoring loop")
+
+    # Use proper context manager for spinner
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+        while True:
+            # Check if we should shutdown early
+            if coordinator and coordinator.should_shutdown():
+                logging.info("File monitor shutdown requested")
+                return
+
+            # Check for job started
+            if not job_started_notified and job_started_file.exists():
+                if coordinator:
+                    coordinator.signal_job_running()
+                if not quiet:
+                    print_status("🚀 Job started running", final=True)
+                job_started_notified = True
+                logging.debug("Job started detected via status file")
+
+            # Check for main command started (indicates job is actively running)
+            if not job_running_notified and main_started_file.exists():
+                job_running_notified = True
+                logging.debug("Main command started detected via status file")
+
+            # Check for job completion
+            if final_exit_code_file.exists():
+                if coordinator:
+                    coordinator.signal_job_finished()
+                    coordinator.signal_job_completed()
+
+                # Start background resource collection
+                start_background_resource_collection(job_id, final_exit_code_file)
+
+                # Read exit status from file
+                try:
+                    with open(final_exit_code_file, "r") as f:
+                        lines = f.read().strip().split("\n")
+                        exit_status = (
+                            int(lines[0]) if lines and lines[0].isdigit() else 0
+                        )
+                except (OSError, ValueError, IndexError) as e:
+                    logging.warning(
+                        f"Could not read exit status from {final_exit_code_file}: {e}"
+                    )
+                    exit_status = 0
+
+                logging.info(
+                    "Job %s completed with exit status %s (from status file)",
+                    job_id,
+                    exit_status,
+                )
+
+                if coordinator:
+                    coordinator.job_exit_status = exit_status
+                return exit_status
+
+            # Sleep much shorter than qstat polling - we want responsive file detection
+            # But not too aggressive to avoid excessive CPU usage
+            for _ in range(2):  # 2 * 1 = 2 seconds total (vs 30s for qstat)
+                if coordinator and coordinator.should_shutdown():
+                    logging.info("File monitor shutdown during sleep")
+                    return 0  # Return success if interrupted
+                time.sleep(1)
+
+
+def start_background_resource_collection(job_id, final_exit_code_file):
+    """
+    Start background resource collection that waits 60 seconds after job completion
+    and then collects detailed resource usage via qstat -f. This runs independently
+    and doesn't block the main monitoring loop.
+    """
+
+    def collect_resources():
+        try:
+            # Wait for job completion signal
+            while not final_exit_code_file.exists():
+                time.sleep(2)  # Check every 2 seconds for completion
+
+            logging.debug(
+                f"Job {job_id} completed, starting 60s delay for resource collection"
+            )
+
+            # Wait 60 seconds for PBS cleanup and detailed stats to be available
+            time.sleep(60)
+
+            logging.debug(f"Collecting detailed resource usage for job {job_id}")
+
+            # Try to collect detailed job statistics
+            try:
+                # Import here to avoid circular imports
+                from .resource_parser import parse_qstat_output
+                from .resource_tracker import store_resource_usage
+
+                # Get detailed job info via qstat -f
+                result = subprocess.run(
+                    ["qstat", "-f", job_id], capture_output=True, text=True, timeout=30
+                )
+
+                if result.returncode == 0:
+                    # Parse and store resource usage
+                    job_info = parse_qstat_output(result.stdout)
+                    if job_info:
+                        store_resource_usage(job_id, job_info)
+                        logging.info(
+                            f"Successfully collected and stored resource usage for job {job_id}"
+                        )
+                    else:
+                        logging.warning(
+                            f"Could not parse qstat output for job {job_id}"
+                        )
+                else:
+                    logging.warning(
+                        f"qstat -f failed for job {job_id}: {result.stderr}"
+                    )
+
+            except ImportError:
+                logging.debug(
+                    "Resource tracking modules not available, skipping collection"
+                )
+            except subprocess.TimeoutExpired:
+                logging.warning(f"qstat -f timed out for job {job_id}")
+            except Exception as e:
+                logging.warning(f"Error collecting resources for job {job_id}: {e}")
+
+        except Exception as e:
+            logging.error(
+                f"Background resource collection failed for job {job_id}: {e}"
+            )
+
+    # Start background thread for resource collection
+    resource_thread = threading.Thread(target=collect_resources, daemon=True)
+    resource_thread.start()
+    logging.debug(f"Started background resource collection for job {job_id}")
+    return resource_thread
+
+
 def tail(log_file, destination, coordinator=None):
     """
     Tails the given log_file until either EOF or job completion.
@@ -798,10 +965,23 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
     # Create coordinator for thread synchronization
     coordinator = OutputCoordinator()
 
-    # Create threads for job monitoring and log tailing
-    qstat_thread = threading.Thread(
-        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
+    # Check if we should use file-based monitoring (default) or fall back to qstat
+    # File-based monitoring is preferred for performance, but qstat is available as fallback
+    use_file_monitoring = (
+        os.environ.get("QXUB_USE_QSTAT_MONITORING", "false").lower() != "true"
     )
+
+    if use_file_monitoring:
+        logging.debug("Using file-based monitoring (preferred)")
+        monitor_target = monitor_files
+        monitor_args = (job_id, out_file, err_file, quiet, coordinator, success_msg)
+    else:
+        logging.debug("Using qstat polling monitoring (fallback mode)")
+        monitor_target = monitor_qstat
+        monitor_args = (job_id, quiet, coordinator, success_msg)
+
+    # Create threads for job monitoring and log tailing
+    monitor_thread = threading.Thread(target=monitor_target, args=monitor_args)
     out_thread = threading.Thread(
         target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
     )
@@ -828,7 +1008,7 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
     original_handler = signal.signal(signal.SIGINT, signal_handler)
 
     # Start all threads
-    qstat_thread.start()
+    monitor_thread.start()
     out_thread.start()
     err_thread.start()
 
@@ -836,7 +1016,7 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
         """Wait for job monitoring to complete and return exit status"""
         try:
             # Wait for job monitoring to complete or shutdown signal
-            qstat_thread.join()
+            monitor_thread.join()
             return coordinator.job_exit_status or 0
         finally:
             # Restore original signal handler
