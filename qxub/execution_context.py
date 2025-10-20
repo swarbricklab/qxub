@@ -169,6 +169,12 @@ def execute_unified(
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
     logging.info("Submission command: %s", submission_command)
 
+    # Progress message: Job command constructed (skip for terse mode)
+    if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
+        from .scheduler import print_status
+
+        print_status("🔧 Job command constructed", final=True)
+
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
         # Log history even for dry runs

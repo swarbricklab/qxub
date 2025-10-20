@@ -17,7 +17,13 @@ import click
 
 from .history_manager import history_manager
 from .resource_tracker import resource_tracker
-from .scheduler import monitor_and_tail, print_status, qsub, start_job_monitoring
+from .scheduler import (
+    monitor_and_tail,
+    monitor_job_single_thread,
+    print_status,
+    qsub,
+    start_job_monitoring,
+)
 
 
 def expand_submission_variables(cmd_str: str) -> str:
@@ -362,27 +368,33 @@ def submit_and_monitor_job(
         logging.info("Exiting in quiet mode")
         return
 
-    # Start concurrent monitoring of job and log files
-    # Stream log files to STDOUT/STDERR as appropriate
+    # Prepare output files
     out.parent.mkdir(parents=True, exist_ok=True)
     err.parent.mkdir(parents=True, exist_ok=True)
     out.touch()
     err.touch()
 
-    # Start job monitoring and get coordinator for signaling
-    coordinator, wait_for_completion = start_job_monitoring(
-        job_id, out, err, quiet=ctx_obj["quiet"]
-    )
-
-    # Signal that submission messages are complete - spinner can start now
-    coordinator.signal_submission_complete()
-
+    # Use single-thread monitoring for simpler, more reliable operation
     try:
-        exit_status = wait_for_completion()
+        exit_status = monitor_job_single_thread(
+            job_id, out, err, quiet=ctx_obj["quiet"]
+        )
         # Exit with the job's exit status
         sys.exit(exit_status)
-    finally:
-        pass  # Cleanup handled in start_job_monitoring signal handler
+    except KeyboardInterrupt:
+        # Handle Ctrl-C gracefully
+        print("\n🛑 Interrupted! Cleaning up job...")
+        from .scheduler import qdel
+
+        success = qdel(job_id, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+            sys.exit(130)  # Standard exit code for SIGINT
+        else:
+            print(
+                f"⚠️  Job cleanup failed - you may need to manually run: qdel {job_id}"
+            )
+            sys.exit(1)
 
 
 def validate_execution_context(

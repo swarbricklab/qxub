@@ -93,6 +93,10 @@ class OutputCoordinator:
         """Called when job status changes to Running."""
         self.job_running.set()
 
+    def wait_for_job_running(self, timeout=None):
+        """Called to wait for job to start running."""
+        return self.job_running.wait(timeout)
+
     def signal_job_finished(self):
         """Called when job status changes to Finished or Held."""
         self.job_finished.set()
@@ -735,6 +739,80 @@ def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
                 time.sleep(5)
 
 
+def _format_completion_message(job_id, exit_status, status_dir):
+    """
+    Format a completion message with appropriate emoji and hook status information.
+
+    Args:
+        job_id: The PBS job ID
+        exit_status: The final exit status of the job
+        status_dir: Path to the status directory containing hook exit codes
+
+    Returns:
+        str: Formatted completion message
+    """
+    import pathlib
+
+    # Choose emoji based on exit status
+    if exit_status == 0:
+        emoji = "✅"
+        status_text = "Job completed successfully"
+    else:
+        emoji = "❌"
+        status_text = f"Job failed with exit code {exit_status}"
+
+    # Base message
+    message = f"{emoji} {status_text}"
+
+    # Check for hook status information
+    hook_info = []
+
+    # Check pre-command status
+    pre_exit_file = pathlib.Path(status_dir) / "pre_exit_code"
+    if pre_exit_file.exists():
+        try:
+            with open(pre_exit_file, "r") as f:
+                pre_exit_code = int(f.readline().strip())
+                if pre_exit_code == 0:
+                    hook_info.append("pre ✅")
+                else:
+                    hook_info.append(f"pre ❌({pre_exit_code})")
+        except (OSError, ValueError):
+            hook_info.append("pre ❓")
+
+    # Check main command status (always present)
+    main_exit_file = pathlib.Path(status_dir) / "main_exit_code"
+    if main_exit_file.exists():
+        try:
+            with open(main_exit_file, "r") as f:
+                main_exit_code = int(f.readline().strip())
+                if main_exit_code == 0:
+                    hook_info.append("main ✅")
+                else:
+                    hook_info.append(f"main ❌({main_exit_code})")
+        except (OSError, ValueError):
+            hook_info.append("main ❓")
+
+    # Check post-command status
+    post_exit_file = pathlib.Path(status_dir) / "post_exit_code"
+    if post_exit_file.exists():
+        try:
+            with open(post_exit_file, "r") as f:
+                post_exit_code = int(f.readline().strip())
+                if post_exit_code == 0:
+                    hook_info.append("post ✅")
+                else:
+                    hook_info.append(f"post ❌({post_exit_code})")
+        except (OSError, ValueError):
+            hook_info.append("post ❓")
+
+    # Add hook information if any hooks were specified
+    if hook_info:
+        message += f" ({', '.join(hook_info)})"
+
+    return message
+
+
 def monitor_files(
     job_id, out_file, err_file, quiet=False, coordinator=None, success_msg=None
 ):
@@ -783,6 +861,16 @@ def monitor_files(
                 job_started_notified = True
                 logging.debug("Job started detected via status file")
 
+                # Now that job has started and message is displayed, start tail threads
+                if (
+                    coordinator
+                    and hasattr(coordinator, "out_thread")
+                    and hasattr(coordinator, "err_thread")
+                ):
+                    logging.debug("Starting tail threads after job start detection")
+                    coordinator.out_thread.start()
+                    coordinator.err_thread.start()
+
             # Check for main command started (indicates job is actively running)
             if not job_running_notified and main_started_file.exists():
                 job_running_notified = True
@@ -816,6 +904,13 @@ def monitor_files(
                     exit_status,
                 )
 
+                # Display completion message with appropriate emoji and hook status
+                if not quiet:
+                    completion_msg = _format_completion_message(
+                        job_id, exit_status, status_dir
+                    )
+                    print_status(completion_msg, final=True)
+
                 if coordinator:
                     coordinator.job_exit_status = exit_status
                     # Signal shutdown to stop tail threads
@@ -830,6 +925,138 @@ def monitor_files(
                     logging.info("File monitor shutdown during sleep")
                     return 0  # Return success if interrupted
                 time.sleep(1)
+
+
+def monitor_and_stream_job(
+    job_id, out_file, err_file, quiet=False, coordinator=None, success_msg=None
+):
+    """
+    Single-thread approach: Monitor job status and stream output sequentially.
+
+    This eliminates race conditions by doing everything in the correct order:
+    1. Wait for job to start
+    2. Display "Job started running" message
+    3. Stream output files while monitoring for completion
+    4. Exit cleanly when job completes
+    """
+    import pathlib
+    import time
+
+    logging.debug("Starting single-thread job monitoring and streaming")
+
+    # Determine status directory and files
+    status_dir = pathlib.Path(out_file).parent / "status"
+    job_started_file = status_dir / f"job_started_{job_id}"
+    main_started_file = status_dir / f"main_started_{job_id}"
+    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+
+    # Wait for job submission to complete before starting
+    if coordinator:
+        coordinator.wait_for_submission_complete()
+
+    # Use spinner while waiting for job to start
+    with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
+        # Phase 1: Wait for job to start
+        logging.debug("Waiting for job to start...")
+        while not job_started_file.exists():
+            if coordinator and coordinator.should_shutdown():
+                logging.info("Shutdown requested during job start wait")
+                return 0
+            time.sleep(0.1)  # Fast polling for job start
+
+        # Job has started - signal and display message
+        if coordinator:
+            coordinator.signal_job_running()
+        if not quiet:
+            print_status("🚀 Job started running", final=True)
+        logging.debug("Job started detected - beginning output streaming")
+
+    # Phase 2: Stream output while monitoring for completion
+    try:
+        with (
+            open(out_file, "r", encoding="utf-8") as out_f,
+            open(err_file, "r", encoding="utf-8") as err_f,
+        ):
+            out_pos = 0
+            err_pos = 0
+            output_started = False
+
+            while not final_exit_code_file.exists():
+                if coordinator and coordinator.should_shutdown():
+                    logging.info("Shutdown requested during streaming")
+                    break
+
+                # Read new output from STDOUT
+                out_f.seek(out_pos)
+                out_lines = out_f.readlines()
+                if out_lines:
+                    if not output_started and coordinator:
+                        coordinator.signal_output_started()
+                        output_started = True
+                    for line in out_lines:
+                        print(line.rstrip(), file=sys.stdout, flush=True)
+                    out_pos = out_f.tell()
+
+                # Read new output from STDERR
+                err_f.seek(err_pos)
+                err_lines = err_f.readlines()
+                if err_lines:
+                    if not output_started and coordinator:
+                        coordinator.signal_output_started()
+                        output_started = True
+                    for line in err_lines:
+                        print(line.rstrip(), file=sys.stderr, flush=True)
+                    err_pos = err_f.tell()
+
+                # Short sleep to avoid busy-waiting
+                time.sleep(0.1)
+
+        # Phase 3: Read any final output after job completion
+        logging.debug("Job completed - reading final output")
+
+        # Read any remaining output
+        with (
+            open(out_file, "r", encoding="utf-8") as out_f,
+            open(err_file, "r", encoding="utf-8") as err_f,
+        ):
+            out_f.seek(out_pos)
+            remaining_out = out_f.readlines()
+            if remaining_out:
+                for line in remaining_out:
+                    print(line.rstrip(), file=sys.stdout, flush=True)
+
+            err_f.seek(err_pos)
+            remaining_err = err_f.readlines()
+            if remaining_err:
+                for line in remaining_err:
+                    print(line.rstrip(), file=sys.stderr, flush=True)
+
+        # Read exit status
+        try:
+            with open(final_exit_code_file, "r") as f:
+                lines = f.read().strip().split("\n")
+                exit_status = int(lines[0]) if lines and lines[0].isdigit() else 0
+        except (OSError, ValueError, IndexError) as e:
+            logging.warning(
+                f"Could not read exit status from {final_exit_code_file}: {e}"
+            )
+            exit_status = 0
+
+        logging.info("Job %s completed with exit status %s", job_id, exit_status)
+
+        if coordinator:
+            coordinator.job_exit_status = exit_status
+            coordinator.signal_job_finished()
+            coordinator.signal_job_completed()
+
+        # Start background resource collection
+        start_background_resource_collection(job_id, final_exit_code_file)
+
+        return exit_status
+
+    except (OSError, IOError) as e:
+        logging.error(f"Error streaming output files: {e}")
+        return 1
 
 
 def start_background_resource_collection(job_id, final_exit_code_file):
@@ -1063,7 +1290,6 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
             monitor_thread.join()
 
             # Wait for tail threads to finish after shutdown signal
-            # Give them a reasonable timeout since they should exit quickly once signaled
             out_thread.join(timeout=5)
             err_thread.join(timeout=5)
 
@@ -1073,6 +1299,224 @@ def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=No
             signal.signal(signal.SIGINT, original_handler)
 
     return coordinator, wait_for_completion
+
+
+def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
+    """
+    Single-thread job monitoring with proper spinner integration using status files.
+
+    Flow:
+    1. "Job constructed" progress message (handled by caller)
+    2. Spinner while waiting for submission (handled by caller)
+    3. "Job submitted" (handled by caller)
+    4. Spinner while waiting for job to start
+    5. "Job started"
+    6. Job output streaming
+    7. "Job completed" with status
+
+    Returns:
+        int: Job exit status
+    """
+    import sys
+    import time
+    from pathlib import Path
+
+    # Determine status directory based on output file location
+    status_dir = Path(out_file).parent / "status"
+
+    # Status files to monitor (using job ID directly for uniqueness)
+    job_started_file = status_dir / f"job_started_{job_id}"
+    main_started_file = status_dir / f"main_started_{job_id}"
+    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+
+    # Track job state
+    job_started_notified = False
+
+    # 4. Spinner while waiting for job to start - check status files every 0.5 seconds
+    with JobSpinner("", show_message=False, quiet=quiet):
+        while True:
+            # Check for job started (more frequent polling for responsiveness)
+            if not job_started_notified and job_started_file.exists():
+                if not quiet:
+                    print_status("🚀 Job started", final=True)
+                    job_started_notified = True
+                break
+
+            # Check if job finished without running (rare but possible)
+            if final_exit_code_file.exists():
+                logging.info("Job %s completed before starting", job_id)
+                exit_status = read_exit_status_from_file(final_exit_code_file)
+
+                # Completion message
+                if not quiet:
+                    completion_msg = _format_completion_message(
+                        job_id, exit_status, status_dir
+                    )
+                    print_status(completion_msg, final=True)
+
+                return exit_status
+
+            time.sleep(0.5)  # Check every 500ms for good responsiveness
+
+    # 6. Stream job output
+    exit_status = stream_job_output_with_status_files(
+        job_id, out_file, err_file, final_exit_code_file
+    )
+
+    # 7. Completion message
+    if not quiet:
+        completion_msg = _format_completion_message(job_id, exit_status, status_dir)
+        print_status(completion_msg, final=True)
+
+    return exit_status
+
+
+def read_exit_status_from_file(exit_code_file):
+    """Read exit status from a status file."""
+    try:
+        with open(exit_code_file, "r") as f:
+            return int(f.read().strip())
+    except (OSError, IOError, ValueError):
+        logging.warning(f"Could not read exit status from {exit_code_file}")
+        return 1  # Default to failure
+
+
+def stream_job_output_with_status_files(
+    job_id, out_file, err_file, final_exit_code_file
+):
+    """
+    Stream job output files until job completion using status files for detection.
+
+    Returns:
+        int: Job exit status
+    """
+    import os
+    import sys
+    import time
+
+    # Keep track of file positions to avoid re-reading
+    out_pos = 0
+    err_pos = 0
+
+    # Monitor job completion via status file
+    while True:
+        # Stream new output from STDOUT
+        if os.path.exists(out_file):
+            try:
+                with open(out_file, "r") as f:
+                    f.seek(out_pos)
+                    for line in f:
+                        print(line.rstrip(), file=sys.stdout, flush=True)
+                    out_pos = f.tell()
+            except (OSError, IOError):
+                pass
+
+        # Stream new output from STDERR
+        if os.path.exists(err_file):
+            try:
+                with open(err_file, "r") as f:
+                    f.seek(err_pos)
+                    for line in f:
+                        print(line.rstrip(), file=sys.stderr, flush=True)
+                    err_pos = f.tell()
+            except (OSError, IOError):
+                pass
+
+        # Check if job finished using status file
+        if final_exit_code_file.exists():
+            # Read any final output
+            if os.path.exists(out_file):
+                try:
+                    with open(out_file, "r") as f:
+                        f.seek(out_pos)
+                        for line in f:
+                            print(line.rstrip(), file=sys.stdout, flush=True)
+                except (OSError, IOError):
+                    pass
+
+            if os.path.exists(err_file):
+                try:
+                    with open(err_file, "r") as f:
+                        f.seek(err_pos)
+                        for line in f:
+                            print(line.rstrip(), file=sys.stderr, flush=True)
+                except (OSError, IOError):
+                    pass
+
+            # Get final exit status from status file
+            exit_status = read_exit_status_from_file(final_exit_code_file)
+            return exit_status
+
+        time.sleep(0.2)  # Check every 200ms for good output responsiveness
+
+
+def stream_job_output(job_id, out_file, err_file):
+    """
+    Stream job output files until job completion.
+
+    Returns:
+        int: Job exit status
+    """
+    import os
+    import sys
+    import time
+
+    # Keep track of file positions to avoid re-reading
+    out_pos = 0
+    err_pos = 0
+
+    # Monitor job status and stream output
+    while True:
+        status = job_status(job_id)
+
+        # Stream new output from STDOUT
+        if os.path.exists(out_file):
+            try:
+                with open(out_file, "r") as f:
+                    f.seek(out_pos)
+                    for line in f:
+                        print(line.rstrip(), file=sys.stdout, flush=True)
+                    out_pos = f.tell()
+            except (OSError, IOError):
+                pass
+
+        # Stream new output from STDERR
+        if os.path.exists(err_file):
+            try:
+                with open(err_file, "r") as f:
+                    f.seek(err_pos)
+                    for line in f:
+                        print(line.rstrip(), file=sys.stderr, flush=True)
+                    err_pos = f.tell()
+            except (OSError, IOError):
+                pass
+
+        # Check if job finished
+        if status in ["F", "H", "C"]:
+            # Read any final output
+            if os.path.exists(out_file):
+                try:
+                    with open(out_file, "r") as f:
+                        f.seek(out_pos)
+                        for line in f:
+                            print(line.rstrip(), file=sys.stdout, flush=True)
+                except (OSError, IOError):
+                    pass
+
+            if os.path.exists(err_file):
+                try:
+                    with open(err_file, "r") as f:
+                        f.seek(err_pos)
+                        for line in f:
+                            print(line.rstrip(), file=sys.stderr, flush=True)
+                except (OSError, IOError):
+                    pass
+
+            # Get final exit status
+            exit_status = wait_for_job_exit_status(job_id)
+            return exit_status
+
+        time.sleep(1)  # Check every 1 second
 
 
 def monitor_and_tail(
