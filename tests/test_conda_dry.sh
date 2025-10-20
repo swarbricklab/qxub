@@ -59,7 +59,7 @@ run_dry_test() {
         else
             local dry_cmd=$(echo "$test_cmd" | sed 's/qxub exec/qxub exec --dry/')
         fi
-    elif [[ $test_cmd == *"qxub shortcut"* ]] || [[ $test_cmd == *"qxub config"* ]] || [[ $test_cmd == *"qxub alias"* ]] || [[ $test_cmd == *"qxub history"* ]] || [[ $test_cmd == *"qxub platform"* ]]; then
+    elif [[ $test_cmd == *"qxub config"* ]] || [[ $test_cmd == *"qxub alias"* ]] || [[ $test_cmd == *"qxub history"* ]] || [[ $test_cmd == *"qxub platform"* ]]; then
         # Management commands - don't add exec or --dry
         local dry_cmd="$test_cmd"
     else
@@ -173,15 +173,15 @@ test_all_cli_options() {
 
     # Test 1: All main PBS options
     run_dry_test "All main PBS options" \
-        "qxub exec --job-name cli-test --project a56 --queue normal --env base -- echo 'All options test'"
+        "qxub exec --dry --name cli-test --project a56 --queue normal --env base -- echo 'All options test'"
 
     # Test 2: Resources option (multiple formats)
     run_dry_test "Resources - mem and ncpus" \
-        "qxub exec --resource mem=8GB --resource ncpus=2 --env base -- echo 'Resources test'"
+        "qxub exec --dry --resources mem=8GB --resources ncpus=2 --env base -- echo 'Resources test'"
 
     # Test 3: Resources - time format variations
     run_dry_test "Resources - walltime variations" \
-        "qxub exec --resource walltime=01:30:00 --env base -- echo 'Walltime test'"
+        "qxub exec --dry --resources walltime=01:30:00 --env base -- echo 'Walltime test'"
 
     # Test 4: Output and error files
     run_dry_test "Custom output/error files" \
@@ -239,11 +239,11 @@ test_config_with_dry_runs() {
 
     # Test 15: Override single config value
     run_dry_test "Override config name" \
-        "qxub exec --job-name override-test --env base -- echo 'Override test'"
+        "qxub exec --dry --name override-test --env base -- echo 'Override test'"
 
     # Test 16: Override multiple config values
     run_dry_test "Override multiple config values" \
-        "qxub exec --job-name multi-override --project b01 --queue express --env base -- echo 'Multi-override test'"
+        "qxub exec --dry --name multi-override --project b01 --queue express --env base -- echo 'Multi-override test'"
 
     # Test 17: Template variables in config
     run_dry_test "Template variables" \
@@ -272,7 +272,7 @@ test_alias_dry_runs() {
 
     # Test 22: Shortcut with CLI overrides
     run_dry_test "Shortcut with overrides" \
-        "qxub exec --job-name override-shortcut --resource walltime=00:45:00 -- echo 'Shortcut override test'"
+        "qxub exec --dry --name override-shortcut --resources walltime=00:45:00 -- echo 'Shortcut override test'"
 }
 
 # Test edge cases and complex scenarios
@@ -293,11 +293,11 @@ test_edge_cases_dry() {
 
     # Test 26: Multiple resources
     run_dry_test "Multiple resources" \
-        "qxub exec --resource mem=16GB --resource ncpus=4 --resource jobfs=50GB --env base -- echo 'Multi-resource test'"
+        "qxub exec --dry --resources mem=16GB --resources ncpus=4 --resources jobfs=50GB --env base -- echo 'Multi-resource test'"
 
     # Test 27: Special characters in job name
     run_dry_test "Special chars in name" \
-        "qxub exec --job-name 'test-job_2024.01.01' --env base -- echo 'Special name test'"
+        "qxub exec --dry --name 'test-job_2024.01.01' --env base -- echo 'Special name test'"
 }
 
 # Test error conditions (should fail)
@@ -310,9 +310,9 @@ test_error_conditions() {
         0
 
     # Test 29: Non-existent shortcut (returns 0 with helpful message)
-    run_dry_test "Non-existent alias" \
-        "qxub shortcut show nonexistent" \
-        0
+    run_dry_test "Non-existent shortcut" \
+        "qxub config shortcut show nonexistent" \
+        2
 
     # Test 30: Empty command (should fail with exit code 1)
     run_dry_test "Empty command" \
@@ -321,7 +321,7 @@ test_error_conditions() {
 
     # Test 31: Invalid resource format (may succeed in dry-run)
     run_dry_test "Invalid resource format" \
-        "qxub exec --resource invalid_format --env base -- echo 'Bad resource'" \
+        "qxub exec --resources invalid_format --env base -- echo 'Bad resource'" \
         0
 }
 

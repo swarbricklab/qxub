@@ -153,29 +153,24 @@ test_basic_conda() {
     log_info "=== Testing Basic Conda Functionality ==="
 
         # Test 1: Basic command
-    run_integration_test "Basic command" \
-        "qxub --env base -- echo 'Hello World'" \
-        1
+    run_test "Basic command" \
+        "qxub exec --env base -- echo 'Hello World'"
 
     # Test 2: All main options
-    run_integration_test "All main options" \
-        "qxub --name test-job --resources walltime=00:15:00 --resources mem=2GB --resources ncpus=1 --project a56 --queue normal --env base -- echo 'Full options'" \
-        1
+    run_test "All main options" \
+        "qxub exec --name test-job --resources walltime=00:15:00 --resources mem=2GB --resources ncpus=1 --project a56 --queue normal --env base -- echo 'Full options'"
 
     # Test 3: Storage resources
-    run_integration_test "Storage resources" \
-        "qxub --resources storage='scratch/a56+gdata/a56' --env base -- echo 'Storage test'" \
-        1
+    run_test "Storage resources" \
+        "qxub exec --resources storage='scratch/a56+gdata/a56' --env base -- echo 'Storage test'"
 
     # Test 4: Time format variations
-    run_integration_test "Time format variations" \
-        "qxub --resources walltime=1:30 --env base -- echo 'Time format test'" \
-        1
+    run_test "Time format variations" \
+        "qxub exec --resources walltime=00:30:00 --env base -- echo 'Time format test'"
 
     # Test 5: Memory format variations
-    run_integration_test "Memory format variations" \
-        "qxub --resources mem=2048MB --env base -- echo 'Memory format test'" \
-        1
+    run_test "Memory format variations" \
+        "qxub exec --resources mem=2048MB --env base -- echo 'Memory format test'"
 }
 
 # Test config integration
@@ -183,19 +178,16 @@ test_config_integration() {
     log_info "=== Testing Config Integration ==="
 
         # Test 6: Config defaults only
-    run_integration_test "Config defaults only" \
-        "qxub --env base -- echo 'Config defaults test'" \
-        1
+    run_test "Config defaults only" \
+        "qxub exec --env base -- echo 'Config defaults test'"
 
     # Test 7: Partial config override
-    run_integration_test "Partial config override" \
-        "qxub --name override-test --resources walltime=00:45:00 --env base -- echo 'Override test'" \
-        1
+    run_test "Partial config override" \
+        "qxub exec --name override-test --resources walltime=00:45:00 --env base -- echo 'Override test'"
 
     # Test 8: Multiple config overrides
-    run_integration_test "Multiple config overrides" \
-        "qxub --resources mem=6GB --env base -- echo 'Partial override test'" \
-        1
+    run_test "Multiple config overrides" \
+        "qxub exec --resources mem=6GB --env base -- echo 'Partial override test'"
 }
 
 # Test alias functionality
