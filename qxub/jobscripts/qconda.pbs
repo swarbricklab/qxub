@@ -48,6 +48,10 @@ error_handler() {
         # Write error exit code to status
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+
+    # Update database status to 'failed'
+    update_job_status "failed"
+
     exit $exit_code
 }
 
@@ -62,6 +66,25 @@ mkdir -p "$STATUS_DIR"
 echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "🚀 Job started at $(date -Iseconds)"
+
+# Update database status to 'running'
+update_job_status() {
+    local status="$1"
+    if command -v python3 > /dev/null 2>&1; then
+        python3 -c "
+import sys, os
+sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+try:
+    from qxub.resource_tracker import resource_tracker
+    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
+except Exception as e:
+    pass  # Silently ignore database update failures
+" 2>/dev/null || true
+    fi
+}
+
+# Mark job as running
+update_job_status "running"
 
 # Activate conda environment
 echo "🔄 Activating conda environment: $env"
@@ -158,3 +181,8 @@ else
     echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 fi
+
+# Update database status to 'completed'
+update_job_status "completed"
+
+echo "🎉 Job completed successfully!"

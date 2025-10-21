@@ -206,16 +206,12 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 
-    # Log job execution for resource tracking
+    # Log job submission for status and resource tracking
     try:
         cmd_str = " ".join(command)
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
-        )
+        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str)
     except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
+        logging.debug("Failed to log job submission: %s", e)
 
     # Exit if in quiet mode (no monitoring)
     if ctx_obj["quiet"]:

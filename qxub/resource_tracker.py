@@ -39,6 +39,13 @@ class ResourceTracker:
                     command TEXT,
                     exit_code INTEGER,
 
+                    -- Job status tracking (new for v3)
+                    status TEXT DEFAULT 'submitted',
+                    submitted_at TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    last_status_update TEXT,
+
                     -- Requested resources
                     mem_requested_mb INTEGER,
                     time_requested_sec INTEGER,
@@ -69,6 +76,48 @@ class ResourceTracker:
             """
             )
             conn.commit()
+
+            # Migrate existing database if needed
+            self._migrate_database_schema(conn)
+
+    def _migrate_database_schema(self, conn):
+        """Add new status tracking columns to existing database."""
+        try:
+            # Check if status column exists
+            cursor = conn.execute("PRAGMA table_info(job_resources)")
+            columns = [row[1] for row in cursor.fetchall()]
+
+            if "status" not in columns:
+                logging.debug(
+                    "Migrating database schema to add status tracking columns"
+                )
+
+                # Add new columns
+                conn.execute(
+                    "ALTER TABLE job_resources ADD COLUMN status TEXT DEFAULT 'completed'"
+                )
+                conn.execute("ALTER TABLE job_resources ADD COLUMN submitted_at TEXT")
+                conn.execute("ALTER TABLE job_resources ADD COLUMN started_at TEXT")
+                conn.execute("ALTER TABLE job_resources ADD COLUMN completed_at TEXT")
+                conn.execute(
+                    "ALTER TABLE job_resources ADD COLUMN last_status_update TEXT"
+                )
+
+                # Update existing records to have completed status and timestamps
+                conn.execute(
+                    """
+                    UPDATE job_resources
+                    SET status='completed',
+                        completed_at=timestamp,
+                        last_status_update=timestamp
+                    WHERE status IS NULL OR status = 'completed'
+                """
+                )
+
+                conn.commit()
+                logging.debug("Database schema migration completed")
+        except Exception as e:
+            logging.debug("Database migration failed (may be normal): %s", e)
 
     def log_job_resources(
         self, job_id: str, resource_data: Dict[str, Any], command: Optional[str] = None
@@ -422,6 +471,156 @@ class ResourceTracker:
             )
 
             return [dict(row) for row in cursor.fetchall()]
+
+    # Job Status Tracking Methods (new for v3)
+
+    def log_job_submitted(self, job_id: str, command: str) -> bool:
+        """Log initial job submission."""
+        try:
+            now = datetime.now().isoformat()
+            clean_command = self._clean_command(command)
+
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO job_resources
+                    (job_id, timestamp, command, status, submitted_at, last_status_update)
+                    VALUES (?, ?, ?, 'submitted', ?, ?)
+                    """,
+                    (job_id, now, clean_command, now, now),
+                )
+                conn.commit()
+
+            logging.debug("Logged job submission for %s", job_id)
+            return True
+        except Exception as e:
+            logging.debug("Failed to log job submission for %s: %s", job_id, e)
+            return False
+
+    def update_job_status(self, job_id: str, status: str) -> bool:
+        """Update job status (submitted -> running -> completed/failed)."""
+        try:
+            now = datetime.now().isoformat()
+
+            with sqlite3.connect(self.db_path) as conn:
+                # Update status and timestamp
+                conn.execute(
+                    "UPDATE job_resources SET status=?, last_status_update=? WHERE job_id=?",
+                    (status, now, job_id),
+                )
+
+                # Update specific timestamp columns based on status
+                if status == "running":
+                    conn.execute(
+                        "UPDATE job_resources SET started_at=? WHERE job_id=?",
+                        (now, job_id),
+                    )
+                elif status in ("completed", "failed"):
+                    conn.execute(
+                        "UPDATE job_resources SET completed_at=? WHERE job_id=?",
+                        (now, job_id),
+                    )
+
+                conn.commit()
+
+            logging.debug("Updated job %s status to %s", job_id, status)
+            return True
+        except Exception as e:
+            logging.debug("Failed to update job status for %s: %s", job_id, e)
+            return False
+
+    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get current status of a specific job."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute(
+                    """
+                    SELECT job_id, status, command, submitted_at, started_at,
+                           completed_at, last_status_update, exit_code
+                    FROM job_resources WHERE job_id=?
+                    """,
+                    (job_id,),
+                )
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logging.debug("Failed to get job status for %s: %s", job_id, e)
+            return None
+
+    def get_jobs_by_status(
+        self, status: str = None, limit: int = None
+    ) -> List[Dict[str, Any]]:
+        """Get jobs filtered by status."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+
+                if status:
+                    query = """
+                        SELECT job_id, status, command, submitted_at, started_at,
+                               completed_at, last_status_update, exit_code
+                        FROM job_resources
+                        WHERE status=?
+                        ORDER BY submitted_at DESC
+                    """
+                    params = (status,)
+                else:
+                    query = """
+                        SELECT job_id, status, command, submitted_at, started_at,
+                               completed_at, last_status_update, exit_code
+                        FROM job_resources
+                        ORDER BY submitted_at DESC
+                    """
+                    params = ()
+
+                if limit:
+                    query += f" LIMIT {limit}"
+
+                cursor = conn.execute(query, params)
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logging.debug("Failed to get jobs by status: %s", e)
+            return []
+
+    def get_status_summary(self) -> Dict[str, int]:
+        """Get counts of jobs by status."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT status, COUNT(*) as count
+                    FROM job_resources
+                    WHERE submitted_at > datetime('now', '-7 days')
+                    GROUP BY status
+                    """
+                )
+                return {row[0]: row[1] for row in cursor.fetchall()}
+        except Exception as e:
+            logging.debug("Failed to get status summary: %s", e)
+            return {}
+
+    def cleanup_old_jobs(self, days_old: int = 30) -> int:
+        """Remove job records older than specified days. Returns count of deleted jobs."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM job_resources
+                    WHERE completed_at < datetime('now', '-{} days')
+                    OR (status = 'submitted' AND submitted_at < datetime('now', '-{} days'))
+                    """.format(
+                        days_old, days_old // 2
+                    )  # Clean up stuck submitted jobs sooner
+                )
+                deleted_count = cursor.rowcount
+                conn.commit()
+
+            logging.debug("Cleaned up %d old job records", deleted_count)
+            return deleted_count
+        except Exception as e:
+            logging.debug("Failed to cleanup old jobs: %s", e)
+            return 0
 
     def export_csv(self, output_path: Path, limit: Optional[int] = None):
         """Export resource data to CSV."""

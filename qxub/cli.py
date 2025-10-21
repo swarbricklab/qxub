@@ -13,6 +13,7 @@ from .history_cli import history
 from .monitor_cli import monitor_cli
 from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resources_cli import resources
+from .status_cli import status_cli
 
 
 @click.group(invoke_without_command=True)
@@ -60,6 +61,7 @@ qxub.add_command(alias_cli)  # Deprecated - use qxub exec --alias instead
 qxub.add_command(history)
 qxub.add_command(monitor_cli)
 qxub.add_command(resources)
+qxub.add_command(status_cli)
 qxub.add_command(platform_cli)
 qxub.add_command(select_queue_cmd)
 qxub.add_command(validate_cmd)
