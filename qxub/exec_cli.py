@@ -51,6 +51,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option("--quiet", is_flag=True, help="Suppress output")
 @click.option(
+    "--terse",
+    is_flag=True,
+    help="Terse output: emit only job ID and return immediately (for use in pipelines)",
+)
+@click.option(
     "-v",
     "--verbose",
     count=True,
@@ -357,6 +362,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         "array": options["array"],
         "dry": options["dry"],
         "quiet": options["quiet"],
+        "terse": options["terse"],
         "verbose": verbose,
     }
 
