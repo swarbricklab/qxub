@@ -17,13 +17,7 @@ import click
 
 from .history_manager import history_manager
 from .resource_tracker import resource_tracker
-from .scheduler import (
-    monitor_and_tail,
-    monitor_job_single_thread,
-    print_status,
-    qsub,
-    start_job_monitoring,
-)
+from .scheduler import monitor_job_single_thread, print_status, qsub
 
 
 def expand_submission_variables(cmd_str: str) -> str:
