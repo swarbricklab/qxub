@@ -145,6 +145,131 @@ class ResourceTracker:
             logging.debug("Failed to log resource data for job %s: %s", job_id, e)
             return False
 
+    def update_job_resources(self, job_id: str, resource_data: Dict[str, Any]) -> bool:
+        """
+        Update resource usage for a job using parsed joblog data.
+
+        Args:
+            job_id: PBS job ID
+            resource_data: Parsed resource data from parse_joblog_resources()
+
+        Returns:
+            bool: True if updated successfully
+        """
+        try:
+            # Calculate efficiency metrics
+            memory_efficiency = None
+            time_efficiency = None
+            jobfs_efficiency = None
+
+            if resource_data.get("memory_requested_bytes") and resource_data.get(
+                "memory_used_bytes"
+            ):
+                memory_efficiency = round(
+                    (
+                        resource_data["memory_used_bytes"]
+                        / resource_data["memory_requested_bytes"]
+                    )
+                    * 100,
+                    1,
+                )
+
+            if resource_data.get("walltime_requested_seconds") and resource_data.get(
+                "walltime_used_seconds"
+            ):
+                time_efficiency = round(
+                    (
+                        resource_data["walltime_used_seconds"]
+                        / resource_data["walltime_requested_seconds"]
+                    )
+                    * 100,
+                    1,
+                )
+
+            if resource_data.get("jobfs_requested_bytes") and resource_data.get(
+                "jobfs_used_bytes"
+            ):
+                jobfs_efficiency = round(
+                    (
+                        resource_data["jobfs_used_bytes"]
+                        / resource_data["jobfs_requested_bytes"]
+                    )
+                    * 100,
+                    1,
+                )
+
+            # Update the existing record with resource data
+            update_fields = {
+                "exit_code": resource_data.get("exit_status"),
+                # Convert bytes to MB for storage
+                "mem_requested_mb": (
+                    round(
+                        resource_data.get("memory_requested_bytes", 0) / (1024 * 1024),
+                        2,
+                    )
+                    if resource_data.get("memory_requested_bytes")
+                    else None
+                ),
+                "mem_used_mb": (
+                    round(resource_data.get("memory_used_bytes", 0) / (1024 * 1024), 2)
+                    if resource_data.get("memory_used_bytes")
+                    else None
+                ),
+                "time_requested_sec": resource_data.get("walltime_requested_seconds"),
+                "time_used_sec": resource_data.get("walltime_used_seconds"),
+                "cpus_requested": resource_data.get("ncpus_requested"),
+                "cpus_used": resource_data.get("ncpus_used"),
+                "jobfs_requested_mb": (
+                    round(
+                        resource_data.get("jobfs_requested_bytes", 0) / (1024 * 1024), 2
+                    )
+                    if resource_data.get("jobfs_requested_bytes")
+                    else None
+                ),
+                "jobfs_used_mb": (
+                    round(resource_data.get("jobfs_used_bytes", 0) / (1024 * 1024), 2)
+                    if resource_data.get("jobfs_used_bytes")
+                    else None
+                ),
+                # Efficiency metrics
+                "mem_efficiency": memory_efficiency,
+                "time_efficiency": time_efficiency,
+                "jobfs_efficiency": jobfs_efficiency,
+            }
+
+            # Build UPDATE SQL
+            set_clauses = []
+            values = []
+            for field, value in update_fields.items():
+                if value is not None:
+                    set_clauses.append(f"{field} = ?")
+                    values.append(value)
+
+            if not set_clauses:
+                logging.debug("No valid resource data to update for job %s", job_id)
+                return False
+
+            values.append(job_id)  # For WHERE clause
+
+            with sqlite3.connect(self.db_path) as conn:
+                sql = f"UPDATE job_resources SET {', '.join(set_clauses)} WHERE job_id = ?"
+                result = conn.execute(sql, values)
+
+                if result.rowcount == 0:
+                    logging.debug(
+                        "No existing record found to update for job %s", job_id
+                    )
+                    return False
+
+                conn.commit()
+
+            logging.debug("Updated resource data for job %s", job_id)
+            return True
+
+        except Exception as e:
+            logging.debug("Failed to update resource data for job %s: %s", job_id, e)
+            return False
+
     def _clean_command(self, command: Optional[str]) -> Optional[str]:
         """Clean up command string for better display."""
         if not command:

@@ -713,75 +713,74 @@ def _format_completion_message(job_id, exit_status, status_dir):
     return message
 
 
-def start_background_resource_collection(job_id, final_exit_code_file):
+def collect_job_resources_after_completion(job_id, out_file):
     """
-    Start background resource collection that waits 60 seconds after job completion
-    and then collects detailed resource usage via qstat -f. This runs independently
-    and doesn't block the main monitoring loop.
+    Collect detailed resource usage after job completion by parsing the joblog.
+    Waits for PBS to finalize the joblog with resource information.
     """
 
-    def collect_resources():
-        try:
-            # Wait for job completion signal
-            while not final_exit_code_file.exists():
-                time.sleep(2)  # Check every 2 seconds for completion
+    try:
+        # Derive joblog path from out_file path
+        joblog_path = str(out_file).replace(".out", ".log")
 
+        logging.debug(f"Waiting for PBS to finalize joblog for job {job_id}")
+
+        # Wait 60 seconds for PBS to write final resource information to joblog
+        time.sleep(60)
+
+        # Try to parse the joblog with retry logic
+        max_retries = 3
+        retry_delay = 60  # Wait 60 seconds between retries
+
+        for attempt in range(max_retries):
             logging.debug(
-                f"Job {job_id} completed, starting 60s delay for resource collection"
+                f"Attempting to collect resource usage from joblog for job {job_id} (attempt {attempt + 1}/{max_retries})"
             )
 
-            # Wait 60 seconds for PBS cleanup and detailed stats to be available
-            time.sleep(60)
-
-            logging.debug(f"Collecting detailed resource usage for job {job_id}")
-
-            # Try to collect detailed job statistics
             try:
-                # Import here to avoid circular imports
-                from .resource_parser import parse_qstat_output
-                from .resource_tracker import store_resource_usage
+                from .resource_parser import parse_joblog_resources
+                from .resource_tracker import resource_tracker
 
-                # Get detailed job info via qstat -f
-                result = subprocess.run(
-                    ["qstat", "-f", job_id], capture_output=True, text=True, timeout=30
-                )
+                # Parse resource data from joblog
+                resource_data = parse_joblog_resources(joblog_path)
 
-                if result.returncode == 0:
-                    # Parse and store resource usage
-                    job_info = parse_qstat_output(result.stdout)
-                    if job_info:
-                        store_resource_usage(job_id, job_info)
-                        logging.info(
-                            f"Successfully collected and stored resource usage for job {job_id}"
+                if resource_data:
+                    # Update the existing job record with resource data
+                    success = resource_tracker.update_job_resources(
+                        job_id, resource_data
+                    )
+                    if success:
+                        logging.debug(
+                            f"Successfully updated resource data for job {job_id}"
                         )
+                        return
                     else:
-                        logging.warning(
-                            f"Could not parse qstat output for job {job_id}"
+                        logging.debug(
+                            f"Failed to update resource data for job {job_id}"
                         )
                 else:
-                    logging.warning(
-                        f"qstat -f failed for job {job_id}: {result.stderr}"
+                    logging.debug(
+                        f"Could not parse resource data from joblog: {joblog_path}"
                     )
 
-            except ImportError:
-                logging.debug(
-                    "Resource tracking modules not available, skipping collection"
-                )
-            except subprocess.TimeoutExpired:
-                logging.warning(f"qstat -f timed out for job {job_id}")
             except Exception as e:
-                logging.warning(f"Error collecting resources for job {job_id}: {e}")
+                logging.debug(
+                    f"Error collecting resources for job {job_id} (attempt {attempt + 1}): {e}"
+                )
 
-        except Exception as e:
-            logging.error(
-                f"Background resource collection failed for job {job_id}: {e}"
-            )
+            # If not the last attempt, wait before retrying
+            if attempt < max_retries - 1:
+                logging.debug(
+                    f"Retrying resource collection in {retry_delay} seconds..."
+                )
+                time.sleep(retry_delay)
 
-    # Start background thread for resource collection
-    resource_thread = threading.Thread(target=collect_resources, daemon=True)
-    resource_thread.start()
-    logging.debug(f"Started background resource collection for job {job_id}")
-    return resource_thread
+        logging.debug(
+            f"Failed to collect resource data for job {job_id} after {max_retries} attempts"
+        )
+
+    except Exception as e:
+        logging.debug(f"Resource collection failed for job {job_id}: {e}")
 
 
 def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
@@ -849,15 +848,27 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
     finally:
         spinner.clear()  # Always clear spinner when exiting
 
-    # 6. Stream job output
+    # 6. Show output streaming message
+    if not quiet:
+        print_status("📡 Streaming job output", final=True)
+
+    # 7. Stream job output
     exit_status = stream_job_output_with_status_files(
         job_id, out_file, err_file, final_exit_code_file
     )
 
-    # 7. Completion message
+    # 8. Completion message
     if not quiet:
         completion_msg = _format_completion_message(job_id, exit_status, status_dir)
         print_status(completion_msg, final=True)
+
+    # 9. Collect resources after job completion (final step)
+    if not quiet:
+        print_status("📊 Collecting job resource usage...", final=True)
+
+    # Derive joblog path from out_file path (change .out to .log)
+    joblog_path = str(out_file).replace(".out", ".log")
+    collect_job_resources_after_completion(job_id, joblog_path)
 
     return exit_status
 
