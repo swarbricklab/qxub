@@ -56,8 +56,8 @@ qxub exec --shortcut python -- script.py
 | `--project` | PBS project | `--project a56` |
 | `--out` | Output file path | `--out /scratch/job.out` |
 | `--err` | Error file path | `--err /scratch/job.err` |
-| `--quiet` | Suppress progress messages | `--quiet` |
-| `--terse` | Terse output: emit job ID only | `--terse` |
+| `--quiet` | Silent monitoring (no progress messages or job ID) | `--quiet` |
+| `--terse` | Emit job ID then silent monitoring | `--terse` |
 | `--remote` | Execute on remote HPC system via SSH | `--remote gadi` |
 | `--dry` | Preview without submission | `--dry` |
 | `-v/-vv/-vvv` | Verbosity levels | `-vv` |

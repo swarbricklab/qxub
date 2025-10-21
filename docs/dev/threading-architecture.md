@@ -1,15 +1,45 @@
 # qxub Threading Architecture
 
-qxub uses multi-threaded architecture for real-time job monitoring with clean output streaming.
+qxub uses **single-threaded monitoring** for reliable job tracking with clean output streaming.
 
-## Thread Components
+## Current Architecture (v3+)
 
-1. **Monitor Thread** - Polls PBS for job completion
-2. **STDOUT Tail Thread** - Streams job output to terminal
-3. **STDERR Tail Thread** - Streams job errors to terminal
-4. **Spinner Thread** - Shows progress indicator until output starts
+**Single Thread Monitoring**: Uses `monitor_job_single_thread()` which combines:
+- Job status polling (via status files created by job scripts)
+- Output file streaming (STDOUT/STDERR)
+- Progress indication (spinner during job startup)
+- Resource collection triggering (background thread after completion)
 
-All threads communicate through central `OutputCoordinator` for synchronization.
+## Background Processes
+
+1. **Main Thread** - Handles job submission and single-threaded monitoring
+2. **Resource Collection Thread** - Daemon thread for post-job resource analysis (60+ second delay)
+
+## Key Implementation Details
+
+**Status File Monitoring**: Job scripts create status files that monitoring watches:
+- `job_started_{job_id}` - Written when job begins execution
+- `final_exit_code_{job_id}` - Written when job completes with exit status
+
+**Output Streaming**: Tail-follows log files with position tracking for real-time display
+
+**Clean Shutdown**: Handles Ctrl+C with `qdel` cleanup and proper exit codes
+
+## Execution Modes
+
+qxub supports three execution modes that control UI output during monitoring:
+
+| Mode | Job ID Display | Progress Messages | Monitoring | Resource Collection |
+|------|---------------|------------------|------------|-------------------|
+| **Normal** | ✅ With success message | ✅ Full progress UI | ✅ With output | ✅ Yes |
+| **Terse** | ✅ Job ID only | ❌ Silent | ✅ Silent | ✅ Yes |
+| **Quiet** | ❌ None | ❌ Silent | ✅ Silent | ✅ Yes |
+
+**Normal Mode**: Interactive use with full progress indication and job output streaming.
+
+**Terse Mode**: Pipeline-friendly - emits job ID immediately then does silent monitoring. Perfect for scripts that need the job ID but want monitoring/resource collection.
+
+**Quiet Mode**: Completely silent operation but still performs full monitoring and resource collection. Useful for automated systems that don't need any output.
 
 ## OutputCoordinator
 
@@ -587,23 +617,26 @@ def test_thread_shutdown():
 
 ### Resource Usage
 
-- **4 threads maximum**: Monitor + 2 tails + spinner (spinner is short-lived daemon thread)
-- **Low CPU**: Threads mostly sleep/wait on I/O
-- **Memory**: Minimal - only line-by-line file reading
-- **Network**: Only qstat calls every 30 seconds
+- **Single main thread**: Monitoring, output streaming, and progress indication
+- **One background daemon thread**: Resource collection (only after job completion)
+- **Low CPU**: Mostly sleep/wait on file I/O and status file polling
+- **Memory**: Minimal - only line-by-line file reading with position tracking
+- **No network calls**: Status monitoring via local file system (job scripts create status files)
 
 ### Latency
 
-- **Output streaming**: Near real-time (tailer library)
-- **Job completion**: Up to 30 seconds detection lag
+- **Output streaming**: Near real-time (0.2 second polling interval)
+- **Job status detection**: 0.5 second polling interval for status files
 - **Shutdown response**: < 1 second typically
-- **Spinner updates**: 10Hz (every 0.1 seconds)
+- **Spinner updates**: 10Hz (every 0.1 seconds) during job startup
 
 ### Scalability
 
 The current design scales well because:
-- Thread count is fixed at 4 maximum (3 persistent + 1 short-lived)
+- Thread count is minimal: 1 main + 1 background daemon (only post-completion)
 - No thread pools or dynamic thread creation
+- File-based status monitoring eliminates qstat polling overhead
+- Clean shutdown prevents resource leaks
 - Minimal shared state between threads
 - Clean shutdown prevents resource leaks
 

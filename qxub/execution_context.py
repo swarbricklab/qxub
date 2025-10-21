@@ -187,14 +187,23 @@ def execute_unified(
     # Submit job
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
-    # Handle terse mode - emit only job ID and return immediately
+    # Log job submission for status and resource tracking (do this before terse return)
+    try:
+        cmd_str = " ".join(command)
+        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str)
+    except Exception as e:
+        logging.debug("Failed to log job submission: %s", e)
+
+    # Handle terse mode - emit job ID but continue monitoring like quiet mode
     if ctx_obj.get("terse", False):
         click.echo(job_id)
-        logging.info("Terse mode: emitted job ID %s and exiting", job_id)
-        return
-
-    # Display job ID to user (unless in quiet mode)
-    if not ctx_obj["quiet"]:
+        logging.info(
+            "Terse mode: emitted job ID %s and continuing with silent monitoring",
+            job_id,
+        )
+        # Continue to monitoring (don't return here)
+    elif not ctx_obj["quiet"]:
+        # Display job ID to user (only in normal mode, not quiet or terse)
         from .scheduler import print_status
 
         success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
@@ -206,17 +215,7 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 
-    # Log job submission for status and resource tracking
-    try:
-        cmd_str = " ".join(command)
-        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str)
-    except Exception as e:
-        logging.debug("Failed to log job submission: %s", e)
-
-    # Exit if in quiet mode (no monitoring)
-    if ctx_obj["quiet"]:
-        logging.info("Exiting in quiet mode")
-        return
+    # All modes now continue to monitoring (removed the quiet mode early return)
 
     # Start concurrent monitoring of job and log files
     # Stream log files to STDOUT/STDERR as appropriate
@@ -235,8 +234,10 @@ def execute_unified(
     from .scheduler import monitor_job_single_thread
 
     try:
+        # Terse mode should run monitoring silently like quiet mode
+        monitoring_quiet = ctx_obj["quiet"] or ctx_obj.get("terse", False)
         exit_status = monitor_job_single_thread(
-            job_id, out, err, quiet=ctx_obj["quiet"]
+            job_id, out, err, quiet=monitoring_quiet
         )
         # Exit with the job's exit status
         sys.exit(exit_status)
