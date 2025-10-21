@@ -10,6 +10,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import threading
 import time
 
 import click
@@ -783,6 +784,102 @@ def collect_job_resources_after_completion(job_id, out_file):
         logging.debug(f"Resource collection failed for job {job_id}: {e}")
 
 
+def start_background_resource_collection(job_id, joblog_path):
+    """
+    Start resource collection in background thread so qxub can return control immediately.
+    Sets job status as 'pending' initially, then updates with actual resource data.
+    """
+
+    def collect_resources_background():
+        try:
+            from .resource_tracker import resource_tracker
+
+            # First, mark the job as having pending resource collection
+            logging.debug(f"Marking resource collection as pending for job {job_id}")
+            pending_data = {
+                "memory_efficiency": "pending",
+                "walltime_efficiency": "pending",
+                "cpu_efficiency": "pending",
+                "status": "pending_resources",
+            }
+            resource_tracker.update_job_resources(job_id, pending_data)
+
+            # Now do the actual resource collection with proper delays
+            logging.debug(f"Starting background resource collection for job {job_id}")
+
+            # Wait 60 seconds for PBS to write final resource information to joblog
+            time.sleep(60)
+
+            # Try to parse the joblog with retry logic
+            max_retries = 3
+            retry_delay = 60  # Wait 60 seconds between retries
+
+            for attempt in range(max_retries):
+                logging.debug(
+                    f"Background attempt to collect resource usage for job {job_id} (attempt {attempt + 1}/{max_retries})"
+                )
+
+                try:
+                    from .resource_parser import parse_joblog_resources
+
+                    # Parse resource data from joblog
+                    resource_data = parse_joblog_resources(joblog_path)
+
+                    if resource_data:
+                        # Update with actual resource data
+                        success = resource_tracker.update_job_resources(
+                            job_id, resource_data
+                        )
+                        if success:
+                            logging.debug(
+                                f"Background resource collection completed for job {job_id}"
+                            )
+                            return
+                        else:
+                            logging.debug(
+                                f"Failed to update resource data for job {job_id}"
+                            )
+                    else:
+                        logging.debug(
+                            f"Could not parse resource data from joblog: {joblog_path}"
+                        )
+
+                except Exception as e:
+                    logging.debug(
+                        f"Error in background resource collection for job {job_id} (attempt {attempt + 1}): {e}"
+                    )
+
+                # If not the last attempt, wait before retrying
+                if attempt < max_retries - 1:
+                    logging.debug(
+                        f"Retrying background resource collection in {retry_delay} seconds..."
+                    )
+                    time.sleep(retry_delay)
+
+            # If we get here, all attempts failed - mark as failed
+            failed_data = {
+                "memory_efficiency": "failed",
+                "walltime_efficiency": "failed",
+                "cpu_efficiency": "failed",
+                "status": "resource_collection_failed",
+            }
+            resource_tracker.update_job_resources(job_id, failed_data)
+            logging.debug(
+                f"Background resource collection failed for job {job_id} after {max_retries} attempts"
+            )
+
+        except Exception as e:
+            logging.debug(
+                f"Background resource collection exception for job {job_id}: {e}"
+            )
+
+    # Start the background thread
+    thread = threading.Thread(target=collect_resources_background, daemon=True)
+    thread.start()
+    logging.debug(f"Started background resource collection thread for job {job_id}")
+    return thread
+
+
 def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
     """
     Single-thread job monitoring with proper spinner integration using status files.
@@ -862,13 +959,16 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
         completion_msg = _format_completion_message(job_id, exit_status, status_dir)
         print_status(completion_msg, final=True)
 
-    # 9. Collect resources after job completion (final step)
+    # 9. Start background resource collection and return control immediately
     if not quiet:
-        print_status("📊 Collecting job resource usage...", final=True)
+        print_status(
+            "🎉 Job completed! Resource collection starting in background...",
+            final=True,
+        )
 
     # Derive joblog path from out_file path (change .out to .log)
     joblog_path = str(out_file).replace(".out", ".log")
-    collect_job_resources_after_completion(job_id, joblog_path)
+    start_background_resource_collection(job_id, joblog_path)
 
     return exit_status
 
