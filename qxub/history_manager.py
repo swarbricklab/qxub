@@ -54,7 +54,11 @@ class HistoryManager:
         if len(sys.argv) > 1:
             args = sys.argv[1:]  # Skip script name
 
-            # For unified CLI (qxub 2.0), determine executor type from execution context options
+            # Handle new v3 CLI structure: qxub exec --env test "command"
+            if len(args) > 0 and args[0] == "exec":
+                args = args[1:]  # Remove 'exec' subcommand
+
+            # For unified CLI (qxub 2.0/3.0), determine executor type from execution context options
             executor_type = None
             executor_params = {}
 
@@ -68,8 +72,8 @@ class HistoryManager:
                     executor_type = "conda"
                     executor_params["env"] = args[i + 1]
                     i += 2
-                elif arg == "--mod" and i + 1 < len(args):
-                    # Module specified
+                elif arg in ["--mod", "--mods"] and i + 1 < len(args):
+                    # Module specified (handle both --mod and --mods)
                     executor_type = "module"
                     executor_params["name"] = args[i + 1]
                     i += 2
