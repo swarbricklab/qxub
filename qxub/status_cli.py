@@ -4,6 +4,8 @@ Status CLI for qxub - view job status and monitoring.
 Provides the `qxub status` command for viewing job status without qstat polling.
 """
 
+import json
+import sys
 from datetime import datetime, timedelta
 
 import click
@@ -170,6 +172,92 @@ def cleanup(days, dry_run):
         console.print(f"[green]✅ Cleaned up {deleted_count} old job records[/green]")
     else:
         console.print("[blue]No old job records to clean up[/blue]")
+
+
+@status_cli.command()
+@click.argument("job_id")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["snakemake", "json", "exitcode"], case_sensitive=False),
+    default="snakemake",
+    help="Output format for workflow engine integration",
+)
+def check(job_id, output_format):
+    """Check job status for workflow engine integration.
+
+    Returns machine-readable status information suitable for workflow engines
+    like Snakemake, Nextflow, or CWL.
+
+    Exit codes:
+    - 0: Normal operation (status successfully determined)
+    - 1: Error (invalid job ID, system error, etc.)
+
+    For --format=snakemake (default):
+    - Outputs: "success", "running", or "failed"
+
+    For --format=json:
+    - Outputs: {"status": "...", "job_id": "...", "timestamp": "..."}
+
+    For --format=exitcode:
+    - Outputs: (empty), exit code 0=running, 1=failed, 2=completed
+    """
+
+    # Add .gadi-pbs suffix if not present
+    if not job_id.endswith(".gadi-pbs"):
+        job_id = f"{job_id}.gadi-pbs"
+
+    # Get job status from database
+    job_info = resource_tracker.get_job_status(job_id)
+
+    if not job_info:
+        if output_format == "json":
+            print(json.dumps({"error": "Job not found", "job_id": job_id}))
+        else:
+            sys.stderr.write(f"qxub: Job ID {job_id} not found in database\n")
+        sys.exit(1)
+
+    status = job_info.get("status", "unknown")
+
+    # Map internal status to workflow engine formats
+    if output_format == "snakemake":
+        if status == "completed":
+            # If exit code is available, use it; otherwise assume success for completed jobs
+            exit_code = job_info.get("exit_code")
+            if exit_code is None or exit_code == 0:
+                print("success")
+            else:
+                print("failed")
+        elif status in ["submitted", "running"]:
+            print("running")
+        else:  # failed, unknown, etc.
+            print("failed")
+
+    elif output_format == "json":
+        result = {
+            "status": status,
+            "job_id": job_id,
+            "timestamp": datetime.now().isoformat(),
+            "exit_code": job_info.get("exit_code"),
+            "submitted_at": job_info.get("submitted_at"),
+            "started_at": job_info.get("started_at"),
+            "completed_at": job_info.get("completed_at"),
+        }
+        print(json.dumps(result))
+
+    elif output_format == "exitcode":
+        # Exit code based format (Nextflow style)
+        if status == "completed":
+            # If exit code is available, use it; otherwise assume success for completed jobs
+            exit_code = job_info.get("exit_code")
+            if exit_code is None or exit_code == 0:
+                sys.exit(2)  # completed successfully
+            else:
+                sys.exit(1)  # failed
+        elif status in ["submitted", "running"]:
+            sys.exit(0)  # running
+        else:  # failed, unknown, etc.
+            sys.exit(1)  # failed
 
 
 def _format_status(status):
