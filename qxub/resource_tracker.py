@@ -498,7 +498,7 @@ class ResourceTracker:
             return False
 
     def update_job_status(self, job_id: str, status: str) -> bool:
-        """Update job status (submitted -> running -> completed/failed)."""
+        """Update job status (submitted -> running -> completed/failed/cancelled)."""
         try:
             now = datetime.now().isoformat()
 

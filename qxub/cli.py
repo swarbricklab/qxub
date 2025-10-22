@@ -7,6 +7,7 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 import click
 
 from .alias_cli import alias_cli
+from .cancel_cli import cancel_cli
 from .config_cli import config_cli
 from .exec_cli import exec_cli
 from .history_cli import history
@@ -58,6 +59,7 @@ def qxub(ctx, version):
 qxub.add_command(exec_cli)
 qxub.add_command(config_cli)
 qxub.add_command(alias_cli)  # Deprecated - use qxub exec --alias instead
+qxub.add_command(cancel_cli)
 qxub.add_command(history)
 qxub.add_command(monitor_cli)
 qxub.add_command(resources)
