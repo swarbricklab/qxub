@@ -55,29 +55,48 @@ class ResourceMapper:
         elif isinstance(runtime, str):
             runtime_clean = runtime.replace(" ", "").lower()
 
-            # Handle formats like "2h", "30m", "120s"
-            if runtime_clean.endswith("h"):
-                hours = int(runtime_clean[:-1])
-                self.pbs_resources.append(f"walltime={hours}:00:00")
-            elif runtime_clean.endswith("m"):
-                minutes = int(runtime_clean[:-1])
-                hours = minutes // 60
-                mins = minutes % 60
-                self.pbs_resources.append(f"walltime={hours}:{mins:02d}:00")
-            elif runtime_clean.endswith("s"):
-                seconds = int(runtime_clean[:-1])
-                hours = seconds // 3600
-                mins = (seconds % 3600) // 60
-                secs = seconds % 60
-                self.pbs_resources.append(f"walltime={hours}:{mins:02d}:{secs:02d}")
             # Handle HH:MM:SS format
-            elif re.match(r"^\d{1,2}:\d{2}:\d{2}$", runtime_clean):
+            if re.match(r"^\d{1,2}:\d{2}:\d{2}$", runtime_clean):
                 self.pbs_resources.append(f"walltime={runtime_clean}")
             # Handle HH:MM format
             elif re.match(r"^\d{1,2}:\d{2}$", runtime_clean):
                 self.pbs_resources.append(f"walltime={runtime_clean}:00")
             else:
-                raise ValueError(f"Invalid runtime format: {runtime}")
+                # Parse complex formats like "1h30m", "2h", "90m", "3600s"
+                total_seconds = 0
+
+                # Extract hours
+                hours_match = re.search(r"(\d+)h", runtime_clean)
+                if hours_match:
+                    total_seconds += int(hours_match.group(1)) * 3600
+
+                # Extract minutes
+                minutes_match = re.search(r"(\d+)m", runtime_clean)
+                if minutes_match:
+                    total_seconds += int(minutes_match.group(1)) * 60
+
+                # Extract seconds
+                seconds_match = re.search(r"(\d+)s", runtime_clean)
+                if seconds_match:
+                    total_seconds += int(seconds_match.group(1))
+
+                # Handle simple numeric strings (assume minutes if no unit)
+                if not any([hours_match, minutes_match, seconds_match]):
+                    if runtime_clean.isdigit():
+                        total_seconds = int(runtime_clean) * 60  # Assume minutes
+                    else:
+                        raise ValueError(f"Invalid runtime format: {runtime}")
+
+                if total_seconds == 0:
+                    raise ValueError(f"Invalid runtime format: {runtime}")
+
+                # Convert to HH:MM:SS
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                seconds = total_seconds % 60
+                self.pbs_resources.append(
+                    f"walltime={hours}:{minutes:02d}:{seconds:02d}"
+                )
 
     def add_cpus(self, cpus: int) -> None:
         """Add CPU/cores specification."""
