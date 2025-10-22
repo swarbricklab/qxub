@@ -39,6 +39,9 @@ qxub exec --default --terse -- echo "Hello World"
 JOB_ID=$(qxub exec --terse -- echo "Test job")
 echo "Submitted job: $JOB_ID"
 
+# Even faster with the 'qx' shorthand
+JOB_ID=$(qx --terse -- echo "Test job")
+
 # Capture multiple job IDs
 JOB_IDS=()
 for i in {1..5}; do

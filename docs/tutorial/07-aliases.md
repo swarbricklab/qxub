@@ -13,10 +13,10 @@ This section covers both systems, when to use each, and how they work together.
 - **Automatic detection**: `qxub exec -- python script.py` automatically uses 'python' shortcut
 - **Command-prefix based**: Matches the first word of your command
 - **JSON storage**: Stored in `~/.config/qxub/shortcuts.json`
-- **Modern interface**: Managed with `qxub shortcut` commands
+- **Modern interface**: Managed with `qxub config shortcut` commands
 
 ### Aliases (Legacy System)
-- **Explicit invocation**: `qxub alias quick -- python script.py`
+- **Explicit invocation**: `qxub config alias quick -- python script.py`
 - **Configuration-based**: Defined in YAML config files
 - **Hierarchical**: Support for complex nested configurations
 - **Legacy interface**: Managed with `qxub config alias` commands
@@ -26,7 +26,7 @@ This section covers both systems, when to use each, and how they work together.
 ### View Available Shortcuts
 
 ```bash
-qxub shortcut list
+qxub config shortcut list
 ```
 
 **Expected output:**
@@ -60,14 +60,18 @@ qxub exec --dry -- python script.py
 
 ```bash
 # Create a shortcut for PyTorch development
-qxub shortcut set "pytorch" --env pytorch --queue gpuvolta --resource ngpus=1 --description "PyTorch GPU training"
+qxub config shortcut set "pytorch" --env pytorch --queue gpuvolta --resources ngpus=1 --description "PyTorch GPU training"
 
 # Create a shortcut for data analysis
-qxub shortcut set "pandas" --env analytics --resource mem=16GB --description "Pandas data analysis"
+qxub config shortcut set "pandas" --env analytics --resources mem=16GB --description "Pandas data analysis"
+
+# For faster shortcut creation, use the shorthand:
+qxet "numpy" --env scientific --description "NumPy scientific computing"
 
 # Use them automatically:
 qxub exec -- pytorch train.py
 qxub exec -- pandas analyze.py
+qx -- numpy script.py     # Also works with the 'qx' shorthand
 ```
 
 ## Using Aliases (Legacy System)
@@ -75,7 +79,7 @@ qxub exec -- pandas analyze.py
 ### View Available Aliases
 
 ```bash
-qxub alias list
+qxub config alias list
 ```
 
 **Expected output:**
@@ -89,14 +93,14 @@ Available aliases:
 
 ### Using Aliases Explicitly
 
-Aliases require explicit invocation with the `qxub alias` command:
+Aliases require explicit invocation with the `qxub config alias` command:
 
 ```bash
 # Use aliases with explicit commands:
-qxub alias quick -- python script.py
-qxub alias bigmem -- python memory_intensive.py
-qxub alias gpu -- python train_model.py
-qxub alias parallel -- mpirun -n 8 parallel_app
+qxub config alias quick -- python script.py
+qxub config alias bigmem -- python memory_intensive.py
+qxub config alias gpu -- python train_model.py
+qxub config alias parallel -- mpirun -n 8 parallel_app
 ```
 
 ### Combining Aliases with Additional Options
@@ -105,9 +109,9 @@ You can override alias settings:
 
 ```bash
 # Use alias but override specific settings
-qxub alias quick --queue express -- python test.py
-qxub alias bigmem --resource mem=64GB -- python bigger_job.py
-qxub alias gpu --job-name my-training -- python train.py
+qxub config alias quick --queue express -- python test.py
+qxub config alias bigmem --resources mem=64GB -- python bigger_job.py
+qxub config alias gpu --job-name my-training -- python train.py
 ```
 
 **Expected output:**
@@ -139,10 +143,10 @@ qxub config set aliases.explore.resources '["mem=4GB", "ncpus=1", "walltime=30:0
 
 ```bash
 # Use your machine learning alias
-qxub alias ml -- python train_model.py
+qxub config alias ml -- python train_model.py
 
 # Use your exploration alias
-qxub alias explore -- python explore_data.py
+qxub config alias explore -- python explore_data.py
 ```
 
 ## When to Use Each System
@@ -165,8 +169,8 @@ You can use both systems together for maximum flexibility:
 
 ```bash
 # Create shortcuts for automatic detection
-qxub shortcut set "python" --env base
-qxub shortcut set "jupyter" --env datascience --resource mem=8GB
+qxub config shortcut set "python" --env base
+qxub config shortcut set "jupyter" --env datascience --resources mem=8GB
 
 # Create aliases for specific workflows
 qxub config set aliases.gpu-train.env "pytorch"
@@ -178,7 +182,7 @@ qxub exec -- python analyze.py           # Auto-detects python shortcut
 qxub exec -- jupyter notebook           # Auto-detects jupyter shortcut
 
 # Use aliases explicitly for specific workflows:
-qxub alias gpu-train -- python train_model.py
+qxub config alias gpu-train -- python train_model.py
 ```
 
 ## Best Practices
@@ -452,7 +456,7 @@ Include `.qxub/config.yaml` in your project repository so team members can use t
 
 1. **Two systems available**: Shortcuts (modern, automatic) and Aliases (legacy, explicit)
 2. **Shortcuts for new workflows**: Use `qxub exec --` with automatic command detection
-3. **Aliases for complex configurations**: Use `qxub alias` for explicit workflow management
+3. **Aliases for complex configurations**: Use `qxub config alias` for explicit workflow management
 4. **Both can coexist**: Use shortcuts for daily commands, aliases for special workflows
 5. **Start simple**: Begin with built-in shortcuts and aliases before creating custom ones
 
@@ -462,10 +466,10 @@ If you're transitioning from aliases to shortcuts:
 
 ```bash
 # Old alias approach:
-qxub alias python -- python script.py
+qxub config alias python -- python script.py
 
 # New shortcut approach:
-qxub shortcut set "python" --env base
+qxub config shortcut set "python" --env base
 qxub exec -- python script.py  # Automatic detection
 ```
 
@@ -480,9 +484,9 @@ Both shortcuts and aliases are essential for efficient qxub usage. Shortcuts pro
 ---
 
 **💡 Pro Tips:**
-- **Shortcuts**: Use `qxub shortcut list` to see available shortcuts
-- **Aliases**: Use `qxub alias list` to see available aliases
+- **Shortcuts**: Use `qxub config shortcut list` to see available shortcuts
+- **Aliases**: Use `qxub config alias list` to see available aliases
 - **Testing**: Use `--dry` with both systems to preview behavior
 - **Overrides**: Both systems support command-line overrides
-- **Documentation**: Use `qxub shortcut show` and `qxub config alias show` for details
+- **Documentation**: Use `qxub config shortcut show` and `qxub config alias show` for details
 - **Team sharing**: Shortcuts use JSON files, aliases use YAML config files

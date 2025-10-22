@@ -259,7 +259,7 @@ qxub exec --dry --resources mem=16GB,walltime=2:00:00 -- python3 my_script.py
 
 ```bash
 # Let qxub optimize for you
-qxub exec --queue auto --resource mem=8GB,ncpus=4 -- my_analysis.py
+qxub exec --queue auto --resources mem=8GB,ncpus=4 -- my_analysis.py
 ```
 
 ### 3. Match Resources to Workload
@@ -272,7 +272,7 @@ qxub exec --queue auto --resource mem=8GB,ncpus=4 -- my_analysis.py
 
 ```bash
 # Better to overestimate slightly than underestimate
-qxub exec --resource walltime=1:30:00 -- long_running_task.py  # If you think it takes 1 hour
+qxub exec --resources walltime=1:30:00 -- long_running_task.py  # If you think it takes 1 hour
 ```
 
 ## Monitoring Resource Usage

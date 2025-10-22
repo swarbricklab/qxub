@@ -37,14 +37,16 @@ The shortcuts system is a new feature introduced in qxub v2.4.0 to complement th
   - CLI option precedence (CLI > shortcut > defaults)
   - Full integration with all execution contexts (conda, modules, singularity)
 
-#### Configuration Commands (`qxub/shortcuts_cli.py`)
-- **Purpose**: Management interface for shortcuts via `qxub shortcut` subcommand
+#### Configuration Commands (`qxub/config_cli.py`)
+- **Purpose**: Management interface for shortcuts via `qxub config shortcut` subcommand
 - **Commands**:
-  - `qxub shortcut list` - List all shortcuts with rich table display
-  - `qxub shortcut show <name>` - Show shortcut details with context descriptions
-  - `qxub shortcut set <name> [OPTIONS]` - Create/update shortcuts with execution context
-  - `qxub shortcut delete <name>` - Remove shortcuts
-  - `qxub shortcut rename <old> <new>` - Rename shortcuts
+  - `qxub config shortcut list` - List all shortcuts with rich table display
+  - `qxub config shortcut show <name>` - Show shortcut details with context descriptions
+  - `qxub config shortcut set <name> [OPTIONS]` - Create/update shortcuts with execution context
+  - `qxub config shortcut delete <name>` - Remove shortcuts
+  - `qxub config shortcut rename <old> <new>` - Rename shortcuts
+- **System Support**: `--system` and `--user` flags for system-wide shortcuts (v3.0+)
+- **Additional Features**: `--show-origin` flag to display source information
 
 ### Storage Format
 
@@ -134,7 +136,7 @@ The key innovation is using command strings (or prefixes) as dictionary keys for
 
 ```bash
 # Create shortcuts using command names as keys
-qxub shortcut set "python" --env data-science --resources mem=8GB
+qxub config shortcut set "python" --env data-science --resources mem=8GB
 
 # Run using automatic shortcut detection
 qxub exec -- python analyze.py
@@ -143,7 +145,7 @@ qxub exec -- python analyze.py
 qxub exec --shortcut python -- analyze.py
 
 # Prefix matching for convenience
-qxub shortcut set "pytest" --env testing
+qxub config shortcut set "pytest" --env testing
 
 # This matches the "pytest" shortcut
 qxub exec -- pytest tests/unit/

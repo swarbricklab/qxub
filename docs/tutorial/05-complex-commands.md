@@ -13,8 +13,8 @@ For complex logic, create a script file and run it:
 ```bash
 # ✅ Simple and maintainable
 qxub exec --env myenv -- python analysis.py
-qxub exec --default -- ./process_data.sh
-qxub exec --mods gcc/11.1.0 -- ./compile_and_run.sh
+qx --default -- ./process_data.sh      # 'qx' is shorthand for 'qxub exec'
+qx --mods gcc/11.1.0 -- ./compile_and_run.sh
 ```
 
 ### 2. Test Complex Commands First

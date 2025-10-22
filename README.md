@@ -17,6 +17,11 @@ qxub exec --mod python3 -- python script.py     # Environment module
 qxub exec --sif container.sif -- python script.py  # Singularity container
 qxub exec -- python script.py                    # Direct submission
 
+# Built-in command aliases for faster typing
+qx --env myenv -- python script.py              # Short for 'qxub exec'
+qxtat 12345.gadi-pbs                             # Short for 'qxub status'
+qxet "my-shortcut" --env base                    # Short for 'qxub config shortcut set'
+
 # Add PBS options before --
 qxub exec --resources mem=16GB --queue normal --env myenv -- python script.py
 
@@ -67,9 +72,15 @@ qxub exec --shortcut python -- script.py
 # List available shortcuts
 qxub config shortcut list
 
-# Create a new shortcut
+# Show shortcut source information (system vs user)
+qxub config shortcut list --show-origin
+
+# Create user shortcuts (default)
 qxub config shortcut set "python" --env base --description "Python with base conda environment"
 qxub config shortcut set "gcc" --mod gcc --description "GCC compiler with modules"
+
+# Create system-wide shortcuts (admin/team use)
+qxub config shortcut set "dvc data status" --system --env dvc3 --resources mem=64GB,ncpus=16
 
 # Use shortcuts (automatic detection)
 qxub exec -- python script.py      # Detects 'python' shortcut
@@ -78,11 +89,22 @@ qxub exec -- gcc --version         # Detects 'gcc' shortcut
 # Explicit shortcut usage
 qxub exec --shortcut python -- script.py
 
-# Show shortcut details
+# Show shortcut details with source info
 qxub config shortcut show python
 
-# Delete a shortcut
-qxub config shortcut delete python
+# Delete shortcuts
+qxub config shortcut delete python              # Delete user shortcut
+qxub config shortcut delete "system-wide" --system --yes  # Delete system shortcut
+
+# Rename shortcuts
+qxub config shortcut rename "old-name" "new-name"
+qxub config shortcut rename "old-name" "new-name" --system  # Rename system shortcut
+
+# Built-in command aliases for faster access
+qx --env myenv -- python script.py    # Equivalent to 'qxub exec'
+qxtat 12345.gadi-pbs                   # Equivalent to 'qxub status'
+qxet "ml-pipeline" --env pytorch       # Equivalent to 'qxub config shortcut set'
+```
 ```
 
 ## Parallel Job Execution & Monitoring
@@ -125,21 +147,31 @@ qxub config files
 qxub config set defaults.project "a56"
 qxub config set defaults.queue "normal"
 
-# Create shortcuts for common workflows
+# Create user shortcuts for personal workflows
 qxub config shortcut set gpu --env pytorch --description "GPU training with PyTorch"
 qxub exec -- gpu train.py    # Use the shortcut
 
-# View configuration
+# Create system-wide shortcuts for team use (requires admin permissions)
+qxub config shortcut set "dvc pipeline" --system --env dvc3 --resources mem=32GB --description "DVC data pipeline"
+
+# View configuration and shortcut files
 qxub config files
+qxub config shortcut files    # Shows both system and user shortcut file locations
 qxub config get defaults
 ```
 
 ## Help
 ```bash
-qxub --help                   # General help
-qxub exec --help             # Execution command help
-qxub config --help           # Configuration help
-qxub history --help          # History management help
-qxub resources --help        # Resource tracking help
-qxub monitor --help          # Monitor multiple jobs
+qxub --help                       # General help
+qxub exec --help                 # Execution command help
+qxub config --help               # Configuration help
+qxub config shortcut --help      # Shortcut management help
+qxub history --help              # History management help
+qxub resources --help            # Resource tracking help
+qxub monitor --help              # Monitor multiple jobs
+
+# Built-in alias help
+qx --help                        # qxub exec help
+qxtat --help                     # qxub status help
+qxet --help                      # qxub config shortcut set help
 ```

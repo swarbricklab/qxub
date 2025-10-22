@@ -131,6 +131,43 @@ qxub alias gpu -- python train.py
 qxub config alias list
 ```
 
+## Shortcuts
+
+Create command-specific execution profiles with automatic detection:
+
+```bash
+# Create user shortcuts (default)
+qxub config shortcut set "python" --env base --description "Python with base conda environment"
+qxub config shortcut set "dvc" --env dvc3 --resources mem=16GB,ncpus=8
+
+# Create system-wide shortcuts (requires admin permissions)
+qxub config shortcut set "dvc data status" --system --env dvc3 --resources mem=64GB,ncpus=16
+
+# List shortcuts with source information
+qxub config shortcut list --show-origin
+
+# Use shortcuts (automatic detection)
+qxub exec -- python script.py      # Auto-detects 'python' shortcut
+qxub exec -- dvc data status       # Auto-detects 'dvc data status' shortcut
+
+# Show shortcut details
+qxub config shortcut show "python"
+
+# Delete shortcuts
+qxub config shortcut delete "python"                    # Delete user shortcut
+qxub config shortcut delete "system-shortcut" --system  # Delete system shortcut
+
+# Built-in command aliases
+qx --env myenv -- python script.py     # Short for 'qxub exec'
+qxet "ml-pipeline" --env pytorch        # Short for 'qxub config shortcut set'
+```
+
+### Shortcut Files
+- **System**: `/etc/xdg/qxub/shortcuts.json` - System-wide shortcuts (admin)
+- **User**: `~/.config/qxub/shortcuts.json` - Personal shortcuts
+
+**Priority**: User shortcuts override system shortcuts for the same command prefix.
+
 ## Template Variables
 
 Use variables in paths and names:

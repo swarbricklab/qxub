@@ -63,7 +63,7 @@ qxub exec -- python --version        # Uses 'python' shortcut (conda: base)
 qxub exec -- echo "Hello world"      # Uses 'echo' shortcut (default execution)
 
 # List available shortcuts
-qxub shortcut list
+qxub config shortcut list
 
 # See what shortcut would be used
 qxub exec --dry -- python script.py
@@ -109,6 +109,23 @@ Result: 42
 
 🎉 Job completed successfully (exit code: 0)
 ```
+
+## Shorthand Commands for Speed
+
+For frequent use, qxub provides convenient shorthand commands:
+
+```bash
+# Instead of 'qxub exec', use 'qx' for speed
+qx -- python -c "print('Same functionality, shorter typing!')"
+
+# Also works with all the same options
+qx --resources mem=8GB -- python big_script.py
+```
+
+The shorthand commands available are:
+- **`qx`** - Short for `qxub exec` (fastest way to run jobs)
+- **`qxtat`** - Short for `qxub status` (check job status quickly)
+- **`qxet`** - Short for `qxub config shortcut set` (create shortcuts quickly)
 
 ## Understanding the Default Configuration
 
@@ -206,14 +223,42 @@ qxub exec -- sleep 30
 
 qxub automatically cleans up interrupted jobs - no orphaned processes!
 
+## Checking Job Status
+
+For longer-running jobs, you can check their status from another terminal:
+
+```bash
+# Check status of a specific job
+qxub status 12345678.gadi-pbs
+
+# Or use the shorthand
+qxtat 12345678.gadi-pbs
+
+# List all your recent jobs
+qxub status
+```
+
+**Expected output:**
+```
+📊 Job Status: 12345678.gadi-pbs
+├── Status: Running
+├── Queue: normal
+├── Resources: mem=4GB, ncpus=1, walltime=2:00:00
+├── Started: 2024-10-17 14:35:52
+├── Elapsed: 00:02:15
+└── Working Directory: /g/data/a56/jr9959/project
+```
+
 ## Key Takeaways
 
-1. **Simple syntax**: `qxub exec [options] -- your_command` - that's it!
+1. **Simple syntax**: `qxub exec [options] -- your_command` or just `qx [options] -- your_command`
 2. **Real-time feedback**: See output as it happens, not after
-3. **Automatic cleanup**: Sensible defaults and automatic resource management
-4. **Error handling**: Clear reporting of both success and failure
-5. **Interruption safety**: Ctrl+C cleanly cancels jobs
-6. **Smart shortcuts**: Commands automatically use predefined execution contexts
+3. **Job monitoring**: Use `qxub status` or `qxtat` to check running jobs
+4. **Automatic cleanup**: Sensible defaults and automatic resource management
+5. **Error handling**: Clear reporting of both success and failure
+6. **Interruption safety**: Ctrl+C cleanly cancels jobs
+7. **Smart shortcuts**: Commands automatically use predefined execution contexts
+8. **Speed shortcuts**: Use `qx`, `qxtat`, and `qxet` for faster typing
 
 ## Next Steps
 
@@ -227,8 +272,10 @@ The real-time output feature alone makes qxub a game-changer for interactive HPC
 ---
 
 **💡 Pro Tips:**
+- Use `qx` instead of `qxub exec` for faster typing
+- Use `qxtat` to quickly check job status
 - Use `qxub --help` and `qxub exec --help` to see all available options
-- Use `qxub shortcut list` to see available shortcuts
+- Use `qxub config shortcut list` to see available shortcuts
 - The `--` separator is crucial - everything after it is your command
 - Output files are always created even when you see real-time output
 - Job names include timestamps to avoid conflicts

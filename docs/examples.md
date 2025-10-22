@@ -3,36 +3,7 @@
 ## Project Setup
 
 ```bash
-# Initialize project confqxub exec --env myenv -- python script.py
-```
-
-## Shortcuts System
-
-```bash
-# List available shortcuts
-qxub shortcut list
-
-# Create shortcuts for common workflows
-qxub shortcut set "python" --env base --description "Python with base conda environment"
-qxub shortcut set "pytorch" --env pytorch --queue gpuvolta --resource ngpus=1 --description "PyTorch GPU training"
-qxub shortcut set "gcc" --mod gcc --description "GCC compiler with modules"
-
-# Use shortcuts (automatic detection by command prefix)
-qxub exec -- python script.py               # Uses 'python' shortcut
-qxub exec -- pytorch train.py               # Uses 'pytorch' shortcut
-qxub exec -- gcc -o program source.c        # Uses 'gcc' shortcut
-
-# Explicit shortcut usage
-qxub exec --shortcut python -- script.py
-
-# Show shortcut details
-qxub shortcut show python
-
-# Override shortcut settings
-qxub exec --shortcut python --job-name custom-job -- special_script.py
-```
-
-## Complex Commands with Variablesation
+# Initialize project configuration
 qxub config init-project
 
 # Set team defaults (tracked in git)
@@ -46,9 +17,51 @@ qxub config set --local qxub.defaults.queue "express"
 qxub exec --env pytorch -- python train.py
 ```
 
-## Basic Usage
+## Shortcuts System
 
 ```bash
+# List available shortcuts
+qxub config shortcut list
+
+# Show shortcuts with source information (system vs user)
+qxub config shortcut list --show-origin
+
+# Create user shortcuts for personal workflows
+qxub config shortcut set "python" --env base --description "Python with base conda environment"
+qxub config shortcut set "pytorch" --env pytorch --queue gpuvolta --resources ngpus=1 --description "PyTorch GPU training"
+qxub config shortcut set "gcc" --mod gcc --description "GCC compiler with modules"
+
+# Create system-wide shortcuts for team use (requires admin permissions)
+qxub config shortcut set "dvc data status" --system --env dvc3 --resources mem=64GB,ncpus=16 --description "DVC data pipeline status check"
+
+# Use shortcuts (automatic detection by command prefix)
+qxub exec -- python script.py               # Uses 'python' shortcut
+qxub exec -- pytorch train.py               # Uses 'pytorch' shortcut
+qxub exec -- gcc -o program source.c        # Uses 'gcc' shortcut
+
+# Explicit shortcut usage
+qxub exec --shortcut python -- script.py
+
+# Show shortcut details with source information
+qxub config shortcut show python
+
+# Delete shortcuts
+qxub config shortcut delete "old-shortcut"
+qxub config shortcut delete "system-shortcut" --system --yes   # Delete system shortcut without prompt
+
+# Rename shortcuts
+qxub config shortcut rename "old-name" "new-name"
+qxub config shortcut rename "old-name" "new-name" --system     # Rename system shortcut
+
+# Built-in command aliases for faster workflow
+qx --env pytorch -- train.py                # Short for 'qxub exec'
+qxet "ml-training" --env pytorch --resources ngpus=1  # Short for 'qxub config shortcut set'
+
+# Override shortcut settings
+qxub exec --shortcut python --name custom-job -- special_script.py
+```
+
+## Complex Commands with Variables
 # Conda environment
 qxub exec --env pytorch -- python train.py
 
