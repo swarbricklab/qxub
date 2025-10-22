@@ -35,6 +35,11 @@ setup(
     python_requires=">=3.6",
     install_requires=["omegaconf", "click", "tailer", "rich", "pyyaml"],
     entry_points={
-        "console_scripts": ["qxub=qxub.cli:qxub"],
+        "console_scripts": [
+            "qxub=qxub.cli:qxub",
+            "qx=qxub.standalone_aliases:qx_main",
+            "qxtat=qxub.standalone_aliases:qxtat_main",
+            "qxet=qxub.standalone_aliases:qxet_main",
+        ],
     },
 )
