@@ -243,6 +243,42 @@ class ShortcutManager:
         self._shortcuts_cache = None
         return True
 
+    def remove_system_shortcut(self, name: str) -> bool:
+        """
+        Remove a shortcut from system config.
+
+        Args:
+            name: Shortcut name to remove
+
+        Returns:
+            True if shortcut was removed, False if it didn't exist
+
+        Raises:
+            PermissionError: If no write permissions to system config
+        """
+        if not self._system_shortcuts_file.exists():
+            return False
+
+        try:
+            with open(self._system_shortcuts_file, "r", encoding="utf-8") as f:
+                system_shortcuts = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return False
+
+        if name not in system_shortcuts:
+            return False
+
+        # Remove shortcut
+        del system_shortcuts[name]
+
+        # Save back to file
+        with open(self._system_shortcuts_file, "w", encoding="utf-8") as f:
+            json.dump(system_shortcuts, f, indent=2, sort_keys=True)
+
+        # Invalidate cache
+        self._shortcuts_cache = None
+        return True
+
     def refresh_cache(self) -> None:
         """Force refresh of shortcuts cache."""
         self._shortcuts_cache = None

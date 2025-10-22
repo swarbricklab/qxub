@@ -41,13 +41,13 @@ def qxtat_main():
 
 def qxet_main():
     """Standalone 'qxet' command equivalent to 'qxub config shortcut set'"""
-    from .shortcuts_cli import shortcuts_cli
+    from .config_cli import shortcut_config
 
     # Import the shortcuts set command and invoke it with the provided arguments
     # This gives access to the 'set' subcommand directly
     try:
-        # Get the 'set' command from the shortcuts CLI group
-        set_command = shortcuts_cli.commands.get("set")
+        # Get the 'set' command from the shortcut config CLI group
+        set_command = shortcut_config.commands.get("set")
         if set_command:
             set_command.main(sys.argv[1:], standalone_mode=True)
         else:

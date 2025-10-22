@@ -66,4 +66,3 @@ qxub.add_command(platform_cli)
 qxub.add_command(select_queue_cmd)
 qxub.add_command(validate_cmd)
 qxub.add_command(estimate_cmd)
-# shortcuts_cli moved to qxub config shortcut

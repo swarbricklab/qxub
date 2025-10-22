@@ -918,7 +918,7 @@ def history_to_alias(index, alias_name, overwrite):
         console.print(f"❌ Error creating alias from history: {e}", style="red")
 
 
-# Shortcut management subcommands (moved from shortcuts_cli.py)
+# Shortcut management subcommands
 @config_cli.group(name="shortcut")
 def shortcut_config():
     """Manage configuration shortcuts."""
@@ -1183,6 +1183,15 @@ def show(name: str):
                 click.echo(f"  • {shortcut_name}")
         return
 
+    # Get source information
+    shortcuts_with_origin = shortcut_manager.list_shortcuts_with_origin()
+    source = shortcuts_with_origin.get(name, {}).get("origin", "unknown")
+    source_display = "🌐 system config" if source == "system" else "👤 user config"
+
+    # Display shortcut details
+    click.echo(f"🎯 Shortcut: {name}")
+    click.echo(f"   Source: {source_display}")
+
     def _get_execution_context_description(definition: dict) -> str:
         """Get human-readable description of execution context."""
         if definition.get("env"):
@@ -1248,48 +1257,135 @@ def show(name: str):
 
 @shortcut_config.command()
 @click.argument("name")
-@click.confirmation_option(prompt="Are you sure you want to delete this shortcut?")
-def delete(name: str):
+@click.option("--user", is_flag=True, help="Delete from user config (default)")
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Delete from system config (requires write permissions)",
+)
+@click.option("--yes", is_flag=True, help="Confirm deletion without prompting")
+def delete(name: str, user: bool, system: bool, yes: bool):
     """Delete a shortcut."""
     from .shortcut_manager import shortcut_manager
 
-    if shortcut_manager.remove_shortcut(name):
-        click.echo(f"✅ Shortcut '{name}' deleted successfully")
-    else:
-        click.echo(f"❌ Shortcut '{name}' not found")
+    # Validate mutually exclusive scope flags
+    if user and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system flags. Choose one or omit both for default (user)."
+        )
 
-        # Show available shortcuts
-        shortcuts = shortcut_manager.list_shortcuts()
-        if shortcuts:
-            click.echo("\n💡 Available shortcuts:")
-            for shortcut_name in sorted(shortcuts.keys()):
-                click.echo(f"  • {shortcut_name}")
+    # Manual confirmation if --yes not provided
+    if not yes:
+        if not click.confirm("Are you sure you want to delete this shortcut?"):
+            click.echo("❌ Deletion cancelled")
+            return
+
+    try:
+        if system:
+            success = shortcut_manager.remove_system_shortcut(name)
+            location = "system config"
+        else:
+            # Default to user if neither flag specified, or if --user explicitly set
+            success = shortcut_manager.remove_shortcut(name)
+            location = "user config"
+
+        if success:
+            click.echo(f"✅ Shortcut '{name}' deleted successfully from {location}")
+        else:
+            click.echo(f"❌ Shortcut '{name}' not found in {location}")
+
+            # Show available shortcuts
+            shortcuts = shortcut_manager.list_shortcuts()
+            if shortcuts:
+                click.echo("\n💡 Available shortcuts:")
+                for shortcut_name in sorted(shortcuts.keys()):
+                    click.echo(f"  • {shortcut_name}")
+
+    except PermissionError:
+        raise click.ClickException(
+            f"Permission denied: Cannot write to system shortcuts file. "
+            f"Check write permissions for {shortcut_manager._system_shortcuts_file}"
+        )
 
 
 @shortcut_config.command()
 @click.argument("old_name")
 @click.argument("new_name")
-def rename(old_name: str, new_name: str):
+@click.option("--user", is_flag=True, help="Rename in user config (default)")
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Rename in system config (requires write permissions)",
+)
+def rename(old_name: str, new_name: str, user: bool, system: bool):
     """Rename a shortcut."""
     from .shortcut_manager import shortcut_manager
 
-    # Get existing shortcut
-    shortcut_def = shortcut_manager.get_shortcut(old_name)
-    if not shortcut_def:
+    # Validate mutually exclusive scope flags
+    if user and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system flags. Choose one or omit both for default (user)."
+        )
+
+    # Get existing shortcut - need to check the appropriate config
+    shortcuts_with_origin = shortcut_manager.list_shortcuts_with_origin()
+    shortcut_info = shortcuts_with_origin.get(old_name)
+
+    if not shortcut_info:
         click.echo(f"❌ Shortcut '{old_name}' not found")
         return
 
-    # Check if new name already exists
-    if shortcut_manager.get_shortcut(new_name):
-        if not click.confirm(f"Shortcut '{new_name}' already exists. Overwrite?"):
+    shortcut_def = shortcut_info["definition"]
+    shortcut_source = shortcut_info["origin"]
+
+    # Determine target scope
+    if system:
+        target_scope = "system"
+    else:
+        target_scope = "user"  # Default behavior
+
+    # Warn if trying to rename across scopes
+    if shortcut_source != target_scope:
+        click.echo(
+            f"⚠️  Warning: '{old_name}' exists in {shortcut_source} config but you're targeting {target_scope} config"
+        )
+        if not click.confirm(f"Continue with rename in {target_scope} config?"):
             click.echo("❌ Rename cancelled")
             return
 
-    # Add with new name and remove old
-    shortcut_manager.add_shortcut(new_name, shortcut_def)
-    shortcut_manager.remove_shortcut(old_name)
+    # Check if new name already exists in target scope
+    existing_new = shortcut_manager.get_shortcut(new_name)
+    if existing_new:
+        new_info = shortcuts_with_origin.get(new_name)
+        if new_info and new_info["origin"] == target_scope:
+            if not click.confirm(
+                f"Shortcut '{new_name}' already exists in {target_scope} config. Overwrite?"
+            ):
+                click.echo("❌ Rename cancelled")
+                return
 
-    click.echo(f"✅ Shortcut renamed from '{old_name}' to '{new_name}'")
+    try:
+        # Add with new name in target scope
+        if target_scope == "system":
+            shortcut_manager.add_system_shortcut(new_name, shortcut_def)
+        else:
+            shortcut_manager.add_shortcut(new_name, shortcut_def)
+
+        # Remove old name from original scope
+        if shortcut_source == "system":
+            shortcut_manager.remove_system_shortcut(old_name)
+        else:
+            shortcut_manager.remove_shortcut(old_name)
+
+        click.echo(
+            f"✅ Shortcut renamed from '{old_name}' to '{new_name}' in {target_scope} config"
+        )
+
+    except PermissionError:
+        raise click.ClickException(
+            f"Permission denied: Cannot write to system shortcuts file. "
+            f"Check write permissions for {shortcut_manager._system_shortcuts_file}"
+        )
 
 
 @shortcut_config.command()
