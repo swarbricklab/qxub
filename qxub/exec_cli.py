@@ -12,7 +12,7 @@ import click
 
 from .config import config_manager
 from .config.handler import process_job_options
-from .execution_context import ExecutionContext, execute_unified
+from .execution import ExecutionContext, execute_unified
 
 
 def _get_shortcut_context_description(definition: dict) -> str:

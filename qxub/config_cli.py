@@ -8,6 +8,7 @@ including defaults and aliases.
 # pylint: disable=broad-exception-caught,protected-access,raise-missing-from,unnecessary-pass,unused-variable
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -1181,7 +1182,7 @@ def show(name: str):
             click.echo("\n💡 Available shortcuts:")
             for shortcut_name in sorted(shortcuts.keys()):
                 click.echo(f"  • {shortcut_name}")
-        return
+        sys.exit(2)
 
     # Get source information
     shortcuts_with_origin = shortcut_manager.list_shortcuts_with_origin()

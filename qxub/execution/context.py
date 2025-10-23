@@ -14,9 +14,9 @@ from typing import Dict, List, Optional, Union
 
 import click
 
-from .history_manager import history_manager
-from .resource_tracker import resource_tracker
-from .scheduler import qsub
+from ..history import history_manager
+from ..resources import resource_tracker
+from ..scheduler import qsub
 
 
 class ExecutionContext:
@@ -47,7 +47,7 @@ class ExecutionContext:
 
     def get_default_template(self) -> str:
         """Get the default template for this execution context."""
-        from .templates import get_template
+        from ..templates import get_template
 
         return get_template(self.template_type)
 
@@ -171,7 +171,7 @@ def execute_unified(
 
     # Progress message: Job command constructed (skip for terse mode)
     if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
-        from .scheduler import print_status
+        from ..scheduler import print_status
 
         print_status("🔧 Job command constructed", final=True)
 
@@ -204,7 +204,7 @@ def execute_unified(
         # Continue to monitoring (don't return here)
     elif not ctx_obj["quiet"]:
         # Display job ID to user (only in normal mode, not quiet or terse)
-        from .scheduler import print_status
+        from ..scheduler import print_status
 
         success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
         print_status(success_msg, final=True)
@@ -231,7 +231,7 @@ def execute_unified(
     err.touch()
 
     # Use single-thread monitoring for simpler, more reliable operation
-    from .scheduler import monitor_job_single_thread
+    from ..scheduler import monitor_job_single_thread
 
     try:
         # Terse mode should run monitoring silently like quiet mode
@@ -244,7 +244,7 @@ def execute_unified(
     except KeyboardInterrupt:
         # Handle Ctrl-C gracefully
         print("\n🛑 Interrupted! Cleaning up job...")
-        from .scheduler import qdel
+        from ..scheduler import qdel
 
         success = qdel(job_id, quiet=False)
         if success:

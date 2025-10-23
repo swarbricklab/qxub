@@ -50,7 +50,7 @@ from .parser import (
     size_to_bytes,
     time_to_seconds,
 )
-from .tracker import ResourceTracker
+from .tracker import ResourceTracker, resource_tracker
 
 # Import all public APIs for convenient access
 from .utils import (
@@ -88,4 +88,6 @@ __all__ = [
     # Classes
     "ResourceTracker",
     "ResourceMapper",
+    # Global instances
+    "resource_tracker",
 ]

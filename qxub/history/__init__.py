@@ -41,7 +41,7 @@ Example Usage:
 
 # Import all public APIs for convenient access
 from .base import CommandHistoryLogger, history_logger
-from .manager import HistoryManager
+from .manager import HistoryManager, history_manager
 
 # Define what gets imported with "from qxub.history import *"
 __all__ = [
@@ -49,5 +49,6 @@ __all__ = [
     "HistoryManager",
     "CommandHistoryLogger",
     # Global instances
+    "history_manager",
     "history_logger",
 ]
