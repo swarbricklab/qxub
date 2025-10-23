@@ -18,9 +18,9 @@ qxub exec --sif container.sif -- python script.py  # Singularity container
 qxub exec -- python script.py                    # Direct submission
 
 # Built-in command aliases for faster typing
-qx --env myenv -- python script.py              # Short for 'qxub exec'
+qx dvc push                                      # Short for 'qxub exec -- dvc push'
 qxtat 12345.gadi-pbs                             # Short for 'qxub status'
-qxet "my-shortcut" --env base                    # Short for 'qxub config shortcut set'
+qxet "command" --env base                        # Short for 'qxub config shortcut set "command" --env base'
 
 # Add PBS options before --
 qxub exec --resources mem=16GB --queue normal --env myenv -- python script.py
@@ -152,7 +152,7 @@ qxub config shortcut set gpu --env pytorch --description "GPU training with PyTo
 qxub exec -- gpu train.py    # Use the shortcut
 
 # Create system-wide shortcuts for team use (requires admin permissions)
-qxub config shortcut set "dvc pipeline" --system --env dvc3 --resources mem=32GB --description "DVC data pipeline"
+qxub config shortcut set "dvc repro" --system --env dvc3 --resources mem=32GB --description "DVC data pipeline"
 
 # View configuration and shortcut files
 qxub config files

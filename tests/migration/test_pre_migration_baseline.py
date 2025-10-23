@@ -56,8 +56,8 @@ class TestPreMigrationBaseline:
         import_tests = [
             "from qxub.config_manager import config_manager",
             "from qxub.platform import get_platform",
-            "from qxub.scheduler import qsub, qdel",
-            "from qxub.resource_utils import parse_memory_size",
+            "from qxub.core.scheduler import qsub, qdel",
+            "from qxub.resources import parse_memory_size",
             "from qxub.execution_context import execute_unified",
         ]
 
@@ -69,7 +69,7 @@ class TestPreMigrationBaseline:
 
     def test_dry_run_execution(self):
         """Test basic execution functionality."""
-        cmd = ["qxub", "exec", "--dry", "--", "echo", "test"]
+        cmd = ["qxub", "exec", "--dry-run", "--", "echo", "test"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, f"Dry run failed: {result.stderr}"
         assert "qsub" in result.stdout, "Expected qsub command in dry run output"
@@ -89,14 +89,32 @@ class TestPreMigrationBaseline:
 
     def test_conda_execution_context(self):
         """Test conda execution context works."""
-        cmd = ["qxub", "exec", "--dry", "--env", "base", "--", "python", "--version"]
+        cmd = [
+            "qxub",
+            "exec",
+            "--dry-run",
+            "--env",
+            "base",
+            "--",
+            "python",
+            "--version",
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, f"Conda execution failed: {result.stderr}"
         assert "base" in result.stdout, "Expected conda environment in output"
 
     def test_module_execution_context(self):
         """Test module execution context works."""
-        cmd = ["qxub", "exec", "--dry", "--mod", "python3", "--", "python", "--version"]
+        cmd = [
+            "qxub",
+            "exec",
+            "--dry-run",
+            "--mod",
+            "python3",
+            "--",
+            "python",
+            "--version",
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, f"Module execution failed: {result.stderr}"
         assert "python3" in result.stdout, "Expected module in output"
@@ -122,18 +140,15 @@ class TestPreMigrationBaseline:
 
     def test_resource_parsing(self):
         """Test resource parsing utilities work."""
-        from qxub.resource_utils import parse_memory_size, parse_walltime
+        from qxub.resources import parse_memory_size, parse_walltime
 
         # Test memory parsing
         assert parse_memory_size("4GB") > 0
         assert parse_memory_size("1000MB") > 0
 
-        # Test walltime parsing (returns hours as float)
-        walltime_hours = parse_walltime("2:00:00")
-        assert walltime_hours == 2.0  # 2 hours
-
-        walltime_1h = parse_walltime("1h")
-        assert walltime_1h == 1.0  # 1 hour
+        # Test walltime parsing (returns seconds as int or None)
+        walltime_seconds = parse_walltime("2:00:00")
+        assert walltime_seconds == 7200  # 2 hours in seconds
 
     def test_platform_queue_selection(self):
         """Test platform queue selection works."""

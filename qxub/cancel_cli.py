@@ -14,8 +14,8 @@ from typing import List, Optional
 
 import click
 
-from .resource_tracker import ResourceTracker
-from .scheduler import get_job_resource_data, qdel
+from .core.scheduler import get_job_resource_data, qdel
+from .resources import ResourceTracker
 
 
 @click.group(name="cancel")
@@ -197,7 +197,7 @@ def cancel_by_name(job_name, pattern, force, quiet, wait, timeout):
 @click.option("--limit", type=int, help="Maximum number of jobs to cancel")
 def cancel_by_status(status, dry_run, force, quiet, limit):
     """Cancel qxub-tracked jobs by status."""
-    from .resource_tracker import ResourceTracker
+    from .resources import ResourceTracker
 
     if not status:
         click.echo("❌ Please specify --status", err=True)
@@ -288,8 +288,8 @@ def cancel_by_filter(
     import re
     from datetime import datetime, timedelta
 
-    from .resource_tracker import ResourceTracker
-    from .scheduler import get_job_resource_data
+    from .core.scheduler import get_job_resource_data
+    from .resources import ResourceTracker
 
     # Get all jobs and apply filters
     tracker = ResourceTracker()

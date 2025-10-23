@@ -123,7 +123,7 @@ def select_auto_queue(params):
         from pathlib import Path
 
         from .platform import PlatformLoader
-        from .resource_utils import parse_walltime
+        from .resources import parse_walltime
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
@@ -185,7 +185,7 @@ def select_auto_queue(params):
                         walltime_hours = requirements.get("walltime", 3600)
                         # Convert walltime to hours if it's a string
                         if isinstance(walltime_hours, str):
-                            from .resource_utils import parse_walltime
+                            from .resources import parse_walltime
 
                             walltime_hours = parse_walltime(walltime_hours) or 1.0
                         elif isinstance(walltime_hours, (int, float)):

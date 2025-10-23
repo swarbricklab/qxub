@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
-from .resource_tracker import resource_tracker
+from .resources import resource_tracker
 
 console = Console()
 
@@ -32,7 +32,8 @@ def status_cli():
 @click.option(
     "--all", "show_all", is_flag=True, help="Show all jobs (ignore 7-day limit)"
 )
-def list(status, limit, show_all):
+@click.option("--id-only", is_flag=True, help="Output only job IDs (useful for piping)")
+def list(status, limit, show_all, id_only):
     """List recent jobs with their status."""
 
     if status:
@@ -43,7 +44,14 @@ def list(status, limit, show_all):
         title = "Recent Jobs"
 
     if not jobs:
-        console.print(f"[yellow]No jobs found[/yellow]")
+        if not id_only:
+            console.print(f"[yellow]No jobs found[/yellow]")
+        return
+
+    # If --id-only, just print job IDs for piping
+    if id_only:
+        for job in jobs:
+            click.echo(job["job_id"])
         return
 
     # Create table

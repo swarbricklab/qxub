@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .config import config_manager
+from ..config import config_manager
 
 
 def get_default_output_dir() -> Path:
@@ -186,7 +186,7 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
                         walltime_hours = requirements.get("walltime", 3600)
                         # Convert walltime to hours if it's a string
                         if isinstance(walltime_hours, str):
-                            from .resource_utils import parse_walltime
+                            from ..resources import parse_walltime
 
                             walltime_hours = parse_walltime(walltime_hours) or 1.0
                         elif isinstance(walltime_hours, (int, float)):

@@ -16,7 +16,7 @@ import click
 
 def qx_main():
     """Standalone 'qx' command equivalent to 'qxub exec --'"""
-    from .exec_cli import exec_cli
+    from ..exec_cli import exec_cli
 
     # Import the exec command and invoke it with the provided arguments
     # This mimics the behavior of 'qxub exec --' exactly
@@ -29,7 +29,7 @@ def qx_main():
 
 def qxtat_main():
     """Standalone 'qxtat' command equivalent to 'qxub status'"""
-    from .status_cli import status_cli
+    from ..status_cli import status_cli
 
     # Import the status command group and invoke it with the provided arguments
     try:

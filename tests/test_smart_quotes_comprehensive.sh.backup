@@ -27,7 +27,7 @@ run_test() {
     echo "  Input: $cmd_input"
 
     if result=$(qxub exec --dry-run --env base --cmd "$cmd_input" 2>&1); then
-        output=$(echo "$result" | grep "would execute:" | cut -d: -f2- | sed 's/^ *//')
+        output=$(echo "$result" | grep "Dry run - would execute:" | cut -d: -f2- | sed 's/^ *//')
         echo "  Output: $output"
 
         if echo "$output" | grep -q "$expected_pattern"; then

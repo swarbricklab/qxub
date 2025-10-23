@@ -15,7 +15,7 @@ import time
 
 import click
 
-from .resource_parser import (
+from ..resources import (
     bytes_to_human,
     calculate_efficiency,
     parse_exec_host,
@@ -739,8 +739,7 @@ def collect_job_resources_after_completion(job_id, out_file):
             )
 
             try:
-                from .resource_parser import parse_joblog_resources
-                from .resource_tracker import resource_tracker
+                from ..resources import parse_joblog_resources, resource_tracker
 
                 # Parse resource data from joblog
                 resource_data = parse_joblog_resources(joblog_path)
@@ -792,7 +791,7 @@ def start_background_resource_collection(job_id, joblog_path):
 
     def collect_resources_background():
         try:
-            from .resource_tracker import resource_tracker
+            from ..resources import resource_tracker
 
             # First, mark the job as having pending resource collection
             logging.debug(f"Marking resource collection as pending for job {job_id}")
@@ -820,7 +819,7 @@ def start_background_resource_collection(job_id, joblog_path):
                 )
 
                 try:
-                    from .resource_parser import parse_joblog_resources
+                    from ..resources import parse_joblog_resources
 
                     # Parse resource data from joblog
                     resource_data = parse_joblog_resources(joblog_path)

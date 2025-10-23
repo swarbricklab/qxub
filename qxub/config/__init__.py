@@ -48,7 +48,11 @@ Example Usage:
 """
 
 # Import all public APIs for convenient access
-from .base import QxubConfig  # Legacy configuration (deprecated)
+from .base import (  # Legacy configuration (deprecated)
+    QxubConfig,
+    get_effective_config,
+    setup_logging,
+)
 from .manager import config_manager  # Global instance
 from .manager import ConfigManager
 from .shortcuts import ShortcutManager
@@ -70,6 +74,8 @@ __all__ = [
     "ShortcutManager",
     # Legacy (deprecated)
     "QxubConfig",
+    "get_effective_config",
+    "setup_logging",
 ]
 
 # Add aliases if available
@@ -109,6 +115,8 @@ __all__.extend(
         "get_config",
         "set_config",
         "validate_config",
+        "get_effective_config",
+        "setup_logging",
         "get_user_preference",
         "set_user_preference",
     ]

@@ -15,9 +15,9 @@ from typing import Dict, List, Optional, Tuple
 
 import click
 
-from ..core.scheduler import monitor_job_single_thread, print_status, qsub
-from ..history import history_manager
-from ..resources import resource_tracker
+from .core.scheduler import monitor_job_single_thread, print_status, qsub
+from .history_manager import history_manager
+from .resources import resource_tracker
 
 
 def expand_submission_variables(cmd_str: str) -> str:
@@ -378,7 +378,7 @@ def submit_and_monitor_job(
     except KeyboardInterrupt:
         # Handle Ctrl-C gracefully
         print("\n🛑 Interrupted! Cleaning up job...")
-        from ..core.scheduler import qdel
+        from .core.scheduler import qdel
 
         success = qdel(job_id, quiet=False)
         if success:

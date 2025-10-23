@@ -11,10 +11,9 @@ from typing import Any, Dict, Optional
 
 import click
 
-from ..config import config_manager
-from ..config.manager import setup_logging
-from ..resources import format_walltime, parse_memory_size, parse_walltime
-from .core import (
+from .config import config_manager
+from .config.manager import setup_logging
+from .platform import (
     Platform,
     QueueSelectionResult,
     get_current_platform,
@@ -22,6 +21,7 @@ from .core import (
     list_platforms,
     select_best_queue,
 )
+from .resources import format_walltime, parse_memory_size, parse_walltime
 
 
 @click.group(name="platform")

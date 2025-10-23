@@ -208,8 +208,46 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
             ctx.exit(2)
 
         # Apply alias settings to options (CLI options override alias settings)
-        # Aliases use flat structure, unlike shortcuts which have hierarchical structure
+        # Handle both hierarchical and flat alias structures
+
+        # Flatten hierarchical alias structure if present
+        flat_alias = {}
+
+        if "main" in alias_def and isinstance(alias_def["main"], dict):
+            # Hierarchical structure: extract main options
+            main_section = alias_def["main"]
+            flat_alias.update(main_section)
+
+        if "subcommand" in alias_def and isinstance(alias_def["subcommand"], dict):
+            # Hierarchical structure: extract subcommand options
+            subcommand_section = alias_def["subcommand"]
+            subcommand_type = subcommand_section.get("type")
+
+            if subcommand_type == "conda" and "env" in subcommand_section:
+                flat_alias["env"] = subcommand_section["env"]
+            elif subcommand_type == "module":
+                if "mod" in subcommand_section:
+                    flat_alias["mod"] = subcommand_section["mod"]
+                elif "mods" in subcommand_section:
+                    flat_alias["mods"] = subcommand_section["mods"]
+            elif subcommand_type == "sing" and "sif" in subcommand_section:
+                flat_alias["sif"] = subcommand_section["sif"]
+                if "bind" in subcommand_section:
+                    flat_alias["bind"] = subcommand_section["bind"]
+
+        if "target" in alias_def and isinstance(alias_def["target"], dict):
+            # Hierarchical structure: extract target command
+            target_section = alias_def["target"]
+            if "cmd" in target_section:
+                flat_alias["cmd"] = target_section["cmd"]
+
+        # Also handle flat structure for backward compatibility
         for key, value in alias_def.items():
+            if key not in ["main", "subcommand", "target"]:
+                flat_alias[key] = value
+
+        # Apply flattened alias settings to options
+        for key, value in flat_alias.items():
             if key == "env" and not options["env"]:
                 options["env"] = value
             elif key == "mod" and not options["mod"]:
@@ -233,6 +271,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
                 options["pre"] = value
             elif key == "post" and not options["post"]:
                 options["post"] = value
+
+        # Set command from alias if no command was provided
+        if not command and not cmd:
+            alias_cmd = flat_alias.get("cmd")
+            if alias_cmd:
+                command = tuple(alias_cmd.split())
 
         click.echo(f"🎯 Using alias '{alias}'")
 
@@ -372,7 +416,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     # Process workflow-friendly resource options
     workflow_resources = []
     if options.get("mem") or options.get("memory"):
-        from .resource_mappers import ResourceMapper
+        from .resources import ResourceMapper
 
         mapper = ResourceMapper()
         mapper.add_memory(options.get("mem") or options.get("memory"))

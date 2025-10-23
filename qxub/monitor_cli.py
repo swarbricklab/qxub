@@ -21,7 +21,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .config import config_manager
-from .scheduler import get_job_resource_data, job_status
+from .core.scheduler import get_job_resource_data, job_status
 
 console = Console()
 
