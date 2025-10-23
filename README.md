@@ -1,5 +1,7 @@
 # qxub
 
+qxub is a sophisticated PBS job submission wrapper designed for HPC environments. It eliminates the boilerplate and complexity of writing PBS job scripts by providing a unified command-line interface for submitting jobs across different execution contexts. Whether you need to run code in conda environments, with environment modules, inside containers, or as direct submissions, qxub handles the PBS integration seamlessly while offering intelligent queue selection, resource management, and comprehensive configuration options.
+
 Submit PBS jobs with conda environments, modules, or containers.
 
 ## Install

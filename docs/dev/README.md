@@ -1,24 +1,45 @@
 # qxub Developer Documentation
 
-Technical documentation for developers working on qxub v2.3.2.
+Technical documentation for developers working on qxub v3.0.
 
-## Core Architecture
+## 🎉 v3.0 Migration Complete
 
-### Threading System
-qxub uses multi-threaded architecture for real-time job monitoring:
-- **OutputCoordinator**: Central synchronization hub for job monitoring
-- **Signal handling**: Ctrl+C cleanup with `_signal_handler()` and global `_CURRENT_JOB_ID`
-- **Thread responsibilities**: Monitor thread, STDOUT/STDERR tail, spinner display
-- **Graceful shutdown**: Automatic job cleanup via `qdel` on interruption
+The package structure migration is **COMPLETE**. All modules have been successfully reorganized into logical packages. See [migration-complete.md](migration-complete.md) for full details.
+
+## Current Architecture (v3.0)
+
+### Package Structure
+```
+qxub/
+├── *_cli.py (9 files)    # CLI commands at root level
+├── config/               # Configuration management
+├── core/                 # Core utilities (scheduler, templates, parameters)
+├── execution/            # Execution contexts and logic
+├── history/              # Job history management
+├── platform/             # Platform detection and queue selection
+├── remote/               # Remote execution via SSH
+├── resources/            # Resource parsing and management
+└── jobscripts/           # PBS script templates
+```
+
+See: [package-structure-specification.md](package-structure-specification.md)
+
+### Execution Model
+qxub uses a simple, single-threaded execution model for job monitoring:
+- **Status file monitoring**: Polls job status files for state changes
+- **Simple spinner**: Non-blocking spinner during job submission and startup
+- **Signal handling**: Clean Ctrl+C handling with automatic job cleanup via `qdel`
+- **Real-time output**: Direct streaming of job stdout/stderr once job starts
 
 See: [threading-architecture.md](threading-architecture.md)
 
 ### Configuration System
 - **Hierarchical precedence**: CLI args > User config > System config > Defaults
 - **Template variables**: `{user}`, `{project}`, `{timestamp}` for dynamic substitution
-- **Alias system**: Hierarchical structure with main/subcommand/target sections
+- **Alias system**: Hierarchical structure (main/subcommand/target) for resource and PBS configuration
+- **Shortcuts system**: Command-based automation with prefix matching for workflow patterns
 
-See: [config-and-alias-system-design.md](config-and-alias-system-design.md), [config_schema.md](config_schema.md)
+See: [config-and-alias-system-design.md](config-and-alias-system-design.md), [config_schema.md](config_schema.md), [shortcuts-system-design.md](shortcuts-system-design.md)
 
 ### Platform System
 - **Platform definitions**: YAML files describing HPC system capabilities
@@ -42,76 +63,41 @@ See: [remote_execution.md](remote_execution.md)
 
 ## Debug Commands
 ```bash
-# Enable debug logging for threading issues
+# Enable debug logging for execution issues
 export QXUB_LOG_LEVEL=DEBUG
-qxub --env myenv -- python script.py
+qxub exec --env myenv -- python script.py
 
 # Test dry-run without job submission
-qxub --dry-run --env myenv -- python script.py
+qxub exec --dry-run --env myenv -- python script.py
 
 # Check configuration hierarchy
 qxub config files
+
+# Check job status files for debugging
+ls -la /scratch/$USER/qxub/status/
 ```
 
-## Key Files
-- `qxub/cli.py` - Clean main CLI entry point with standard Click interface
-- `qxub/exec_cli.py` - Comprehensive execution subcommand with all PBS options
-- `qxub/execution_context.py` - Unified execution logic for all environment types
-- `qxub/config_manager.py` - Configuration loading and template resolution
+## Key Files (v3.0 Structure)
+- `qxub/cli.py` - Main CLI entry point with Click interface
+- `qxub/exec_cli.py` - Comprehensive execution subcommand with PBS options
+- `qxub/execution.py` - Unified execution interface
+- `qxub/execution/context.py` - Execution context logic
+- `qxub/config/manager.py` - Configuration loading and template resolution
 - `qxub/platform.py` - Platform abstraction and queue selection
-- `qxub/scheduler.py` - PBS interaction and job monitoring
-- `qxub/remote_executor.py` - SSH-based remote execution
+- `qxub/core/scheduler.py` - PBS interaction and job monitoring
+- `qxub/remote/executor.py` - SSH-based remote execution
 
-# Check thread status
-ps aux | grep qxub
+## Development Workflow
 
-# View active threads in Python
-python -c "import threading; print([t.name for t in threading.enumerate()])"
+```bash
+# Run tests after making changes
+./tests/test_realistic_system_config.sh
+./tests/test_command_edge_cases.sh
 
-# Kill hung qxub processes
-pkill -TERM qxub
+# Check for regressions
+qxub exec --dry-run --env base -- echo "test"
+
+# Test specific execution contexts
+qxub exec --dry-run --mod python3 -- python --version
+qxub exec --dry-run --sif container.sif -- whoami
 ```
-
-### Key Files for Threading
-- `qxub/scheduler.py` - Core threading logic, OutputCoordinator
-- `qxub/conda.py` - Conda executor with threading integration
-- `qxub/module.py` - Module executor with threading integration
-- `qxub/sing.py` - Singularity executor with threading integration
-
-### Testing Threading Code
-```python
-# Always use timeouts in tests
-thread.join(timeout=5)
-assert not thread.is_alive()
-
-# Test shutdown scenarios
-coordinator.signal_shutdown()
-assert coordinator.should_shutdown()
-
-# Mock the coordinator for unit tests
-from unittest.mock import Mock
-coordinator = Mock()
-```
-
-## Contributing to Threading System
-
-When modifying the threading system:
-
-1. **Read the architecture docs first** - Understand the event-based coordination
-2. **Test shutdown scenarios** - Ensure clean Ctrl-C handling
-3. **Use timeouts everywhere** - Prevent hanging threads
-4. **Follow the event patterns** - Use Events for coordination, not shared variables
-5. **Add debug logging** - Include thread names and timing information
-6. **Test with real PBS jobs** - Integration testing is crucial
-
-## Getting Help
-
-If you encounter threading-related issues:
-
-1. **Check the troubleshooting guide** - Most common issues are documented
-2. **Enable debug logging** - Use `QXUB_LOG_LEVEL=DEBUG`
-3. **Gather thread dumps** - Include in bug reports
-4. **Test in isolation** - Reproduce with minimal examples
-5. **Document edge cases** - Help improve these docs
-
-For questions or contributions, see the main project README for contact information.
