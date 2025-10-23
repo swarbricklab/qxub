@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Optional
 
-from .remote_config import RemoteConfig
+from .config import RemoteConfig
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +425,7 @@ class RemoteExecutorFactory:
         executor_class = executors.get(config.protocol)
         if not executor_class:
             supported = ", ".join(executors.keys())
-            from .remote_config import UnsupportedProtocolError
+            from .config import UnsupportedProtocolError
 
             raise UnsupportedProtocolError(
                 f"Protocol '{config.protocol}' not supported. "

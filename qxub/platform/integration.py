@@ -10,8 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..remote import execute_remote_platform
-from ..remote_config import RemoteConfig
+from ..remote import RemoteConfig, execute_remote_platform
 from .core import Platform, Queue, QueueLimits
 
 logger = logging.getLogger(__name__)
