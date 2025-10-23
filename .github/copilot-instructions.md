@@ -102,16 +102,15 @@ cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 ## Development Workflows
 
 ### Environment Setup
-- **Virtual environment**: Always activate the qxub virtual environment before development
-- **Environment location**: The virtual environment is located in `venv/` directory within the project root
+- **Conda environment**: Always activate the `qxub` conda environment before development
 - **Environment verification**: Check `qxub --version` to ensure correct installation
 - **Terminal sessions**: Activate environment in each new terminal session
 - **Documentation first**: Always read relevant docs before implementing features
 
 ```bash
-# Activate virtual environment (located in project root)
+# Activate qxub conda environment
 cd /g/data/a56/software/qsub_tools
-source venv/bin/activate
+conda activate qxub
 
 # Verify qxub is available
 qxub --version

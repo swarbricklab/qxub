@@ -4,7 +4,7 @@ Alias CLI commands for qxub.
 
 import click
 
-from .config_manager import config_manager
+from .config import config_manager
 
 
 @click.command(name="alias")

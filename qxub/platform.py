@@ -248,7 +248,7 @@ class PlatformLoader:
             self.search_paths = search_paths
         else:
             # Import here to avoid circular import
-            from .config_manager import config_manager
+            from .config import config_manager
 
             self.search_paths = config_manager.get_platform_search_paths()
 
@@ -778,7 +778,7 @@ def select_best_queue(
         QueueSelectionResult with selection details
     """
     # Import here to avoid circular import
-    from .config_manager import config_manager
+    from .config import config_manager
 
     # Get platform
     if platform_name:

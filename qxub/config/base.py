@@ -124,7 +124,7 @@ class QxubConfig:
         configured_paths = self.get("platform_search_paths", [])
         if configured_paths:
             # Import here to avoid circular import
-            from .config.manager import ConfigManager
+            from .manager import ConfigManager
 
             config_manager = ConfigManager()
 

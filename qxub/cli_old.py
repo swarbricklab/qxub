@@ -16,9 +16,8 @@ from pathlib import Path
 import click
 
 from .alias_cli import alias_cli
-from .config import setup_logging
+from .config import config_manager, setup_logging
 from .config_cli import config_cli
-from .config_manager import config_manager
 
 # Import signal handler from execution module
 from .execution import _signal_handler, validate_execution_context

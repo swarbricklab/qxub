@@ -1,20 +1,14 @@
-"""
-Queue selection and parameter management for qxub.
-
-This module handles auto queue selection and parameter resolution logic.
-"""
+"""Configuration handling logic extracted from CLI for better separation of concerns."""
 
 import logging
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
-
-from .config import config_manager
 
 
-def get_default_output_dir() -> Path:
+def _get_default_output_dir():
     """Get appropriate output directory that works across login and compute nodes."""
+    from datetime import datetime
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Prefer shared scratch space over TMPDIR to avoid cross-node access issues
@@ -30,7 +24,7 @@ def get_default_output_dir() -> Path:
     return Path(os.getcwd(), "qt", timestamp)
 
 
-def sanitize_job_name(name: str) -> str:
+def _sanitize_job_name(name):
     """Sanitize job name for PBS compliance.
 
     PBS job names cannot contain certain characters like /, :, @, etc.
@@ -52,45 +46,33 @@ def sanitize_job_name(name: str) -> str:
     if sanitized and not sanitized[0].isalnum():
         sanitized = "job_" + sanitized
 
-    # Limit length (PBS has limits on job name length)
-    if len(sanitized) > 50:
-        sanitized = sanitized[:47] + "..."
-
-    return sanitized or "job"  # Fallback if sanitization results in empty string
+    return sanitized
 
 
-def apply_config_defaults(params: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply configuration defaults to parameters."""
+def apply_config_defaults(params, config_manager):
+    """Apply configuration defaults to CLI parameters."""
     defaults = config_manager.get_defaults()
 
     # Apply defaults if not explicitly set by CLI
-    if params.get("out") is None:
-        params["out"] = defaults.get("out", get_default_output_dir() / "out")
-    if params.get("err") is None:
-        params["err"] = defaults.get("err", get_default_output_dir() / "err")
-    if params.get("joblog") is None:
+    if params["out"] is None:
+        params["out"] = defaults.get("out", _get_default_output_dir() / "out")
+    if params["err"] is None:
+        params["err"] = defaults.get("err", _get_default_output_dir() / "err")
+    if params["joblog"] is None:
         params["joblog"] = defaults.get("joblog")
-    if params.get("queue") is None:
+    if params["queue"] is None:
         params["queue"] = defaults.get("queue", "normal")
-    if params.get("name") is None:
+    if params["name"] is None:
         params["name"] = defaults.get("name", "qt")
-    if params.get("project") is None:
+    if params["project"] is None:
         params["project"] = defaults.get("project", os.getenv("PROJECT"))
-    if not params.get("resources"):  # Empty tuple means no resources provided
+    if not params["resources"]:  # Empty tuple means no resources provided
         params["resources"] = defaults.get("resources", [])
-
-    # Ensure boolean flags have defaults
-    if params.get("dry") is None:
-        params["dry"] = False
-    if params.get("quiet") is None:
-        params["quiet"] = False
-    if params.get("terse") is None:
-        params["terse"] = False
 
     return params
 
 
-def resolve_template_variables(params: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_template_variables(params, config_manager):
     """Resolve template variables in parameter values."""
     template_vars = config_manager.get_template_variables(
         name=params["name"], project=params["project"], queue=params["queue"]
@@ -106,25 +88,41 @@ def resolve_template_variables(params: Dict[str, Any]) -> Dict[str, Any]:
         else:
             resolved_params[key] = value
 
-    return resolved_params
+    return resolved_params, template_vars
 
 
-def auto_select_queue(params: Dict[str, Any]) -> str:
-    """
-    Automatically select the best queue based on resource requirements.
+def process_job_configuration(params, config_manager):
+    """Process and sanitize job configuration parameters."""
+    # Apply defaults
+    params = apply_config_defaults(params, config_manager)
 
-    Args:
-        params: Parameter dictionary containing resources and other options
+    # Resolve template variables
+    resolved_params, template_vars = resolve_template_variables(params, config_manager)
+    params.update(resolved_params)
 
-    Returns:
-        Selected queue name, or 'normal' if auto-selection fails
-    """
-    if params.get("queue") != "auto":
-        return params["queue"]
+    # Sanitize job name for PBS compliance
+    if params["name"]:
+        params["name"] = _sanitize_job_name(params["name"])
+
+    # Handle joblog default
+    joblog = params["joblog"] or f"{params['name']}.log"
+    if isinstance(joblog, str) and "{" in joblog:
+        joblog = config_manager.resolve_templates(joblog, template_vars)
+
+    params["joblog"] = joblog
+
+    return params
+
+
+def select_auto_queue(params):
+    """Handle automatic queue selection based on resource requirements."""
+    if params["queue"] != "auto":
+        return params
 
     try:
         from pathlib import Path
 
+        from ..resources import parse_walltime
         from .platform import PlatformLoader
 
         # Check for QXUB_PLATFORM_PATHS environment variable
@@ -141,7 +139,8 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
             logging.warning(
                 "No platforms available for auto queue selection, using 'normal'"
             )
-            return "normal"
+            params["queue"] = "normal"
+            return params
 
         # Build requirements from resources
         requirements = {}
@@ -186,7 +185,7 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
                         walltime_hours = requirements.get("walltime", 3600)
                         # Convert walltime to hours if it's a string
                         if isinstance(walltime_hours, str):
-                            from .resource_utils import parse_walltime
+                            from ..resources import parse_walltime
 
                             walltime_hours = parse_walltime(walltime_hours) or 1.0
                         elif isinstance(walltime_hours, (int, float)):
@@ -205,65 +204,44 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
                 continue
 
         if best_queue:
+            params["queue"] = best_queue
             logging.info(f"Auto-selected queue: {best_queue}")
-            return best_queue
         else:
             logging.warning("No suitable queue found for requirements, using 'normal'")
-            return "normal"
+            params["queue"] = "normal"
 
     except ImportError:
         logging.warning(
             "Platform system not available for auto queue selection, using 'normal'"
         )
-        return "normal"
+        params["queue"] = "normal"
     except Exception as e:
         logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
-        return "normal"
-
-
-def process_parameters(params: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Process and normalize all parameters.
-
-    Args:
-        params: Raw parameter dictionary
-
-    Returns:
-        Processed parameter dictionary
-    """
-    # Apply config defaults
-    params = apply_config_defaults(params)
-
-    # Log parameters for debugging
-    for key, value in params.items():
-        logging.debug("qsub option: %s = %s", key, value)
-
-    # Resolve template variables
-    params = resolve_template_variables(params)
-
-    # Sanitize job name for PBS compliance
-    if params["name"]:
-        params["name"] = sanitize_job_name(params["name"])
-
-    # Handle joblog default
-    template_vars = config_manager.get_template_variables(
-        name=params["name"], project=params["project"], queue=params["queue"]
-    )
-    joblog = params["joblog"] or f"{params['name']}.log"
-    if isinstance(joblog, str) and "{" in joblog:
-        joblog = config_manager.resolve_templates(joblog, template_vars)
-    params["joblog"] = joblog
-
-    # Auto-select queue if needed
-    params["queue"] = auto_select_queue(params)
+        params["queue"] = "normal"
 
     return params
 
 
-def build_qsub_options(params: Dict[str, Any]) -> str:
+def build_qsub_options(params):
     """Build qsub options string from parameters."""
     options = "-N {name} -q {queue} -P {project} ".format_map(params)
     if params.get("resources"):
         options += " ".join([f"-l {resource}" for resource in params["resources"]])
     options += f" -o {params['joblog']}"
     return options
+
+
+def process_job_options(params, config_manager):
+    """Complete job option processing pipeline."""
+    # Process configuration
+    params = process_job_configuration(params, config_manager)
+
+    # Handle auto queue selection
+    params = select_auto_queue(params)
+
+    # Build qsub options
+    options = build_qsub_options(params)
+
+    logging.info("Options: %s", options)
+
+    return params, options

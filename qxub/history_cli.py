@@ -271,7 +271,7 @@ def clear():
 @click.option("--overwrite", is_flag=True, help="Overwrite existing alias")
 def recipe_to_alias(recipe_hash, alias_name, overwrite):
     """Convert a recipe to an alias."""
-    from .config_manager import config_manager
+    from .config import config_manager
 
     try:
         # Get recipe

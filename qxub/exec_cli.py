@@ -10,8 +10,8 @@ import logging
 
 import click
 
-from .config_handler import process_job_options
-from .config_manager import config_manager
+from .config import config_manager
+from .config.handler import process_job_options
 from .execution_context import ExecutionContext, execute_unified
 
 
@@ -162,7 +162,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         qxub exec --env myenv --cmd "python script.py arg1 arg2"
     """
     # Set up logging verbosity using the count-based system
-    from .config_manager import setup_logging
+    from .config.manager import setup_logging
 
     if options.get("quiet"):
         # Override verbose count when quiet is specified

@@ -34,10 +34,20 @@ except ImportError:
 from . import config, scheduler
 from .cli import qxub
 
-# Backwards compatibility for resources package (Phase 1 Migration)
+# Backwards compatibility for resources and history packages (Phase 1 Migration)
+# Backwards compatibility for config package (Phase 2 Migration)
 # These imports allow existing code to continue working while we migrate
 try:
     # Import key resource utilities for backwards compatibility
+    # Import key config components for backwards compatibility
+    from .config import (
+        ConfigManager,
+        ShortcutManager,
+        config_manager,
+        get_config,
+        set_config,
+    )
+
     # Import key history components for backwards compatibility
     from .history import HistoryManager, history_logger
     from .resources import (
@@ -50,7 +60,7 @@ try:
     )
 
     # Make them available at package level for existing imports like:
-    # from qxub import parse_memory_size, history_logger
+    # from qxub import parse_memory_size, config_manager, history_logger
     __all__.extend(
         [
             "parse_memory_size",
@@ -61,6 +71,11 @@ try:
             "ResourceMapper",
             "HistoryManager",
             "history_logger",
+            "ConfigManager",
+            "config_manager",
+            "ShortcutManager",
+            "get_config",
+            "set_config",
         ]
     )
 except ImportError:
