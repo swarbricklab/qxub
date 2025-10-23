@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from .resource_utils import (
+from ..resource_utils import (
     evaluate_condition,
     format_walltime,
     parse_memory_size,
@@ -248,7 +248,7 @@ class PlatformLoader:
             self.search_paths = search_paths
         else:
             # Import here to avoid circular import
-            from .config import config_manager
+            from ..config import config_manager
 
             self.search_paths = config_manager.get_platform_search_paths()
 

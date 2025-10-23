@@ -12,7 +12,7 @@ from .config_cli import config_cli
 from .exec_cli import exec_cli
 from .history_cli import history
 from .monitor_cli import monitor_cli
-from .platform_cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
+from .platform import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .resources_cli import resources
 from .status_cli import status_cli
 
