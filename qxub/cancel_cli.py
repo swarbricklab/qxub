@@ -10,11 +10,11 @@ import logging
 import re
 import subprocess
 import time
-from typing import List, Optional
+from typing import List
 
 import click
 
-from .core.scheduler import get_job_resource_data, qdel
+from .core.scheduler import qdel
 from .resources import ResourceTracker
 
 

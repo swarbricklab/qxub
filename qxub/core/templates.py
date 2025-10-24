@@ -7,7 +7,6 @@ execution contexts (conda, modules, singularity, default).
 
 import os
 from pathlib import Path
-from typing import Dict
 
 
 def get_template(template_type: str, custom_template: str = None) -> str:

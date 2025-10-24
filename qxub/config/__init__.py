@@ -59,7 +59,7 @@ from .shortcuts import ShortcutManager
 
 # Optional aliases support (may be moved later)
 try:
-    from .aliases import StandaloneAliases
+    from .aliases import StandaloneAliases  # noqa: F401
 
     ALIASES_AVAILABLE = True
 except ImportError:

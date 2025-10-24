@@ -18,7 +18,7 @@ qxub = cli_module.qxub
 
 # Import remote execution components (v2.2)
 try:
-    from .remote import (
+    from .remote import (  # noqa: F401
         RemoteConfig,
         RemoteExecutorFactory,
         get_remote_config,
@@ -36,8 +36,8 @@ except ImportError:
     # Remote execution dependencies not available
     __all__ = ["qxub"]
 
-from . import config
-from .core import scheduler
+from . import config  # noqa: F401
+from .core import scheduler  # noqa: F401
 
 # CLI is imported at the top of the file
 
@@ -47,7 +47,7 @@ from .core import scheduler
 try:
     # Import key resource utilities for backwards compatibility
     # Import key config components for backwards compatibility
-    from .config import (
+    from .config import (  # noqa: F401
         ConfigManager,
         ShortcutManager,
         config_manager,
@@ -56,8 +56,8 @@ try:
     )
 
     # Import key history components for backwards compatibility
-    from .history import HistoryManager, history_logger
-    from .resources import (
+    from .history import HistoryManager, history_logger  # noqa: F401
+    from .resources import (  # noqa: F401
         ResourceMapper,
         ResourceTracker,
         format_memory_size,

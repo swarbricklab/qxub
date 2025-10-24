@@ -6,8 +6,6 @@ options and contexts (conda, modules, singularity, default) into a single
 comprehensive interface.
 """
 
-import logging
-
 import click
 
 from .config import config_manager
@@ -351,7 +349,6 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         if shortcut_match:
             shortcut_name = shortcut_match["name"]
             shortcut_def = shortcut_match["definition"]
-            remaining_args = shortcut_match["remaining_args"]
 
             # Apply shortcut settings (CLI options still override)
             for key, value in shortcut_def.items():

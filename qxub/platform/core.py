@@ -15,7 +15,6 @@ Platform definitions are loaded from YAML files in standard locations:
 
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,7 +23,6 @@ import yaml
 
 from ..resources import (
     evaluate_condition,
-    format_walltime,
     parse_memory_size,
     parse_walltime,
     suggest_resource_adjustment,
@@ -408,14 +406,6 @@ class PlatformLoader:
         """Reload all platform definitions."""
         self.platforms.clear()
         self._load_platforms()
-
-    def get_platform(self, name: str) -> Optional[Platform]:
-        """Get platform by name."""
-        return self.platforms.get(name)
-
-    def list_platforms(self) -> List[str]:
-        """List all available platform names."""
-        return list(self.platforms.keys())
 
     def reload_platforms(self):
         """Reload all platform definitions."""

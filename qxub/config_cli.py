@@ -148,13 +148,10 @@ def list_config(
 
     if user_only:
         config_to_show = config_manager.user_config
-        title_suffix = " (User Only)"
     elif system_only:
         config_to_show = config_manager.system_config
-        title_suffix = " (System Only)"
     else:
         config_to_show = config_manager.merged_config
-        title_suffix = ""
 
     if not config_to_show:
         if user_only:
@@ -555,7 +552,7 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
             project=alias_def.get("project", "test"),
             queue=alias_def.get("queue", "test"),
         )
-        resolved = config_manager.resolve_templates(alias_def, template_vars)
+        config_manager.resolve_templates(alias_def, template_vars)
         click.echo("✅ Template resolution successful")
     except Exception as e:
         errors.append(f"Template resolution failed: {e}")

@@ -5,8 +5,6 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
 import logging
-import os
-import pathlib
 import shlex
 import subprocess
 import sys
@@ -69,14 +67,13 @@ class SimpleSpinner:
 
     def _is_remote_ssh(self):
         """Detect if we're running in a remote SSH session where spinners don't work well."""
-        import os
 
         # Check for SSH environment variables that indicate remote execution
-        ssh_indicators = [
-            os.environ.get("SSH_CLIENT"),
-            os.environ.get("SSH_CONNECTION"),
-            os.environ.get("SSH_TTY"),
-        ]
+        # ssh_indicators = [
+        #     os.environ.get("SSH_CLIENT"),
+        #     os.environ.get("SSH_CONNECTION"),
+        #     os.environ.get("SSH_TTY"),
+        # ]
 
         # For now, allow spinners in SSH sessions for better UX
         # TODO: Make this configurable if needed
@@ -574,72 +571,6 @@ def _enhance_resource_data(data):
     return data
 
 
-def job_status(job_id):
-    """
-    Check the current status of a completed job_status function.
-
-    Returns:
-        string: Job state (R, Q, H, F, C, etc.)
-    """
-    logging.debug("Getting job status for job %s", job_id)
-
-    # Use DSV format with ASCII Unit Separator for robust parsing
-    delimiter = "\x1f"  # ASCII Unit Separator - designed for field separation
-    qstat_result = subprocess.run(
-        ["qstat", "-fx", "-F", "dsv", "-D", delimiter, job_id],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    # Check if qstat failed
-    if qstat_result.returncode != 0:
-        logging.debug("qstat failed for job %s", job_id)
-        return "C"  # Assume completed if qstat fails
-
-    # Parse DSV output to find job_state
-    output = qstat_result.stdout.strip()
-    if not output:
-        logging.error("Empty qstat output for job %s", job_id)
-        return "C"  # Assume completed if no output
-
-    # Split on delimiter and look for job_state field
-    fields = output.split(delimiter)
-    for field in fields:
-        if field.startswith("job_state="):
-            status = field.split("=", 1)[1]
-            logging.debug("Job status: %s", status)
-            return status
-
-    # Fallback: if job_state not found, try simple qstat
-    logging.warning("job_state field not found in DSV output, trying simple qstat")
-    try:
-        fallback_result = subprocess.run(
-            ["qstat", job_id],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if fallback_result.returncode == 0 and fallback_result.stdout:
-            # Parse simple qstat output
-            lines = fallback_result.stdout.strip().split("\n")
-            if len(lines) >= 2:  # Header + job line
-                job_line = lines[-1].split()
-                if len(job_line) >= 8:
-                    status = job_line[-1]  # Last column is status
-                    logging.debug("Job status from simple qstat: %s", status)
-                    return status
-
-        # Final fallback - assume completed
-        logging.warning("All qstat methods failed, assuming job completed")
-        return "C"
-    except Exception as e:
-        logging.error("Exception in job_status fallback: %s", e)
-        return "C"
-
-
 def _format_completion_message(job_id, exit_status, status_dir):
     """
     Format a completion message with appropriate emoji and hook status information.
@@ -895,8 +826,6 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
     Returns:
         int: Job exit status
     """
-    import sys
-    import time
     from pathlib import Path
 
     # Determine status directory based on output file location
@@ -904,7 +833,6 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
 
     # Status files to monitor (using job ID directly for uniqueness)
     job_started_file = status_dir / f"job_started_{job_id}"
-    main_started_file = status_dir / f"main_started_{job_id}"
     final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
 
     # Track job state
@@ -994,9 +922,6 @@ def stream_job_output_with_status_files(
     Returns:
         int: Job exit status
     """
-    import os
-    import sys
-    import time
 
     # Keep track of file positions to avoid re-reading
     out_pos = 0
@@ -1061,9 +986,6 @@ def stream_job_output(job_id, out_file, err_file):
     Returns:
         int: Job exit status
     """
-    import os
-    import sys
-    import time
 
     # Keep track of file positions to avoid re-reading
     out_pos = 0

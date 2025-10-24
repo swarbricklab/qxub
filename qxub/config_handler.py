@@ -185,8 +185,6 @@ def select_auto_queue(params):
                         walltime_hours = requirements.get("walltime", 3600)
                         # Convert walltime to hours if it's a string
                         if isinstance(walltime_hours, str):
-                            from .resources import parse_walltime
-
                             walltime_hours = parse_walltime(walltime_hours) or 1.0
                         elif isinstance(walltime_hours, (int, float)):
                             walltime_hours = (

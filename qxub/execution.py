@@ -11,7 +11,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import click
 
@@ -47,9 +47,6 @@ def expand_submission_variables(cmd_str: str) -> str:
         expand_submission_variables('"awk \\"{print \\\$1}\\" file"')
         # Returns: 'awk "{print $1}" file'
     """
-    import logging
-    import os
-    import re
 
     # Check for smart quote processing (double-quote wrapped commands)
     if cmd_str.startswith('"') and cmd_str.endswith('"') and len(cmd_str) > 1:

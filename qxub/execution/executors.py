@@ -15,7 +15,7 @@ from ..core.templates import (
     get_module_template,
     get_singularity_template,
 )
-from .core import submit_and_monitor_job, validate_execution_context
+from .core import submit_and_monitor_job
 
 
 def _handle_terse_execution(ctx, command, template_path, context_vars, pre, post):

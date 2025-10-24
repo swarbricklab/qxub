@@ -1,22 +1,17 @@
 """
 Remote execution backends for qxub v2.2.
 
-This module provides the execution backends for different protocol        # Show SSH command in verbose mode
-        if verbose >= 2:
-            print(f"🔗 SSH connection: ssh {self.config.hostname}", file=sys.stderr)
-            # Show the command with proper quoting for display
-            ssh_display = ssh_command[:-1] + [shlex.quote(ssh_command[-1])]
-            print(f"🔧 SSH command: {' '.join(ssh_display)}", file=sys.stderr)tarting with SSH-based remote execution.
+This module provides the execution backends for different protocols,
+starting with SSH-based remote execution.
 """
 
 import logging
 import select
-import shlex
 import subprocess
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List
 
 from .config import RemoteConfig
 

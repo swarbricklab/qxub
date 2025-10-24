@@ -408,7 +408,7 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
 
         return result if result else None
 
-    except Exception as e:
+    except Exception:
         return None
 
 

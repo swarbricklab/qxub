@@ -7,7 +7,7 @@ Snakemake, NextFlow, CWL, and other workflow engines.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 
 class ResourceMapper:

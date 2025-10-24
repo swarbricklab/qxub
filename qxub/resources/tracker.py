@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .parser import bytes_to_human, size_to_bytes, time_to_seconds
+from .parser import size_to_bytes, time_to_seconds
 
 
 class ResourceTracker:

@@ -10,7 +10,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import List, Union
 
 import click
 

@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 import click
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
 
 from .resources import resource_tracker
 
