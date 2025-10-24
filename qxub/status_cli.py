@@ -321,7 +321,7 @@ def _calculate_duration(job):
         duration = end - start
 
         if duration.days > 0:
-            return f"{duration.days}d {duration.seconds//3600}h"
+            return f"{duration.days}d {duration.seconds // 3600}h"
         elif duration.seconds >= 3600:
             hours = duration.seconds // 3600
             minutes = (duration.seconds % 3600) // 60

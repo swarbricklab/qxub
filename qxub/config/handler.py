@@ -205,7 +205,7 @@ def select_auto_queue(params):
 
         if best_queue:
             params["queue"] = best_queue
-            logging.info(f"Auto-selected queue: {best_queue}")
+            logging.info("Auto-selected queue: %s", best_queue)
         else:
             logging.warning("No suitable queue found for requirements, using 'normal'")
             params["queue"] = "normal"
@@ -216,7 +216,7 @@ def select_auto_queue(params):
         )
         params["queue"] = "normal"
     except Exception as e:
-        logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
+        logging.warning("Auto queue selection failed: %s, using 'normal'", e)
         params["queue"] = "normal"
 
     return params

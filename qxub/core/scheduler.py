@@ -416,7 +416,7 @@ def parse_qstat_fx_output(qstat_output):
     # Parse line by line
     for line in qstat_output.split("\n"):
         line = line.strip()
-        if not line or not "=" in line:
+        if not line or "=" not in line:
             continue
 
         # Split on first '=' to handle values with '=' in them
@@ -603,7 +603,7 @@ def _format_completion_message(job_id, exit_status, status_dir):
     pre_exit_file = pathlib.Path(status_dir) / "pre_exit_code"
     if pre_exit_file.exists():
         try:
-            with open(pre_exit_file, "r") as f:
+            with open(pre_exit_file, "r", encoding="utf-8") as f:
                 pre_exit_code = int(f.readline().strip())
                 if pre_exit_code == 0:
                     hook_info.append("pre ✅")
@@ -616,7 +616,7 @@ def _format_completion_message(job_id, exit_status, status_dir):
     main_exit_file = pathlib.Path(status_dir) / "main_exit_code"
     if main_exit_file.exists():
         try:
-            with open(main_exit_file, "r") as f:
+            with open(main_exit_file, "r", encoding="utf-8") as f:
                 main_exit_code = int(f.readline().strip())
                 if main_exit_code == 0:
                     hook_info.append("main ✅")
@@ -629,7 +629,7 @@ def _format_completion_message(job_id, exit_status, status_dir):
     post_exit_file = pathlib.Path(status_dir) / "post_exit_code"
     if post_exit_file.exists():
         try:
-            with open(post_exit_file, "r") as f:
+            with open(post_exit_file, "r", encoding="utf-8") as f:
                 post_exit_code = int(f.readline().strip())
                 if post_exit_code == 0:
                     hook_info.append("post ✅")
@@ -655,7 +655,7 @@ def collect_job_resources_after_completion(job_id, out_file):
         # Derive joblog path from out_file path
         joblog_path = str(out_file).replace(".out", ".log")
 
-        logging.debug(f"Waiting for PBS to finalize joblog for job {job_id}")
+        logging.debug("Waiting for PBS to finalize joblog for job %s", job_id)
 
         # Wait 60 seconds for PBS to write final resource information to joblog
         time.sleep(60)
@@ -666,7 +666,11 @@ def collect_job_resources_after_completion(job_id, out_file):
 
         for attempt in range(max_retries):
             logging.debug(
-                f"Attempting to collect resource usage from joblog for job {job_id} (attempt {attempt + 1}/{max_retries})"
+                "Attempting to collect resource usage from joblog for job %s "
+                "(attempt %d/%d)",
+                job_id,
+                attempt + 1,
+                max_retries,
             )
 
             try:
@@ -685,10 +689,8 @@ def collect_job_resources_after_completion(job_id, out_file):
                             f"Successfully updated resource data for job {job_id}"
                         )
                         return
-                    else:
-                        logging.debug(
-                            f"Failed to update resource data for job {job_id}"
-                        )
+
+                    logging.debug(f"Failed to update resource data for job {job_id}")
                 else:
                     logging.debug(
                         f"Could not parse resource data from joblog: {joblog_path}"
@@ -711,7 +713,7 @@ def collect_job_resources_after_completion(job_id, out_file):
         )
 
     except Exception as e:
-        logging.debug(f"Resource collection failed for job {job_id}: {e}")
+        logging.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
 def start_background_resource_collection(job_id, joblog_path):
@@ -746,7 +748,11 @@ def start_background_resource_collection(job_id, joblog_path):
 
             for attempt in range(max_retries):
                 logging.debug(
-                    f"Background attempt to collect resource usage for job {job_id} (attempt {attempt + 1}/{max_retries})"
+                    "Background attempt to collect resource usage for job %s "
+                    "(attempt %d/%d)",
+                    job_id,
+                    attempt + 1,
+                    max_retries,
                 )
 
                 try:
@@ -765,10 +771,10 @@ def start_background_resource_collection(job_id, joblog_path):
                                 f"Background resource collection completed for job {job_id}"
                             )
                             return
-                        else:
-                            logging.debug(
-                                f"Failed to update resource data for job {job_id}"
-                            )
+
+                        logging.debug(
+                            f"Failed to update resource data for job {job_id}"
+                        )
                     else:
                         logging.debug(
                             f"Could not parse resource data from joblog: {joblog_path}"
@@ -776,7 +782,11 @@ def start_background_resource_collection(job_id, joblog_path):
 
                 except Exception as e:
                     logging.debug(
-                        f"Error in background resource collection for job {job_id} (attempt {attempt + 1}): {e}"
+                        "Error in background resource collection for job %s "
+                        "(attempt %d): %s",
+                        job_id,
+                        attempt + 1,
+                        e,
                     )
 
                 # If not the last attempt, wait before retrying
@@ -795,7 +805,9 @@ def start_background_resource_collection(job_id, joblog_path):
             }
             resource_tracker.update_job_resources(job_id, failed_data)
             logging.debug(
-                f"Background resource collection failed for job {job_id} after {max_retries} attempts"
+                "Background resource collection failed for job %s after %d attempts",
+                job_id,
+                max_retries,
             )
 
         except Exception as e:
@@ -903,7 +915,7 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
 def read_exit_status_from_file(exit_code_file):
     """Read exit status from a status file."""
     try:
-        with open(str(exit_code_file), "r") as f:
+        with open(str(exit_code_file), "r", encoding="utf-8") as f:
             content = f.read().strip()
             # Status file format: first line is exit code, second line is timestamp
             first_line = content.split("\n")[0]
@@ -922,6 +934,7 @@ def stream_job_output_with_status_files(
     Returns:
         int: Job exit status
     """
+    import os
 
     # Keep track of file positions to avoid re-reading
     out_pos = 0
@@ -932,7 +945,7 @@ def stream_job_output_with_status_files(
         # Stream new output from STDOUT
         if os.path.exists(out_file):
             try:
-                with open(out_file, "r") as f:
+                with open(out_file, "r", encoding="utf-8") as f:
                     f.seek(out_pos)
                     for line in f:
                         print(line.rstrip(), file=sys.stdout, flush=True)
@@ -943,7 +956,7 @@ def stream_job_output_with_status_files(
         # Stream new output from STDERR
         if os.path.exists(err_file):
             try:
-                with open(err_file, "r") as f:
+                with open(err_file, "r", encoding="utf-8") as f:
                     f.seek(err_pos)
                     for line in f:
                         print(line.rstrip(), file=sys.stderr, flush=True)
@@ -956,7 +969,7 @@ def stream_job_output_with_status_files(
             # Read any final output
             if os.path.exists(out_file):
                 try:
-                    with open(out_file, "r") as f:
+                    with open(out_file, "r", encoding="utf-8") as f:
                         f.seek(out_pos)
                         for line in f:
                             print(line.rstrip(), file=sys.stdout, flush=True)
@@ -965,7 +978,7 @@ def stream_job_output_with_status_files(
 
             if os.path.exists(err_file):
                 try:
-                    with open(err_file, "r") as f:
+                    with open(err_file, "r", encoding="utf-8") as f:
                         f.seek(err_pos)
                         for line in f:
                             print(line.rstrip(), file=sys.stderr, flush=True)
@@ -986,6 +999,7 @@ def stream_job_output(job_id, out_file, err_file):
     Returns:
         int: Job exit status
     """
+    import os
 
     # Keep track of file positions to avoid re-reading
     out_pos = 0
@@ -998,7 +1012,7 @@ def stream_job_output(job_id, out_file, err_file):
         # Stream new output from STDOUT
         if os.path.exists(out_file):
             try:
-                with open(out_file, "r") as f:
+                with open(out_file, "r", encoding="utf-8") as f:
                     f.seek(out_pos)
                     for line in f:
                         print(line.rstrip(), file=sys.stdout, flush=True)
@@ -1009,7 +1023,7 @@ def stream_job_output(job_id, out_file, err_file):
         # Stream new output from STDERR
         if os.path.exists(err_file):
             try:
-                with open(err_file, "r") as f:
+                with open(err_file, "r", encoding="utf-8") as f:
                     f.seek(err_pos)
                     for line in f:
                         print(line.rstrip(), file=sys.stderr, flush=True)
@@ -1022,7 +1036,7 @@ def stream_job_output(job_id, out_file, err_file):
             # Read any final output
             if os.path.exists(out_file):
                 try:
-                    with open(out_file, "r") as f:
+                    with open(out_file, "r", encoding="utf-8") as f:
                         f.seek(out_pos)
                         for line in f:
                             print(line.rstrip(), file=sys.stdout, flush=True)
@@ -1031,7 +1045,7 @@ def stream_job_output(job_id, out_file, err_file):
 
             if os.path.exists(err_file):
                 try:
-                    with open(err_file, "r") as f:
+                    with open(err_file, "r", encoding="utf-8") as f:
                         f.seek(err_pos)
                         for line in f:
                             print(line.rstrip(), file=sys.stderr, flush=True)

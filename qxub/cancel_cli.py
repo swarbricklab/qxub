@@ -531,7 +531,7 @@ def cancel_all(user, queue, status, force, quiet):
         click.echo(f"   Status filter: {status}")
     click.echo(
         f"   Jobs: {', '.join(matching_jobs[:10])}"
-        + (f" and {len(matching_jobs)-10} more..." if len(matching_jobs) > 10 else "")
+        + (f" and {len(matching_jobs) - 10} more..." if len(matching_jobs) > 10 else "")
     )
 
     if not force:

@@ -5,7 +5,8 @@ Handles loading and merging configuration from system, user, and environment sou
 with hierarchical precedence and template variable substitution.
 """
 
-# pylint: disable=no-else-return,no-else-continue,broad-exception-caught,too-many-return-statements
+# pylint: disable=no-else-return,no-else-continue,broad-exception-caught
+# pylint: disable=too-many-return-statements
 
 
 import os
@@ -17,7 +18,8 @@ from typing import Any, Dict, List, Optional
 import click
 from omegaconf import DictConfig, OmegaConf
 
-# pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements,no-else-continue,duplicate-code
+# pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements
+# pylint: disable=no-else-continue,duplicate-code
 
 
 class ConfigManager:
@@ -83,46 +85,35 @@ class ConfigManager:
         self,
     ) -> tuple[Optional[DictConfig], Optional[DictConfig], Optional[DictConfig]]:
         """Load project, local, and test configurations."""
-        project_config = None
-        local_config = None
-        test_config = None
-
         project_dir = self._get_project_config_dir()
-        if project_dir:
-            # Load project config (.qx/project.yaml)
-            project_file = project_dir / "project.yaml"
-            if project_file.exists():
-                try:
-                    project_config = OmegaConf.load(project_file)
-                except Exception as e:
-                    click.echo(
-                        f"Warning: Failed to load project config {project_file}: {e}",
-                        err=True,
-                    )
+        if not project_dir:
+            return None, None, None
 
-            # Load local config (.qx/local.yaml)
-            local_file = project_dir / "local.yaml"
-            if local_file.exists():
-                try:
-                    local_config = OmegaConf.load(local_file)
-                except Exception as e:
-                    click.echo(
-                        f"Warning: Failed to load local config {local_file}: {e}",
-                        err=True,
-                    )
+        config_files = ["project.yaml", "local.yaml", "test.yaml"]
+        configs = []
 
-            # Load test config (.qx/test.yaml)
-            test_file = project_dir / "test.yaml"
-            if test_file.exists():
-                try:
-                    test_config = OmegaConf.load(test_file)
-                except Exception as e:
-                    click.echo(
-                        f"Warning: Failed to load test config {test_file}: {e}",
-                        err=True,
-                    )
+        for config_file in config_files:
+            config_path = project_dir / config_file
+            config = self._load_config_file(config_path, config_file)
+            configs.append(config)
 
-        return project_config, local_config, test_config
+        return tuple(configs)
+
+    def _load_config_file(
+        self, config_path: Path, config_name: str
+    ) -> Optional[DictConfig]:
+        """Load a single config file with error handling."""
+        if not config_path.exists():
+            return None
+
+        try:
+            return OmegaConf.load(config_path)
+        except Exception as e:
+            click.echo(
+                f"Warning: Failed to load {config_name} config {config_path}: {e}",
+                err=True,
+            )
+            return None
 
     def _load_system_config(
         self,
@@ -242,7 +233,8 @@ class ConfigManager:
         Args:
             value: The value to resolve templates in
             template_vars: Dictionary of template variables
-            max_iterations: Maximum number of recursive resolution attempts to prevent infinite loops
+            max_iterations: Maximum number of recursive resolution attempts to
+                prevent infinite loops
         """
         if isinstance(value, str):
             # Only resolve if there are template placeholders
@@ -265,8 +257,8 @@ class ConfigManager:
                         return resolved_value
                 # If we hit max iterations, warn about possible infinite loop
                 click.echo(
-                    f"Warning: Template resolution hit maximum iterations ({max_iterations}) for '{value}'. "
-                    f"Possible circular reference.",
+                    f"Warning: Template resolution hit maximum iterations "
+                    f"({max_iterations}) for '{value}'. Possible circular reference.",
                     err=True,
                 )
                 return resolved_value

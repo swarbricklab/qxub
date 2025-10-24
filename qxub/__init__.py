@@ -36,8 +36,9 @@ except ImportError:
     # Remote execution dependencies not available
     __all__ = ["qxub"]
 
-from . import config  # noqa: F401
-from .core import scheduler  # noqa: F401
+# Backwards compatibility imports (must come after conditional remote imports)
+from . import config  # noqa: F401,E402
+from .core import scheduler  # noqa: F401,E402
 
 # CLI is imported at the top of the file
 

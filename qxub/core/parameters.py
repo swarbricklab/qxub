@@ -63,29 +63,31 @@ def apply_config_defaults(params: Dict[str, Any]) -> Dict[str, Any]:
     """Apply configuration defaults to parameters."""
     defaults = config_manager.get_defaults()
 
+    # Define default values with fallbacks
+    default_mappings = {
+        "out": defaults.get("out", get_default_output_dir() / "out"),
+        "err": defaults.get("err", get_default_output_dir() / "err"),
+        "joblog": defaults.get("joblog"),
+        "queue": defaults.get("queue", "normal"),
+        "name": defaults.get("name", "qt"),
+        "project": defaults.get("project", os.getenv("PROJECT")),
+        "resources": defaults.get("resources", []),
+    }
+
     # Apply defaults if not explicitly set by CLI
-    if params.get("out") is None:
-        params["out"] = defaults.get("out", get_default_output_dir() / "out")
-    if params.get("err") is None:
-        params["err"] = defaults.get("err", get_default_output_dir() / "err")
-    if params.get("joblog") is None:
-        params["joblog"] = defaults.get("joblog")
-    if params.get("queue") is None:
-        params["queue"] = defaults.get("queue", "normal")
-    if params.get("name") is None:
-        params["name"] = defaults.get("name", "qt")
-    if params.get("project") is None:
-        params["project"] = defaults.get("project", os.getenv("PROJECT"))
-    if not params.get("resources"):  # Empty tuple means no resources provided
-        params["resources"] = defaults.get("resources", [])
+    for param, default_value in default_mappings.items():
+        if params.get(param) is None:
+            # Special handling for resources (empty tuple check)
+            if param == "resources" and not params.get("resources"):
+                params[param] = default_value
+            elif param != "resources":
+                params[param] = default_value
 
     # Ensure boolean flags have defaults
-    if params.get("dry") is None:
-        params["dry"] = False
-    if params.get("quiet") is None:
-        params["quiet"] = False
-    if params.get("terse") is None:
-        params["terse"] = False
+    boolean_defaults = {"dry": False, "quiet": False, "terse": False}
+    for param, default_value in boolean_defaults.items():
+        if params.get(param) is None:
+            params[param] = default_value
 
     return params
 
@@ -200,16 +202,16 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
                             best_queue = selected_queue
             except Exception as e:
                 logging.debug(
-                    f"Failed to select queue from platform {platform.name}: {e}"
+                    "Failed to select queue from platform %s: %s", platform.name, e
                 )
                 continue
 
         if best_queue:
-            logging.info(f"Auto-selected queue: {best_queue}")
+            logging.info("Auto-selected queue: %s", best_queue)
             return best_queue
-        else:
-            logging.warning("No suitable queue found for requirements, using 'normal'")
-            return "normal"
+
+        logging.warning("No suitable queue found for requirements, using 'normal'")
+        return "normal"
 
     except ImportError:
         logging.warning(
@@ -217,7 +219,7 @@ def auto_select_queue(params: Dict[str, Any]) -> str:
         )
         return "normal"
     except Exception as e:
-        logging.warning(f"Auto queue selection failed: {e}, using 'normal'")
+        logging.warning("Auto queue selection failed: %s, using 'normal'", e)
         return "normal"
 
 

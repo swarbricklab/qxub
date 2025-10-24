@@ -81,40 +81,41 @@ def parse_walltime(walltime_str: str) -> Optional[float]:
 
     walltime_str = walltime_str.strip()
 
-    # Try HH:MM:SS format
+    # Try HH:MM:SS or HH:MM format
     if ":" in walltime_str:
-        parts = walltime_str.split(":")
-        if len(parts) == 3:
-            try:
-                hours = int(parts[0])
-                minutes = int(parts[1])
-                seconds = int(parts[2])
-                return hours + minutes / 60 + seconds / 3600
-            except ValueError:
-                pass
-        elif len(parts) == 2:
-            try:
-                hours = int(parts[0])
-                minutes = int(parts[1])
-                return hours + minutes / 60
-            except ValueError:
-                pass
+        return _parse_colon_format(walltime_str)
 
     # Try human-readable format (1h, 30m, 45s)
-    match = re.match(r"^(\d+(?:\.\d+)?)\s*([hms]?)$", walltime_str.lower())
-    if match:
-        value, unit = match.groups()
-        value = float(value)
+    return _parse_unit_format(walltime_str)
 
-        if unit == "h" or unit == "":
-            return value
-        elif unit == "m":
-            return value / 60
-        elif unit == "s":
-            return value / 3600
 
-    logger.warning(f"Could not parse walltime: {walltime_str}")
+def _parse_colon_format(walltime_str: str) -> Optional[float]:
+    """Parse HH:MM:SS or HH:MM format."""
+    parts = walltime_str.split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = map(int, parts)
+            return hours + minutes / 60 + seconds / 3600
+        elif len(parts) == 2:
+            hours, minutes = map(int, parts)
+            return hours + minutes / 60
+    except ValueError:
+        pass
     return None
+
+
+def _parse_unit_format(walltime_str: str) -> Optional[float]:
+    """Parse unit format like 1h, 30m, 45s."""
+    match = re.match(r"^(\d+(?:\.\d+)?)\s*([hms]?)$", walltime_str.lower())
+    if not match:
+        logger.warning(f"Could not parse walltime: {walltime_str}")
+        return None
+
+    value, unit = match.groups()
+    value = float(value)
+
+    unit_multipliers = {"h": 1, "": 1, "m": 1 / 60, "s": 1 / 3600}
+    return value * unit_multipliers.get(unit, 1)
 
 
 def format_walltime(hours: float) -> str:

@@ -44,7 +44,7 @@ def expand_submission_variables(cmd_str: str) -> str:
         # Returns: 'find /path -exec echo "User: jr9959" \\;'
 
         # Literal dollar preservation
-        expand_submission_variables('"awk \\"{print \\\$1}\\" file"')
+        expand_submission_variables('"awk \\"{print \\\\$1}\\" file"')
         # Returns: 'awk "{print $1}" file'
     """
 
@@ -140,7 +140,7 @@ def expand_variables_preserving_quotes(cmd_str: str, is_list: bool = False) -> s
 
     def save_escaped_var(match):
         escaped_vars.append(match.group(1))  # Save the $VAR part
-        return f"__ESCAPED_VAR_{len(escaped_vars)-1}__"
+        return f"__ESCAPED_VAR_{len(escaped_vars) - 1}__"
 
     result = re.sub(escaped_pattern, save_escaped_var, result)
 
