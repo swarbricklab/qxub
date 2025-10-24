@@ -40,6 +40,22 @@ echo "📍 Current directory: $(pwd)"
 # Strict mode with error handling
 set -e
 
+# Update database status function (defined early so error handler can use it)
+update_job_status() {
+    local status="$1"
+    if command -v python3 > /dev/null 2>&1; then
+        python3 -c "
+import sys, os
+sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+try:
+    from qxub.resources.tracker import resource_tracker
+    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
+except Exception as e:
+    pass  # Silently ignore database update failures
+" 2>/dev/null || true
+    fi
+}
+
 # Error handler function
 error_handler() {
     local exit_code=$?
@@ -67,29 +83,64 @@ echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "🚀 Job started at $(date -Iseconds)"
 
-# Update database status to 'running'
-update_job_status() {
-    local status="$1"
-    if command -v python3 > /dev/null 2>&1; then
-        python3 -c "
-import sys, os
-sys.path.insert(0, '/g/data/a56/software/qsub_tools')
-try:
-    from qxub.resource_tracker import resource_tracker
-    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
-except Exception as e:
-    pass  # Silently ignore database update failures
-" 2>/dev/null || true
-    fi
-}
-
 # Mark job as running
 update_job_status "running"
 
 # Activate conda environment
 echo "🔄 Activating conda environment: $env"
-eval "$(conda shell.bash hook)"
-conda activate $env
+
+# Check if conda is available and properly initialized
+if ! command -v conda > /dev/null 2>&1; then
+    echo "❌ ERROR: conda command not found"
+    echo "💡 Possible solutions:"
+    echo "   1. Run 'conda init bash' to initialize conda in your shell"
+    echo "   2. Add conda to your PATH in ~/.bashrc"
+    echo "   3. Ensure conda storage volumes are mounted (e.g., -l storage=gdata/conda)"
+    echo "   4. Check that your conda installation path is accessible from compute nodes"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Initialize conda shell integration
+echo "🔧 Initializing conda shell integration..."
+if ! eval "$(conda shell.bash hook)" 2>&1; then
+    echo "❌ ERROR: Failed to initialize conda shell integration"
+    echo "💡 Possible solutions:"
+    echo "   1. Run 'conda init bash' in your login shell to set up conda properly"
+    echo "   2. Check that conda is properly installed and accessible"
+    echo "   3. Verify that your ~/.bashrc contains conda initialization code"
+    echo "   4. Ensure conda storage volumes are mounted in your PBS job"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Capture conda activate output and check if environment exists
+if ! conda activate $env 2>&1; then
+    echo "❌ ERROR: Failed to activate conda environment: $env"
+    echo "💡 Possible solutions:"
+    echo "   1. Check that the environment exists: conda env list"
+    echo "   2. Create the environment: conda create -n $env"
+    echo "   3. Verify the environment name is spelled correctly"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Verify that the environment was actually activated
+if [ "$CONDA_DEFAULT_ENV" != "$env" ]; then
+    echo "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+echo "✅ Successfully activated conda environment: $env"
 
 # Switch work directory
 echo "📂 Changing to working directory: $cwd"
