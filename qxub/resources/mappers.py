@@ -113,6 +113,17 @@ class ResourceMapper:
             else:
                 raise ValueError(f"Invalid disk format: {disk}")
 
+    def add_storage(self, storage: Union[str, int], unit: str = "MB") -> None:
+        """Add storage volume specification."""
+        if isinstance(storage, int):
+            self.pbs_resources.append(f"storage={storage}{unit}")
+        elif isinstance(storage, str):
+            storage_clean = storage.replace(" ", "").upper()
+            if re.match(r"^\d+[KMGT]?B?$", storage_clean):
+                self.pbs_resources.append(f"storage={storage_clean}")
+            else:
+                raise ValueError(f"Invalid storage format: {storage}")
+
     def add_custom(self, key: str, value: str) -> None:
         """Add custom PBS resource specification."""
         self.pbs_resources.append(f"{key}={value}")
@@ -171,6 +182,16 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
     elif "jobfs" in resources:
         mapper.add_disk(resources["jobfs"])
 
+    # Storage
+    if "storage_mb" in resources:
+        mapper.add_storage(resources["storage_mb"], "MB")
+    elif "storage_gb" in resources:
+        mapper.add_storage(resources["storage_gb"], "GB")
+    elif "storage" in resources:
+        mapper.add_storage(resources["storage"])
+    elif "volumes" in resources:
+        mapper.add_storage(resources["volumes"])
+
     # Custom resources (passed through if they look like PBS resources)
     for key, value in resources.items():
         if key not in [
@@ -184,6 +205,10 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
             "disk_mb",
             "disk_gb",
             "jobfs",
+            "storage_mb",
+            "storage_gb",
+            "storage",
+            "volumes",
         ]:
             # Check if it's a valid PBS resource name
             if isinstance(value, (str, int)):

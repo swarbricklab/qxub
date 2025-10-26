@@ -61,6 +61,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Local disk/jobfs requirement (workflow-friendly). Examples: '10GB', '500MB'. Converted to PBS format automatically.",
 )
 @click.option(
+    "--volumes",
+    "--storage",
+    help="Storage volume requirement (workflow-friendly). Examples: '500GB', '2TB'. Converted to PBS storage= automatically.",
+)
+@click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
 )
 @click.option(
@@ -412,32 +417,39 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
 
     # Process workflow-friendly resource options
     workflow_resources = []
-    if options.get("mem") or options.get("memory"):
+    if any(
+        [
+            options.get("mem"),
+            options.get("memory"),
+            options.get("runtime"),
+            options.get("time"),
+            options.get("cpus"),
+            options.get("threads"),
+            options.get("disk"),
+            options.get("jobfs"),
+            options.get("volumes"),
+            options.get("storage"),
+        ]
+    ):
         from .resources import ResourceMapper
 
         mapper = ResourceMapper()
-        mapper.add_memory(options.get("mem") or options.get("memory"))
-        workflow_resources.extend(mapper.get_pbs_resources())
 
-    if options.get("runtime") or options.get("time"):
-        from .resource_mappers import ResourceMapper
+        if options.get("mem") or options.get("memory"):
+            mapper.add_memory(options.get("mem") or options.get("memory"))
 
-        mapper = ResourceMapper()
-        mapper.add_runtime(options.get("runtime") or options.get("time"))
-        workflow_resources.extend(mapper.get_pbs_resources())
+        if options.get("runtime") or options.get("time"):
+            mapper.add_runtime(options.get("runtime") or options.get("time"))
 
-    if options.get("cpus") or options.get("threads"):
-        from .resource_mappers import ResourceMapper
+        if options.get("cpus") or options.get("threads"):
+            mapper.add_cpus(options.get("cpus") or options.get("threads"))
 
-        mapper = ResourceMapper()
-        mapper.add_cpus(options.get("cpus") or options.get("threads"))
-        workflow_resources.extend(mapper.get_pbs_resources())
+        if options.get("disk") or options.get("jobfs"):
+            mapper.add_disk(options.get("disk") or options.get("jobfs"))
 
-    if options.get("disk") or options.get("jobfs"):
-        from .resource_mappers import ResourceMapper
+        if options.get("volumes") or options.get("storage"):
+            mapper.add_storage(options.get("volumes") or options.get("storage"))
 
-        mapper = ResourceMapper()
-        mapper.add_disk(options.get("disk") or options.get("jobfs"))
         workflow_resources.extend(mapper.get_pbs_resources())
 
     # Merge workflow resources with existing PBS resources
