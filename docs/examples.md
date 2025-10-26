@@ -104,6 +104,33 @@ qxub exec --mem 16GB --cpus 8 --sif container.sif -- ./analysis               # 
 qxub exec --mem 4GB --cpus 2 -- ./native_program                              # Direct submission
 ```
 
+### Config Defaults for Workflow-Friendly Options
+
+Set default values for workflow-friendly options to avoid repeating common resource specifications:
+
+```bash
+# Set your typical resource defaults
+qxub config set mem "8GB"
+qxub config set cpus 4
+qxub config set runtime "2h"
+qxub config set disk "20GB"
+qxub config set volumes "gdata/a56+scratch/a56"
+
+# Now these are automatically applied
+qxub exec --env pytorch -- python script.py
+# Equivalent to: qxub exec --mem 8GB --cpus 4 --runtime 2h --disk 20GB --volumes gdata/a56+scratch/a56 --env pytorch -- python script.py
+
+# CLI options override config defaults
+qxub exec --mem 32GB --env pytorch -- python large_job.py
+# Uses 32GB memory but other defaults (cpus=4, runtime=2h, etc.)
+
+# View current config defaults
+qxub config list
+
+# Reset to remove all custom defaults
+qxub config reset
+```
+
 ## Basic Execution
 
 ```bash

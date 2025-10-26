@@ -58,11 +58,11 @@ qxub exec --shortcut python -- script.py
 | `--shortcut` | Use predefined shortcut | `--shortcut python` |
 | `--cmd` | Complex command (alternative to `--`) | `--cmd "echo \"Hello ${USER}\""` |
 | `--resources` | PBS resources (traditional format) | `--resources mem=16GB --resources ncpus=8` |
-| `--mem` / `--memory` | Memory requirement (workflow-friendly) | `--mem 16GB` or `--memory 4GB` |
-| `--cpus` / `--threads` | CPU cores/threads (workflow-friendly) | `--cpus 8` or `--threads 4` |
-| `--runtime` / `--time` | Walltime limit (workflow-friendly) | `--runtime 2h30m` or `--time 1h` |
-| `--disk` / `--jobfs` | Local disk requirement (workflow-friendly) | `--disk 100GB` or `--jobfs 50GB` |
-| `--volumes` / `--storage` | NCI storage volumes to mount | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
+| `--mem` / `--memory` | Memory requirement (workflow-friendly, default: configured) | `--mem 16GB` or `--memory 4GB` |
+| `--cpus` / `--threads` | CPU cores/threads (workflow-friendly, default: configured) | `--cpus 8` or `--threads 4` |
+| `--runtime` / `--time` | Walltime limit (workflow-friendly, default: configured) | `--runtime 2h30m` or `--time 1h` |
+| `--disk` / `--jobfs` | Local disk requirement (workflow-friendly, default: configured) | `--disk 100GB` or `--jobfs 50GB` |
+| `--volumes` / `--storage` | NCI storage volumes to mount (default: configured) | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
 | `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
 | `--name` | Job name | `--name myjob` |
 | `--project` | PBS project | `--project a56` |
