@@ -418,23 +418,67 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     # Process workflow-friendly resource options with config defaults
     workflow_resources = []
 
+    # Parse existing --resources to see what's already specified
+    existing_resource_keys = set()
+    if options["resources"]:
+        for resource in options["resources"]:
+            if "=" in resource:
+                key = resource.split("=", 1)[0]
+                existing_resource_keys.add(key)
+
+    # Map resource key aliases (e.g., ncpus -> cpus, walltime -> runtime)
+    resource_key_map = {
+        "ncpus": "cpus",
+        "walltime": "runtime",
+        "mem": "mem",
+        "jobfs": "disk",
+        "storage": "volumes",
+    }
+
+    # Check which resources are already specified (considering aliases)
+    specified_resources = set()
+    for key in existing_resource_keys:
+        canonical_key = resource_key_map.get(key, key)
+        specified_resources.add(canonical_key)
+
     # Collect all resource values (CLI args take precedence over config)
+    # Only use config defaults if the resource wasn't already specified in --resources
     resource_values = {
         "mem": options.get("mem")
         or options.get("memory")
-        or config_manager.get_config_value("mem"),
+        or (
+            config_manager.get_config_value("mem")
+            if "mem" not in specified_resources
+            else None
+        ),
         "runtime": options.get("runtime")
         or options.get("time")
-        or config_manager.get_config_value("runtime"),
+        or (
+            config_manager.get_config_value("runtime")
+            if "runtime" not in specified_resources
+            else None
+        ),
         "cpus": options.get("cpus")
         or options.get("threads")
-        or config_manager.get_config_value("cpus"),
+        or (
+            config_manager.get_config_value("cpus")
+            if "cpus" not in specified_resources
+            else None
+        ),
         "disk": options.get("disk")
         or options.get("jobfs")
-        or config_manager.get_config_value("disk"),
+        or (
+            config_manager.get_config_value("disk")
+            if "disk" not in specified_resources
+            else None
+        ),
         "volumes": options.get("volumes")
         or options.get("storage")
-        or config_manager.get_config_value("volumes"),
+        or (
+            config_manager.get_config_value("volumes")
+            if "volumes" not in specified_resources
+            else None
+        ),
     }
 
     # Only create mapper if we have any resource values to process

@@ -1,5 +1,21 @@
 # qxub Copilot Instructions
 
+## ⚠️ CRITICAL: Environment Setup
+
+**ALWAYS activate the `qxub` conda environment before testing ANY qxub commands!**
+
+```bash
+# Required before every test session
+cd /g/data/a56/software/qsub_tools
+conda activate qxub
+
+# Verify qxub is available (should show conda environment path)
+which qxub
+qxub --version
+```
+
+**Never run qxub commands without first activating the environment!** This is the most common source of testing errors.
+
 ## Project Overview
 
 qxub is a sophisticated PBS job submission wrapper for HPC environments that eliminates boilerplate when running jobs in conda environments, with modules, or in containers. The codebase follows a unified CLI architecture with execution contexts, intelligent queue selection, and comprehensive configuration management.
