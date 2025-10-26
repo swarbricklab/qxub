@@ -931,6 +931,32 @@ def shortcut_config():
 @click.option("--sif", help="Singularity container image")
 @click.option("--bind", help="Singularity bind mounts")
 @click.option("-l", "--resources", help="PBS resource requirements")
+@click.option(
+    "--mem",
+    "--memory",
+    help="Memory requirement (workflow-friendly). Examples: '4GB', '2000MB', '16g'",
+)
+@click.option(
+    "--runtime",
+    "--time",
+    help="Runtime/walltime limit (workflow-friendly). Examples: '2h', '30m', '1h30m', '02:30:00'",
+)
+@click.option(
+    "--cpus",
+    "--threads",
+    type=int,
+    help="Number of CPU cores/threads (workflow-friendly)",
+)
+@click.option(
+    "--disk",
+    "--jobfs",
+    help="Local disk/jobfs requirement (workflow-friendly). Examples: '10GB', '500MB'",
+)
+@click.option(
+    "--volumes",
+    "--storage",
+    help="Storage volumes to mount (NCI format). Examples: 'gdata/a56', 'gdata/a56+gdata/px14'",
+)
 @click.option("-q", "--queue", help="PBS queue name")
 @click.option("-N", "--name", help="PBS job name")
 @click.option("-P", "--project", help="PBS project code")
@@ -956,14 +982,17 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     matching commands.
 
     Examples:
-        # Create a Python shortcut (matches 'python', 'python3', 'python script.py', etc.)
-        qxub config shortcut set "python" --env datascience --queue express
+        # Create a Python shortcut with workflow-friendly options
+        qxub config shortcut set "python" --env datascience --mem 8GB --time 2h
 
-        # Create a Jupyter shortcut (matches 'jupyter', 'jupyter lab', etc.)
+        # Create a Jupyter shortcut with traditional PBS format
         qxub config shortcut set "jupyter" --env jupyter -l "mem=16GB,walltime=4:00:00"
 
-        # Create a DVC shortcut (matches 'dvc', 'dvc doctor', 'dvc add', etc.)
+        # Create a DVC shortcut with multiple modules
         qxub config shortcut set "dvc" --mod python3 --mod dvc
+
+        # Create a high-memory analysis shortcut
+        qxub config shortcut set "bigmem" --env scipy --mem 128GB --cpus 48 --time 8h
 
         # Create a Singularity ML shortcut
         qxub config shortcut set "tensorflow" --sif /path/to/tf.sif --bind /data:/mnt
@@ -998,8 +1027,52 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
             definition["bind"] = options["bind"]
 
     # PBS options
+    resources_list = []
+
+    # Handle workflow-friendly resource options - convert to PBS format
+    if options.get("mem") or options.get("memory"):
+        from qxub.resources import ResourceMapper
+
+        mapper = ResourceMapper()
+        mapper.add_memory(options.get("mem") or options.get("memory"))
+        resources_list.extend(mapper.get_pbs_resources())
+
+    if options.get("runtime") or options.get("time"):
+        from qxub.resources import ResourceMapper
+
+        mapper = ResourceMapper()
+        mapper.add_runtime(options.get("runtime") or options.get("time"))
+        resources_list.extend(mapper.get_pbs_resources())
+
+    if options.get("cpus") or options.get("threads"):
+        from qxub.resources import ResourceMapper
+
+        mapper = ResourceMapper()
+        mapper.add_cpus(options.get("cpus") or options.get("threads"))
+        resources_list.extend(mapper.get_pbs_resources())
+
+    if options.get("disk") or options.get("jobfs"):
+        from qxub.resources import ResourceMapper
+
+        mapper = ResourceMapper()
+        mapper.add_disk(options.get("disk") or options.get("jobfs"))
+        resources_list.extend(mapper.get_pbs_resources())
+
+    if options.get("volumes") or options.get("storage"):
+        from qxub.resources import ResourceMapper
+
+        mapper = ResourceMapper()
+        mapper.add_storage(options.get("volumes") or options.get("storage"))
+        resources_list.extend(mapper.get_pbs_resources())
+
+    # Handle traditional PBS resources format
     if options["resources"]:
-        definition["resources"] = [options["resources"]]
+        resources_list.append(options["resources"])
+
+    # Store resources if any were provided
+    if resources_list:
+        definition["resources"] = resources_list
+
     if options["queue"]:
         definition["queue"] = options["queue"]
     if options["name"]:
