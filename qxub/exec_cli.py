@@ -422,9 +422,11 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     existing_resource_keys = set()
     if options["resources"]:
         for resource in options["resources"]:
-            if "=" in resource:
-                key = resource.split("=", 1)[0]
-                existing_resource_keys.add(key)
+            # Split by comma in case of comma-separated resources (e.g., "ncpus=48,mem=128GB")
+            for part in resource.split(","):
+                if "=" in part:
+                    key = part.split("=", 1)[0].strip()
+                    existing_resource_keys.add(key)
 
     # Map resource key aliases (e.g., ncpus -> cpus, walltime -> runtime)
     resource_key_map = {
