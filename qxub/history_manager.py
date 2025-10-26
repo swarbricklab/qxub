@@ -144,8 +144,18 @@ class HistoryManager:
         error: Optional[str] = None,
         job_id: Optional[str] = None,
         resource_data: Optional[Dict] = None,
+        file_paths: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Log a command execution and return the execution timestamp."""
+        """Log a command execution and return the execution timestamp.
+
+        Args:
+            ctx: Click context
+            success: Whether execution was successful
+            error: Error message if failed
+            job_id: PBS job ID
+            resource_data: Resource usage data
+            file_paths: Dict with 'out', 'err', 'joblog' file paths
+        """
         try:
             # Generate microsecond timestamp
             execution_timestamp = str(int(time.time() * 1000000))
@@ -232,7 +242,7 @@ class HistoryManager:
                 "requested": {"main_options": ctx.params.copy() if ctx.params else {}},
                 "execution": {
                     "job_id": job_id,
-                    "joblog": None,  # To be filled in later if available
+                    "files": file_paths or {},  # Store file paths (out, err, joblog)
                     "status": "completed" if success else "failed",
                     "timestamp": datetime.now().isoformat(),
                     "exit_code": (
@@ -409,6 +419,52 @@ class HistoryManager:
             alias_def["target"] = recipe["target"]
 
         return alias_def
+
+    def get_execution_by_job_id(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get execution record by job ID."""
+        if not self.executions_file.exists():
+            return None
+
+        try:
+            config = OmegaConf.load(self.executions_file)
+            executions = config.get("executions", {})
+
+            # Search for execution with matching job_id
+            for ts, execution in executions.items():
+                if execution.get("execution", {}).get("job_id") == job_id:
+                    execution_copy = execution.copy()
+                    execution_copy["timestamp"] = ts
+                    return execution_copy
+
+            return None
+        except Exception:
+            return None
+
+    def get_most_recent_execution(self) -> Optional[Dict[str, Any]]:
+        """Get the most recent execution record."""
+        executions = self.get_executions(limit=1)
+        return executions[0] if executions else None
+
+    def get_execution_file_paths(
+        self, job_id: Optional[str] = None
+    ) -> Optional[Dict[str, str]]:
+        """Get file paths for a job execution.
+
+        Args:
+            job_id: PBS job ID. If None, returns paths for most recent job.
+
+        Returns:
+            Dict with 'out', 'err', 'joblog' paths or None if not found
+        """
+        if job_id:
+            execution = self.get_execution_by_job_id(job_id)
+        else:
+            execution = self.get_most_recent_execution()
+
+        if not execution:
+            return None
+
+        return execution.get("execution", {}).get("files", {})
 
 
 # Global history manager instance

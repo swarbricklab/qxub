@@ -339,7 +339,15 @@ def submit_and_monitor_job(
 
     # Log execution to history system
     try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
+        # Prepare file paths for history
+        file_paths = {
+            "out": ctx_obj["out"],
+            "err": ctx_obj["err"],
+            "joblog": ctx_obj.get("joblog"),  # May be None initially
+        }
+        history_manager.log_execution(
+            ctx, success=True, job_id=job_id, file_paths=file_paths
+        )
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 
