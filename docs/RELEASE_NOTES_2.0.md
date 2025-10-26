@@ -1,3 +1,63 @@
+# Release Notes
+
+## 🔍 qxub 3.2.0 - Job Log Viewing Tools
+
+**Release Date**: October 2025
+**Version**: 3.2.0
+**Breaking Changes**: None - fully backward compatible
+
+### ✨ **New Features**
+
+#### **Job Output Viewing Commands**
+New convenience commands for viewing job output files:
+
+```bash
+# View most recent job output
+qxub history out    # stdout
+qxub history err    # stderr
+qxub history log    # PBS log
+
+# View specific job output by ID
+qxub history out 153392916.gadi-pbs
+qxub history err 153392916.gadi-pbs
+qxub history log 153392916.gadi-pbs
+```
+
+#### **Enhanced History Tracking**
+- **File path storage**: Execution records now store paths to stdout, stderr, and PBS log files
+- **Universal support**: Works with all execution contexts (conda, modules, containers, default)
+- **Dry run tracking**: File paths tracked even for `--dry` runs
+
+#### **Improved User Experience**
+- **Rich formatting**: Output displayed with syntax highlighting and clear headers
+- **Smart fallbacks**: Commands default to most recent job when no ID specified
+- **Error handling**: Clear messages for missing files or invalid job IDs
+
+### 🔧 **Technical Improvements**
+
+#### **History System Enhancements**
+- Extended `log_execution()` method with `file_paths` parameter
+- Added `get_execution_by_job_id()` for job ID-based lookups
+- Added `get_most_recent_execution()` for latest job retrieval
+- Added `get_execution_file_paths()` for file path access
+
+#### **Code Quality**
+- Removed redundant `history_manager.py` file
+- Consolidated imports to use modular `qxub.history` package
+- Enhanced documentation with comprehensive examples
+
+#### **File Structure Cleanup**
+- Fixed mixed imports between old and new history manager
+- Standardized on modular package structure
+- Improved module docstrings for future maintainability
+
+### 📚 **Documentation Updates**
+- Added comprehensive examples in `docs/examples.md`
+- Updated README.md with new job management commands
+- Enhanced inline documentation for all new methods
+
+---
+
 # qxub 2.0.0 Release Notes
 
 ## 🎉 Major Release: Unified CLI Architecture

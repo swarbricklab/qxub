@@ -16,7 +16,7 @@ from typing import Dict, Optional, Tuple
 import click
 
 from .core.scheduler import monitor_job_single_thread, print_status, qsub
-from .history_manager import history_manager
+from .history import history_manager
 from .resources import resource_tracker
 
 
@@ -318,7 +318,13 @@ def submit_and_monitor_job(
 
         # Log history even for dry runs
         try:
-            history_manager.log_execution(ctx, success=True)
+            # Prepare file paths for history (even for dry runs)
+            file_paths = {
+                "out": ctx_obj["out"],
+                "err": ctx_obj["err"],
+                "joblog": ctx_obj.get("joblog"),  # May be None initially
+            }
+            history_manager.log_execution(ctx, success=True, file_paths=file_paths)
         except Exception as e:
             logging.debug("Failed to log execution history: %s", e)
         return

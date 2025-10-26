@@ -2,11 +2,13 @@
 
 qxub automatically tracks all your job submissions, creating a comprehensive history that helps you monitor progress, debug issues, and optimize resource usage. This section covers how to view, search, and analyze your job history.
 
+**New in v3.2.0:** Job output viewing commands (`qxub history out/err/log`) make it easy to quickly check job results and debug issues.
+
 ## Understanding qxub History
 
 qxub maintains two types of historical information:
-1. **Execution records** - What you ran, when, and with what resources
-2. **Resource efficiency** - How well jobs used allocated resources
+1. **Execution records** - What you ran, when, and with what resources (now including file paths)
+2. **Computational recipes** - Reusable job templates indexed by unique hash
 
 All history is stored locally and tied to your user account.
 
@@ -17,343 +19,347 @@ All history is stored locally and tied to your user account.
 ```bash
 # Show the 10 most recent jobs
 qxub history executions
+
+# Show specific number of recent jobs
+qxub history executions --limit 20
 ```
 
 **Expected output:**
 ```
-📊 Job History (10 most recent):
-
-┌─────────────────┬──────────────┬─────────────────────┬─────────┬──────────┬─────────────┐
-│ Job ID          │ Name         │ Submitted           │ Status  │ Duration │ Efficiency  │
-├─────────────────┼──────────────┼─────────────────────┼─────────┼──────────┼─────────────┤
-│ 12345691.gadi   │ qx-20241017… │ 2024-10-17 15:05:32 │ ✅ Done │ 00:00:15 │ 25% / 4%    │
-│ 12345690.gadi   │ qx-20241017… │ 2024-10-17 15:00:52 │ ✅ Done │ 00:00:25 │ 42% / 12%   │
-│ 12345689.gadi   │ qx-20241017… │ 2024-10-17 14:55:22 │ ✅ Done │ 00:00:08 │ 13% / 8%    │
-│ 12345688.gadi   │ qx-20241017… │ 2024-10-17 14:50:15 │ ❌ Fail │ 00:00:03 │ 5% / 2%     │
-│ 12345687.gadi   │ param-1.0    │ 2024-10-17 14:45:10 │ ✅ Done │ 00:00:22 │ 37% / 15%   │
-└─────────────────┴──────────────┴─────────────────────┴─────────┴──────────┴─────────────┘
-
-💡 Efficiency shows: Walltime% / Memory%
-💡 Use 'qxub history show <job_id>' for detailed information
+                                  Recent Executions
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Time           ┃ Recipe   ┃ Command             ┃ Status    ┃ Directory           ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ 10-26 21:01:17 │ 54d59eab │ conda/envs/usr/jr9… │ completed │ g/data/a56/softwar… │
+│                │          │ exec --dry --env    │           │                     │
+│                │          │ base --...          │           │                     │
+│ 10-26 20:53:14 │ 603cb1a9 │ conda/envs/usr/jr9… │ completed │ g/data/a56/softwar… │
+│                │          │ exec --mem 1GB      │           │                     │
+│                │          │ --name te...        │           │                     │
+│ 10-26 20:49:57 │ 55dd762f │ conda/envs/usr/jr9… │ completed │ g/data/a56/softwar… │
+│                │          │ exec --dry --mem    │           │                     │
+│                │          │ 1GB --n...          │           │                     │
+└────────────────┴──────────┴─────────────────────┴───────────┴─────────────────────┘
 ```
 
-### Show More Jobs
+### View Latest Job Details
 
 ```bash
-# Show last 20 jobs
-qxub history list --limit 20
+# Show detailed information about the most recent job
+qxub history latest
+```
 
-# Show all jobs from today
-qxub history list --since today
+### Browse Computational Recipes
 
-# Show jobs from the last week
-qxub history list --since "1 week ago"
+```bash
+# Show all saved computational recipes (reusable job templates)
+qxub history recipes
+
+# Show executions for a specific recipe
+qxub history runs <recipe_hash>
 ```
 
 ## Detailed Job Information
 
-### View Single Job Details
+### View Latest Job Details
 
 ```bash
-# Get detailed info about a specific job
-qxub history show 12345691.gadi-pbs
+# Get detailed info about the most recent job
+qxub history latest
 ```
 
 **Expected output:**
 ```
-📋 Job Details: 12345691.gadi-pbs
+📋 Latest Execution
 
-Basic Information:
-├── Name: qx-20241017-150532
-├── Status: Completed ✅
-├── Submitted: 2024-10-17 15:05:32
-├── Started: 2024-10-17 15:05:45
-├── Finished: 2024-10-17 15:06:00
-└── Duration: 00:00:15
+Recipe: 54d59eab4954
+Command: /g/data/a56/conda/envs/usr/jr9959/qxub/bin/qxub exec --env dvc3 --mem 4GB
+-- python analysis.py
+Directory: /g/data/a56/user/project
+Status: completed
+Time: 2025-10-26T20:53:14.825717
 
-Resources:
-├── Queue: normal
-├── Project: a56
-├── Requested: mem=4GB, ncpus=1, walltime=2:00:00
-├── Used: mem=0.2GB, ncpus=1, walltime=00:00:15
-└── Efficiency: 25% walltime, 4% memory
-
-Command:
-└── python data_analysis.py
-
-Execution Context:
-├── Environment: dvc3 (conda)
-├── Working Directory: /g/data/a56/software/qsub_tools
-└── Platform: nci_gadi
-
-Files:
-├── Output: /scratch/a56/jr9959/qxub/qx-20241017-150532_20241017-150532.out
-├── Error: /scratch/a56/jr9959/qxub/qx-20241017-150532_20241017-150532.err
-└── Log: /scratch/a56/jr9959/qxub/qx-20241017-150532_20241017-150532.log
-
-Exit Code: 0 (success)
-
-💡 Use 'qxub history efficiency' to see resource usage patterns
+🏗️ Recipe Structure:
+  1 executor:
+  2   env: dvc3
+  3   mem: 4GB
+  4   type: conda
+  5 target:
+  6   cmd: python analysis.py
+  7
 ```
 
-### View Job Output Files
+### View Recipe Details
 
 ```bash
-# Quickly view output from a historical job
-qxub history show 12345691.gadi-pbs --output
-
-# View stderr from a job
-qxub history show 12345691.gadi-pbs --error
-
-# View the PBS log
-qxub history show 12345691.gadi-pbs --log
+# Show detailed information about a computational recipe
+qxub history show <recipe_hash>
 ```
 
-## Searching and Filtering History
+This shows the full recipe definition that can be reused or converted to an alias.
 
-### Filter by Status
+### View Job Output Files (v3.2.0)
 
-```bash
-# Show only failed jobs
-qxub history list --status failed
-
-# Show only successful jobs
-qxub history list --status completed
-
-# Show running jobs (if any)
-qxub history list --status running
-```
-
-### Filter by Time
+qxub now provides convenient commands to quickly view job output files:
 
 ```bash
-# Jobs from specific date
-qxub history list --since "2024-10-17"
+# View stdout from most recent job
+qxub history out
 
-# Jobs from last 2 hours
-qxub history list --since "2 hours ago"
+# View stderr from most recent job
+qxub history err
 
-# Jobs between dates
-qxub history list --since "2024-10-16" --until "2024-10-17"
-```
+# View PBS log from most recent job
+qxub history log
 
-### Filter by Command or Environment
-
-```bash
-# Search for jobs containing specific text
-qxub history search "pandas"
-
-# Jobs that used specific environment
-qxub history list --env dvc3
-
-# Jobs that used specific queue
-qxub history list --queue express
-```
-
-### Filter by Resource Usage
-
-```bash
-# Jobs that used more than 8GB memory
-qxub history list --min-memory 8GB
-
-# Jobs that ran for more than 1 hour
-qxub history list --min-walltime 1:00:00
-
-# Long-running jobs with low efficiency
-qxub history list --min-walltime 30:00 --max-efficiency 20%
-```
-
-## Resource Efficiency Analysis
-
-### Overall Efficiency Report
-
-```bash
-qxub history efficiency
+# View output from specific job by ID
+qxub history out 12345691.gadi-pbs
+qxub history err 12345691.gadi-pbs
+qxub history log 12345691.gadi-pbs
 ```
 
 **Expected output:**
+```bash
+$ qxub history out
+📄 Stdout from job most recent
+(/scratch/a56/jr9959/qxub/analysis_20251026_205314.out):
+Processing dataset...
+Analysis complete: 1,234 records processed
+Results saved to output.csv
+✅ Command completed successfully
+🎉 Job completed successfully
+
+$ qxub history err 12345691.gadi-pbs
+📄 Stderr file is empty:
+/scratch/a56/jr9959/qxub/analysis_20251026_205314.err
+
+$ qxub history log
+📄 PBS log from job most recent
+(/scratch/a56/jr9959/qxub/analysis_20251026_205314.log):
+📁 Execution directory: /g/data/a56/user/project
+🔧 Conda environment: dvc3
+💻 Command: python analysis.py
+📄 STDOUT file: /scratch/a56/jr9959/qxub/analysis_20251026_205314.out
+📄 STDERR file: /scratch/a56/jr9959/qxub/analysis_20251026_205314.err
+🚀 Job started at 2025-10-26T20:53:28+11:00
+💻 Executing main command...
+...
+✅ Job completed successfully
 ```
-📊 Resource Efficiency Analysis (last 50 jobs):
 
-Walltime Efficiency:
-├── Average: 28.5%
-├── Median: 22.0%
-├── Range: 5% - 85%
-└── Under 50%: 42 jobs (84%)
+**Key Features:**
+- **Smart defaults**: Commands without job ID show most recent job output
+- **Syntax highlighting**: Output is formatted for easy reading
+- **File status**: Clear indication if files are empty or missing
+- **Rich formatting**: Headers show job ID and file paths for context
 
-Memory Efficiency:
-├── Average: 12.3%
-├── Median: 8.5%
-├── Range: 2% - 45%
-└── Under 25%: 48 jobs (96%)
+## Working with History and Recipes
 
-Queue Usage:
-├── normal: 35 jobs (70%)
-├── express: 8 jobs (16%)
-├── hugemem: 5 jobs (10%)
-└── normalsl: 2 jobs (4%)
+### Understanding the History System
 
-Resource Recommendations:
-├── 🔍 Consider reducing walltime estimates (84% under-utilized)
-├── 💾 Consider reducing memory requests (96% under-utilized)
-├── ⚡ More jobs could use express queue for faster turnaround
-└── 📊 Use 'qxub history optimize' for specific suggestions
-```
+qxub tracks two types of data:
+1. **Computational Recipes** - Unique job templates indexed by hash (what you want to run)
+2. **Execution Records** - Individual job submissions with timestamps (when you ran it)
 
-### Resource Optimization Suggestions
+This separation allows qxub to:
+- Deduplicate similar jobs into reusable recipes
+- Track multiple executions of the same recipe
+- Provide templates for frequently used job patterns
+
+### Exploring Recipes
 
 ```bash
-qxub history optimize
+# List all computational recipes
+qxub history recipes
+
+# View details of a specific recipe
+qxub history show <recipe_hash>
+
+# See all executions of a specific recipe
+qxub history runs <recipe_hash>
+
+# Convert a recipe to an alias for easy reuse
+qxub history to-alias <recipe_hash> <alias_name>
 ```
 
-**Expected output:**
-```
-🎯 Resource Optimization Suggestions:
-
-Based on your last 50 jobs:
-
-Memory Optimization:
-├── Current typical request: 8GB
-├── Actual typical usage: 1.2GB
-├── Suggestion: Try --mem 2GB for most jobs
-└── Potential savings: ~75% memory allocation
-
-Walltime Optimization:
-├── Current typical request: 2:00:00
-├── Actual typical usage: 0:15:00
-├── Suggestion: Try --walltime 30:00 for quick jobs
-└── Potential savings: ~75% walltime allocation
-
-Queue Optimization:
-├── 15 jobs could have used express queue (completed <30min)
-├── 3 jobs needed more resources than requested
-└── Consider using --queue auto for better selection
-
-Most Efficient Recent Jobs:
-├── 12345685: 82% walltime, 35% memory (good balance)
-├── 12345682: 78% walltime, 42% memory (excellent usage)
-└── 12345679: 65% walltime, 38% memory (well optimized)
-
-💡 Use these efficient jobs as templates for similar work
-```
-
-## Comparing Jobs
-
-### Compare Resource Usage
+### Managing History
 
 ```bash
-# Compare two specific jobs
-qxub history compare 12345690.gadi-pbs 12345691.gadi-pbs
-```
+# Clear all history (use with caution!)
+qxub history clear
 
-**Expected output:**
-```
-📊 Job Comparison:
-
-                    │ 12345690.gadi-pbs    │ 12345691.gadi-pbs
-─────────────────────┼─────────────────────┼──────────────────────
-Command             │ python analysis.py   │ python quick_test.py
-Environment         │ dvc3                 │ dvc3
-Duration            │ 00:00:25             │ 00:00:15
-Walltime Requested  │ 2:00:00              │ 2:00:00
-Walltime Efficiency │ 42% ⚠️               │ 25% ⚠️
-Memory Requested    │ 8GB                  │ 4GB
-Memory Used         │ 1.2GB                │ 0.2GB
-Memory Efficiency   │ 12% ⚠️               │ 4% ⚠️
-Queue              │ normal               │ normal
-Status             │ ✅ Completed         │ ✅ Completed
-
-💡 Both jobs are significantly under-utilizing resources
-💡 Consider: --mem 2GB --walltime 30:00 for similar future jobs
-```
-
-## Exporting History Data
-
-### Export to CSV
-
-```bash
-# Export recent history to CSV for analysis
-qxub history export --format csv --output my_jobs.csv --limit 100
-```
-
-### Export Specific Fields
-
-```bash
-# Export only efficiency data
-qxub history export --fields job_id,walltime_efficiency,memory_efficiency --format csv
+# This removes both recipes and execution records
+# Useful for testing or starting fresh
 ```
 
 ## Practical History Usage Patterns
 
-### Debug Failed Jobs
+### Debugging Workflow Issues
+
+When something goes wrong with a job, history helps you quickly investigate:
 
 ```bash
-# Find recent failures
-qxub history list --status failed --limit 5
+# 1. Check recent executions to identify the problem job
+qxub history executions --limit 10
 
-# Get details about a failure
-qxub history show 12345688.gadi-pbs
+# 2. View the specific execution details
+qxub history latest  # or qxub history show <recipe_hash>
 
-# View error output
-qxub history show 12345688.gadi-pbs --error
+# 3. Check the job output for errors
+qxub history err     # stderr from most recent job
+qxub history out     # stdout from most recent job
+qxub history log     # PBS log with full job details
+
+# 4. If you know a specific job ID that failed
+qxub history err 12345.gadi-pbs
 ```
 
-### Track Parameter Sweeps
+### Reusing Successful Job Patterns
 
 ```bash
-# Find all jobs from a parameter sweep
-qxub history search "param-"
+# 1. Find a job pattern that worked well
+qxub history recipes
 
-# Compare efficiency across parameters
-qxub history list --pattern "param-*" --format efficiency
+# 2. View the details of a successful recipe
+qxub history show 54d59eab4954
+
+# 3. See how many times you've used this pattern
+qxub history runs 54d59eab4954
+
+# 4. Convert it to an alias for easy reuse
+qxub history to-alias 54d59eab4954 "data-analysis"
+
+# 5. Now use the alias
+qxub alias data-analysis --mem 8GB -- python new_dataset.py
 ```
 
-### Monitor Long-running Analysis
+### Tracking Job Progress Over Time
 
 ```bash
-# Track jobs from a specific project
-qxub history list --since "1 week ago" | grep "analysis"
+# Check your recent work
+qxub history executions --limit 20
 
-# Find resource-intensive jobs
-qxub history list --min-memory 16GB --min-walltime 1:00:00
+# Look at a specific recipe's execution history
+qxub history runs cf7cc954  # shows all times this pattern was used
+
+# View detailed information about successful patterns
+qxub history show cf7cc954  # see the full recipe structure
 ```
 
-### Optimize Resource Requests
+## Working with Job Output Files
+
+The new v3.2.0 logging features make it easy to check job results:
+
+### Quick Output Checks
 
 ```bash
-# Find your most efficient jobs as templates
-qxub history list --min-efficiency 50% --limit 10
+# Check if your most recent job produced the expected output
+qxub history out | grep "Analysis complete"
 
-# Analyze jobs with similar commands
-qxub history search "pandas" --format efficiency
+# Check for any errors in the most recent job
+qxub history err
+
+# View the PBS log to understand resource usage
+qxub history log | grep "Memory Used"
+```
+
+### Debugging Failed Jobs
+
+```bash
+# When a job fails, follow this pattern:
+# 1. Check recent executions to identify the failed job
+qxub history executions --limit 5
+
+# 2. Look at the error output
+qxub history err  # most recent job
+# or for a specific job:
+qxub history err 12345.gadi-pbs
+
+# 3. Check the PBS log for system-level issues
+qxub history log | tail -20
+```
+
+### Comparing Different Runs
+
+```bash
+# Compare output from different executions of similar jobs
+qxub history out 12345.gadi-pbs > run1_output.txt
+qxub history out 12346.gadi-pbs > run2_output.txt
+diff run1_output.txt run2_output.txt
+```
+
+## Recipe Management Best Practices
+
+### Understanding Recipe Hashes
+
+Each unique combination of execution context and options creates a recipe:
+
+```bash
+# These create different recipes:
+qxub exec --env dvc3 --mem 4GB -- python script.py      # Recipe A
+qxub exec --env dvc3 --mem 8GB -- python script.py      # Recipe B
+qxub exec --env base --mem 4GB -- python script.py      # Recipe C
+```
+
+### Converting Recipes to Aliases
+
+When you find a recipe you use frequently:
+
+```bash
+# 1. Find the recipe hash in your executions
+qxub history executions
+
+# 2. Convert it to an alias
+qxub history to-alias 54d59eab4954 "my-analysis"
+
+# 3. Use the alias with modifications
+qxub alias my-analysis --name "analysis-v2" -- python script.py --version 2
 ```
 
 ## History Maintenance
 
-### Clean Old History
+### Clear History
 
 ```bash
-# Remove history older than 30 days
-qxub history clean --older-than "30 days"
+# Clear all history (recipes and executions)
+# Use with caution - this removes all tracked data
+qxub history clear
 
-# Remove only failed job records
-qxub history clean --status failed --older-than "7 days"
+# This is useful when:
+# - Starting fresh with a new project
+# - Testing and development
+# - Cleaning up after many experimental runs
 ```
 
-### Backup History
+**Note:** There's currently no selective deletion - clearing removes both recipes and execution records. Consider this before clearing if you have valuable job templates.
 
-```bash
-# Export complete history for backup
-qxub history export --all --format json --output backup_$(date +%Y%m%d).json
-```
+## Available History Commands Summary
+
+Here's a complete reference of the history commands available in qxub:
+
+### Core Commands
+- `qxub history executions [--limit N]` - List recent job executions
+- `qxub history latest` - Show details of most recent execution
+- `qxub history recipes` - List all computational recipes
+- `qxub history show <recipe_hash>` - Show recipe details
+- `qxub history runs <recipe_hash>` - Show executions for a recipe
+
+### New in v3.2.0: Log Viewing
+- `qxub history out [job_id]` - View job stdout (defaults to most recent)
+- `qxub history err [job_id]` - View job stderr (defaults to most recent)
+- `qxub history log [job_id]` - View PBS log (defaults to most recent)
+
+### Management Commands
+- `qxub history clear` - Clear all history data
+- `qxub history to-alias <recipe_hash> <alias_name>` - Convert recipe to alias
 
 ## Key Takeaways
 
-1. **Automatic tracking**: All jobs are automatically recorded
-2. **Rich details**: Command, resources, efficiency, and timing all tracked
-3. **Powerful filtering**: Search by time, status, resources, and content
-4. **Efficiency insights**: Identify over-allocation and optimization opportunities
-5. **Debugging support**: Quickly find and analyze failed jobs
+1. **Automatic tracking**: All jobs are automatically recorded with file paths
+2. **Recipe deduplication**: Similar jobs are grouped into reusable recipes
+3. **Easy log viewing**: New v3.2.0 commands make checking job output effortless
+4. **Template creation**: Convert successful recipes to aliases for reuse
+5. **Debugging support**: Quickly access job output files for troubleshooting
 
 ## Next Steps
 
@@ -361,13 +367,13 @@ Now that you understand job history:
 - **[Aliases](07-aliases.md)** - Save optimized resource combinations as shortcuts
 - **[Configuration](08-configuration.md)** - Understand how settings affect all jobs
 
-Job history is invaluable for optimizing your HPC workflows. Use it regularly to improve resource efficiency and debug issues.
+Job history is invaluable for optimizing your HPC workflows. Use it regularly to identify successful patterns and debug issues.
 
 ---
 
 **💡 Pro Tips:**
-- Check `qxub history efficiency` weekly to optimize resource requests
-- Use `qxub history show <job_id> --output` to quickly view results
-- Export history data for deeper analysis in spreadsheets or Python
-- Use failed job analysis to improve error handling in scripts
-- Bookmark highly efficient jobs as templates for similar work
+- Use `qxub history out` after every job to quickly check results
+- Convert frequently-used recipes to aliases with `qxub history to-alias`
+- Check `qxub history err` first when debugging failed jobs
+- Use `qxub history latest` to understand the structure of your last job
+- The recipe hash in executions can be used with `qxub history show` for details

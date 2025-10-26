@@ -4,6 +4,17 @@ New dual-log history system for qxub.
 This system separates "what" (recipes) from "how/when" (executions):
 - recipes.yaml: Unique computational recipes indexed by hash
 - executions.yaml: Individual execution records indexed by microsecond timestamp
+
+The manager provides comprehensive job tracking including:
+- Recipe storage and deduplication
+- Execution logging with file path tracking
+- Job lookup by ID for output file viewing
+- Support for all execution contexts (conda, modules, containers, default)
+
+New in v3.2.0:
+- File path tracking in execution records (stdout, stderr, PBS log)
+- Job ID-based execution lookup for log viewing
+- Enhanced CLI commands: qxub history out/err/log [job_id]
 """
 
 import hashlib
@@ -135,6 +146,10 @@ class HistoryManager:
                             k += 1
                         break
 
+            # If still no executor type found, default to "default" type
+            if not executor_type:
+                recipe["executor"] = {"type": "default"}
+
         return recipe
 
     def log_execution(
@@ -144,6 +159,7 @@ class HistoryManager:
         error: Optional[str] = None,
         job_id: Optional[str] = None,
         resource_data: Optional[Dict] = None,
+        file_paths: Optional[Dict[str, str]] = None,
     ) -> str:
         """Log a command execution and return the execution timestamp."""
         try:
@@ -163,6 +179,7 @@ class HistoryManager:
                 "conda",
                 "module",
                 "sing",
+                "default",  # Added default execution type
             ]:
                 return execution_timestamp  # Skip logging for non-execution commands
 
@@ -253,6 +270,10 @@ class HistoryManager:
 
             if error:
                 execution_record["execution"]["error"] = error
+
+            # Add file paths if provided
+            if file_paths:
+                execution_record["files"] = file_paths
 
             # Add execution record
             executions_config.executions[execution_timestamp] = execution_record
@@ -409,6 +430,75 @@ class HistoryManager:
             alias_def["target"] = recipe["target"]
 
         return alias_def
+
+    def get_execution_by_job_id(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get execution record by PBS job ID.
+
+        Args:
+            job_id: PBS job ID (e.g., "153392916.gadi-pbs")
+
+        Returns:
+            Execution record dictionary with 'timestamp' field added, or None if not found.
+            The record includes 'files' section with paths to out, err, and joblog files.
+        """
+        if not self.executions_file.exists():
+            return None
+
+        try:
+            config = OmegaConf.load(self.executions_file)
+            if not config or "executions" not in config:
+                return None
+
+            # Search through executions for matching job_id
+            for timestamp, execution in config.executions.items():
+                if execution.get("execution", {}).get("job_id") == job_id:
+                    # Add timestamp to the record
+                    execution_copy = dict(execution)
+                    execution_copy["timestamp"] = timestamp
+                    return execution_copy
+            return None
+        except Exception:
+            return None
+
+    def get_most_recent_execution(self) -> Optional[Dict[str, Any]]:
+        """Get the most recent execution record.
+
+        Returns:
+            Most recent execution record dictionary with 'timestamp' field, or None if no executions.
+            Equivalent to calling get_executions(limit=1)[0] but more convenient.
+        """
+        executions = self.get_executions(limit=1)
+        if executions:
+            return executions[0]
+        return None
+
+    def get_execution_file_paths(self, job_id: str = None) -> Optional[Dict[str, str]]:
+        """Get file paths (stdout, stderr, PBS log) for a job.
+
+        Args:
+            job_id: PBS job ID. If None, returns paths for most recent execution.
+
+        Returns:
+            Dictionary with 'out', 'err', and 'joblog' keys containing file paths,
+            or None if execution not found. Used by history CLI commands to locate
+            job output files for viewing.
+
+        Example:
+            >>> manager.get_execution_file_paths("153392916.gadi-pbs")
+            {
+                'out': '/scratch/a56/user/qxub/job_20251026_205314.out',
+                'err': '/scratch/a56/user/qxub/job_20251026_205314.err',
+                'joblog': '/scratch/a56/user/qxub/job_20251026_205314.log'
+            }
+        """
+        if job_id:
+            execution = self.get_execution_by_job_id(job_id)
+        else:
+            execution = self.get_most_recent_execution()
+
+        if execution and "files" in execution:
+            return execution["files"]
+        return None
 
 
 # Global history manager instance

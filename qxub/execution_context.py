@@ -15,7 +15,7 @@ from typing import List, Union
 import click
 
 from .core.scheduler import qsub
-from .history_manager import history_manager
+from .history import history_manager
 from .resources import resource_tracker
 
 
@@ -148,6 +148,7 @@ def execute_unified(
         post: Post-execution command
         bind: Singularity bind mounts (only used for singularity context)
     """
+    print("DEBUG: execute_unified called")  # DEBUG
     # Validate execution context
     execution_context.validate()
 
@@ -176,11 +177,24 @@ def execute_unified(
         print_status("🔧 Job command constructed", final=True)
 
     if ctx_obj["dry"]:
+        print("DEBUG: Dry run detected!")  # DEBUG
         print(f"Dry run - would execute: {submission_command}")
+        print("DEBUG: In dry run code block")  # DEBUG
         # Log history even for dry runs
         try:
-            history_manager.log_execution(ctx, success=True)
+            # Prepare file paths for history (even for dry runs)
+            file_paths = {
+                "out": ctx_obj["out"],
+                "err": ctx_obj["err"],
+                "joblog": ctx_obj.get("joblog"),  # May be None initially
+            }
+            print(
+                f"DEBUG: About to log execution with file_paths: {file_paths}"
+            )  # DEBUG
+            history_manager.log_execution(ctx, success=True, file_paths=file_paths)
+            print("DEBUG: Execution logged successfully")  # DEBUG
         except Exception as e:
+            print(f"DEBUG: Failed to log execution history: {e}")  # DEBUG
             logging.debug("Failed to log execution history: %s", e)
         return
 
@@ -211,7 +225,15 @@ def execute_unified(
 
     # Log execution to history system
     try:
-        history_manager.log_execution(ctx, success=True, job_id=job_id)
+        # Prepare file paths for history
+        file_paths = {
+            "out": ctx_obj["out"],
+            "err": ctx_obj["err"],
+            "joblog": ctx_obj.get("joblog"),  # May be None initially
+        }
+        history_manager.log_execution(
+            ctx, success=True, job_id=job_id, file_paths=file_paths
+        )
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 

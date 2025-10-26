@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
-from .history_manager import history_manager
+from .history import history_manager
 
 console = Console()
 
