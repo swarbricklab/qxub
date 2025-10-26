@@ -138,6 +138,12 @@ echo "12345.gadi-pbs" | qxub monitor --quiet
 qxub history executions --limit 10
 qxub history latest
 
+# View job output files (v3.2.0)
+qxub history out                 # Most recent job stdout
+qxub history err                 # Most recent job stderr
+qxub history log                 # Most recent job PBS log
+qxub history out 12345.gadi-pbs  # Specific job by ID
+
 # View resource efficiency
 qxub resources list --limit 5
 qxub resources stats

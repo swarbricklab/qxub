@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
-from .history_manager import history_manager
+from .history import history_manager
 
 console = Console()
 
@@ -354,3 +354,136 @@ def latest():
         yaml_content = OmegaConf.to_yaml(OmegaConf.create(recipe_copy))
         syntax = Syntax(yaml_content, "yaml", theme="github-dark", line_numbers=True)
         console.print(syntax)
+
+
+@history.command()
+@click.argument("job_id", required=False)
+def out(job_id):
+    """Show the stdout file for a job.
+
+    If no job ID is specified, shows output for the most recent job.
+    """
+    from pathlib import Path
+
+    file_paths = history_manager.get_execution_file_paths(job_id)
+    if not file_paths:
+        if job_id:
+            console.print(f"❌ Job {job_id} not found in history", style="red")
+        else:
+            console.print("❌ No recent jobs found in history", style="red")
+        return
+
+    out_path = file_paths.get("out")
+    if not out_path:
+        console.print("❌ No stdout file path found for this job", style="red")
+        return
+
+    out_file = Path(out_path)
+    if not out_file.exists():
+        console.print(f"❌ Stdout file not found: {out_path}", style="red")
+        return
+
+    try:
+        with open(out_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Display with syntax highlighting if content looks like it has structure
+        if content.strip():
+            console.print(
+                f"📄 Stdout from job {job_id or 'most recent'} ({out_path}):",
+                style="cyan",
+            )
+            console.print(content)
+        else:
+            console.print(f"📄 Stdout file is empty: {out_path}", style="yellow")
+
+    except Exception as e:
+        console.print(f"❌ Error reading stdout file: {e}", style="red")
+
+
+@history.command()
+@click.argument("job_id", required=False)
+def err(job_id):
+    """Show the stderr file for a job.
+
+    If no job ID is specified, shows errors for the most recent job.
+    """
+    from pathlib import Path
+
+    file_paths = history_manager.get_execution_file_paths(job_id)
+    if not file_paths:
+        if job_id:
+            console.print(f"❌ Job {job_id} not found in history", style="red")
+        else:
+            console.print("❌ No recent jobs found in history", style="red")
+        return
+
+    err_path = file_paths.get("err")
+    if not err_path:
+        console.print("❌ No stderr file path found for this job", style="red")
+        return
+
+    err_file = Path(err_path)
+    if not err_file.exists():
+        console.print(f"❌ Stderr file not found: {err_path}", style="red")
+        return
+
+    try:
+        with open(err_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if content.strip():
+            console.print(
+                f"📄 Stderr from job {job_id or 'most recent'} ({err_path}):",
+                style="cyan",
+            )
+            console.print(content, style="red")
+        else:
+            console.print(f"📄 Stderr file is empty: {err_path}", style="green")
+
+    except Exception as e:
+        console.print(f"❌ Error reading stderr file: {e}", style="red")
+
+
+@history.command()
+@click.argument("job_id", required=False)
+def log(job_id):
+    """Show the PBS log file for a job.
+
+    If no job ID is specified, shows log for the most recent job.
+    """
+    from pathlib import Path
+
+    file_paths = history_manager.get_execution_file_paths(job_id)
+    if not file_paths:
+        if job_id:
+            console.print(f"❌ Job {job_id} not found in history", style="red")
+        else:
+            console.print("❌ No recent jobs found in history", style="red")
+        return
+
+    log_path = file_paths.get("joblog")
+    if not log_path:
+        console.print("❌ No PBS log file path found for this job", style="red")
+        return
+
+    log_file = Path(log_path)
+    if not log_file.exists():
+        console.print(f"❌ PBS log file not found: {log_path}", style="red")
+        return
+
+    try:
+        with open(log_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if content.strip():
+            console.print(
+                f"📄 PBS log from job {job_id or 'most recent'} ({log_path}):",
+                style="cyan",
+            )
+            console.print(content)
+        else:
+            console.print(f"📄 PBS log file is empty: {log_path}", style="yellow")
+
+    except Exception as e:
+        console.print(f"❌ Error reading PBS log file: {e}", style="red")

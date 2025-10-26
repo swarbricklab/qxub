@@ -346,6 +346,67 @@ qxub monitor --interval 60 12345.gadi-pbs  # Check every minute
 qxub monitor --quiet 12345.gadi-pbs 12346.gadi-pbs
 ```
 
+## Job History and Log Viewing (v3.2.0)
+
+qxub automatically tracks execution history and provides convenient commands to view job output files.
+
+### View Job Output Files
+
+```bash
+# View stdout from most recent job
+qxub history out
+
+# View stderr from most recent job
+qxub history err
+
+# View PBS log from most recent job
+qxub history log
+
+# View specific job output by job ID
+qxub history out 153392916.gadi-pbs
+qxub history err 153392916.gadi-pbs
+qxub history log 153392916.gadi-pbs
+```
+
+### History Management
+
+```bash
+# List recent executions with details
+qxub history executions
+
+# Show details of the most recent execution
+qxub history latest
+
+# List computational recipes (reusable job templates)
+qxub history recipes
+
+# Clear all history (use with caution)
+qxub history clear
+```
+
+### Example Output
+
+```bash
+$ qxub history out
+📄 Stdout from job most recent
+(/scratch/a56/user/qxub/test-job_20251026_205314.out):
+This is a real job for testing logging
+✅ Command completed successfully
+🎉 Job completed successfully
+
+$ qxub history executions --limit 3
+                                  Recent Executions
+┏━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Time           ┃ Recipe   ┃ Command             ┃ Status    ┃ Directory           ┃
+┡━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ 10-26 20:53:14 │ 603cb1a9 │ qxub exec --mem 1GB │ completed │ /g/data/a56/soft... │
+│ 10-26 20:49:57 │ 55dd762f │ qxub exec --dry     │ completed │ /g/data/a56/soft... │
+│ 10-26 20:19:49 │ c50c02f2 │ conda exec --env... │ completed │ /a56/user/project   │
+└────────────────┴──────────┴─────────────────────┴───────────┴─────────────────────┘
+```
+
+**Note:** History tracking works with all execution contexts (conda, modules, containers, default) and includes both dry runs and actual job submissions.
+
 ### Real-World Workflows
 
 #### Bioinformatics Pipeline
