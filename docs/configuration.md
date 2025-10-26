@@ -243,19 +243,104 @@ Configuration files merge hierarchically:
 ```yaml
 # System config (/etc/xdg/qxub/config.yaml):
 defaults:
+  project: a56
+  queue: normal
+
+  # Workflow-friendly resource defaults (recommended)
   cpus: 4
   mem: 8GB
   runtime: 2h
   disk: 15GB
+  volumes: gdata/a56
+
+  # OR traditional PBS format (deprecated)
+  resources:
+    - ncpus=4
+    - mem=8GB
+    - walltime=2:00:00
 
 # User config (~/.config/qxub/config.yaml):
-cpus: 8        # Overrides system
-mem: 16GB      # Overrides system
-# runtime and disk inherited from system
+defaults:
+  # Overrides system defaults
+  cpus: 8
+  mem: 16GB
+  # Inherits: runtime=2h, disk=15GB from system
 
 # Final merged defaults:
-# cpus: 8, mem: 16GB, runtime: 2h, disk: 15GB
+# cpus: 8 (user override)
+# mem: 16GB (user override)
+# runtime: 2h (inherited from system)
+# disk: 15GB (inherited from system)
+# volumes: gdata/a56 (inherited from system)
 ```
+
+### Two Ways to Specify Resource Defaults
+
+**Method 1: Workflow-Friendly (Recommended)**
+
+Place workflow-friendly keys directly under `defaults`:
+
+```yaml
+defaults:
+  project: a56
+  queue: normal
+
+  # Workflow-friendly resource keys
+  mem: 8GB
+  cpus: 4
+  runtime: 2h
+  disk: 15GB
+  volumes: gdata/a56+gdata/px14
+```
+
+**Benefits:**
+- Easier to read and write
+- Flexible time formats (`2h`, `30m`, `1h30m`)
+- Friendly naming (`cpus` vs `ncpus`, `runtime` vs `walltime`)
+- Per-key override behavior
+
+**Method 2: PBS Format (Legacy)**
+
+Use the `resources` list for traditional PBS format:
+
+```yaml
+defaults:
+  resources:
+    - mem=8GB
+    - ncpus=4
+    - walltime=2:00:00
+    - jobfs=15GB
+    - storage=gdata/a56+gdata/px14
+```
+
+**Hybrid Approach (Recommended for Advanced Cases):**
+
+Use workflow-friendly keys for common resources, `resources` list for uncommon PBS options:
+
+```yaml
+defaults:
+  # Common resources (workflow-friendly)
+  mem: 8GB
+  cpus: 4
+  runtime: 2h
+
+  # Uncommon PBS options
+  resources:
+    - wd=true
+    - software=matlab
+```
+
+### Resource Key Mapping
+
+When resolving resources, qxub maps between naming conventions:
+
+| Workflow Key | PBS Key | Example Values |
+|--------------|---------|----------------|
+| `mem` | `mem` | `8GB`, `2000MB`, `16g` |
+| `cpus` | `ncpus` | `4`, `16`, `48` |
+| `runtime` | `walltime` | `2h`, `30m`, `1h30m`, `02:30:00` |
+| `disk` | `jobfs` | `50GB`, `1000MB` |
+| `volumes` | `storage` | `gdata/a56`, `gdata/a56+scratch/a56` |
 
 ### Key Behaviors
 

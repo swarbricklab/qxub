@@ -443,41 +443,65 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         canonical_key = resource_key_map.get(key, key)
         specified_resources.add(canonical_key)
 
+    # Helper function to get workflow-friendly config values with backward compatibility
+    def get_workflow_resource_config(key):
+        """
+        Get workflow resource from config, checking new location first (defaults.KEY),
+        then falling back to old root-level location with deprecation warning.
+        """
+        # Try new location: defaults.mem, defaults.cpus, etc.
+        value = config_manager.get_config_value(f"defaults.{key}")
+        if value is not None:
+            return value
+
+        # Fall back to old root-level location for backward compatibility
+        value = config_manager.get_config_value(key)
+        if value is not None:
+            import logging
+
+            logging.warning(
+                f"Config key '{key}' at root level is deprecated. "
+                f"Please move to 'defaults.{key}' in your config file."
+            )
+            return value
+
+        return None
+
     # Collect all resource values (CLI args take precedence over config)
     # Only use config defaults if the resource wasn't already specified in --resources
     resource_values = {
         "mem": options.get("mem")
         or options.get("memory")
         or (
-            config_manager.get_config_value("mem")
+            get_workflow_resource_config("mem")
             if "mem" not in specified_resources
             else None
         ),
         "runtime": options.get("runtime")
         or options.get("time")
         or (
-            config_manager.get_config_value("runtime")
+            get_workflow_resource_config("runtime")
             if "runtime" not in specified_resources
             else None
         ),
         "cpus": options.get("cpus")
         or options.get("threads")
         or (
-            config_manager.get_config_value("cpus")
+            get_workflow_resource_config("cpus")
             if "cpus" not in specified_resources
             else None
         ),
         "disk": options.get("disk")
         or options.get("jobfs")
         or (
-            config_manager.get_config_value("disk")
+            get_workflow_resource_config("disk")
             if "disk" not in specified_resources
             else None
         ),
         "volumes": options.get("volumes")
         or options.get("storage")
         or (
-            config_manager.get_config_value("volumes")
+            get_workflow_resource_config("volumes")
             if "volumes" not in specified_resources
             else None
         ),
