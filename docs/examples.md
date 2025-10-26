@@ -67,16 +67,16 @@ qxub v3.1.0 introduces convenient resource flags that automatically convert to P
 
 ```bash
 # New workflow-friendly syntax (recommended for most users)
-qxub exec --mem 16GB --cpus 8 --runtime 2h30m --disk 100GB --volumes 1TB --env myenv -- python script.py
+qxub exec --mem 16GB --cpus 8 --runtime 2h30m --disk 100GB --volumes gdata/a56 --env myenv -- python script.py
 
 # Equivalent traditional PBS syntax
-qxub exec --resources mem=16GB,ncpus=8,walltime=2:30:00,jobfs=100GB,storage=1TB --env myenv -- python script.py
+qxub exec --resources mem=16GB,ncpus=8,walltime=2:30:00,jobfs=100GB,storage=gdata/a56 --env myenv -- python script.py
 
 # Mix and match approaches
-qxub exec --mem 32GB --cpus 16 --volumes 2TB --resources storage=scratch/a56+gdata/a56 --env myenv -- python large_job.py
+qxub exec --mem 32GB --cpus 16 --volumes gdata/a56+scratch/a56 --env myenv -- python large_job.py
 
 # Alternative flag names (same functionality)
-qxub exec --memory 8GB --threads 4 --time 1h --jobfs 50GB --storage 500GB --env base -- python analysis.py
+qxub exec --memory 8GB --threads 4 --time 1h --jobfs 50GB --storage gdata/a56+gdata/px14 --env base -- python analysis.py
 
 # Flexible time formats
 qxub exec --runtime 2h30m --env base -- python script.py     # 2 hours 30 minutes
@@ -89,14 +89,14 @@ qxub exec --mem 4096MB --env base -- python script.py        # Megabytes
 
 # Quick examples for common scenarios
 qxub exec --mem 4GB --cpus 2 --time 30m --env base -- python quick_analysis.py
-qxub exec --mem 64GB --cpus 16 --time 4h --disk 200GB --volumes 1TB --env pytorch -- python training.py
-qxub exec --mem 1TB --cpus 48 --time 12h --volumes 5TB --env bioinformatics -- ./genome_assembly.sh
+qxub exec --mem 64GB --cpus 16 --time 4h --disk 200GB --volumes gdata/a56 --env pytorch -- python training.py
+qxub exec --mem 1TB --cpus 48 --time 12h --volumes gdata/a56+scratch/a56 --env bioinformatics -- ./genome_assembly.sh
 
 # GPU jobs with workflow-friendly resources
-qxub exec --mem 32GB --cpus 12 --time 8h --volumes 2TB --resources ngpus=1 --env pytorch -- python train_model.py
+qxub exec --mem 32GB --cpus 12 --time 8h --volumes gdata/a56+gdata/px14 --resources ngpus=1 --env pytorch -- python train_model.py
 
 # Perfect for Snakemake and other workflow engines
-snakemake --cluster "qxub exec --mem {resources.mem_gb}GB --cpus {threads} --time {resources.runtime}h --volumes {resources.storage}GB --"
+snakemake --cluster "qxub exec --mem {resources.mem_gb}GB --cpus {threads} --time {resources.runtime}h --volumes {resources.storage} --"
 
 # Works with all execution contexts
 qxub exec --mem 8GB --cpus 4 --mod python3 -- python script.py               # Modules

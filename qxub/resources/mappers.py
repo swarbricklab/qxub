@@ -113,16 +113,18 @@ class ResourceMapper:
             else:
                 raise ValueError(f"Invalid disk format: {disk}")
 
-    def add_storage(self, storage: Union[str, int], unit: str = "MB") -> None:
-        """Add storage volume specification."""
-        if isinstance(storage, int):
-            self.pbs_resources.append(f"storage={storage}{unit}")
-        elif isinstance(storage, str):
-            storage_clean = storage.replace(" ", "").upper()
-            if re.match(r"^\d+[KMGT]?B?$", storage_clean):
-                self.pbs_resources.append(f"storage={storage_clean}")
-            else:
-                raise ValueError(f"Invalid storage format: {storage}")
+    def add_storage(self, storage: str) -> None:
+        """Add storage volume specification for NCI storage mounts.
+
+        Args:
+            storage: Storage volumes to mount (e.g., 'gdata/a56', 'gdata/a56+gdata/px14')
+        """
+        if isinstance(storage, str):
+            # For NCI storage volumes, pass through directly to PBS
+            # Examples: 'gdata/a56', 'gdata/a56+gdata/px14', 'scratch/a56+gdata/a56'
+            self.pbs_resources.append(f"storage={storage}")
+        else:
+            raise ValueError(f"Storage must be a string specifying volumes: {storage}")
 
     def add_custom(self, key: str, value: str) -> None:
         """Add custom PBS resource specification."""
@@ -182,12 +184,8 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
     elif "jobfs" in resources:
         mapper.add_disk(resources["jobfs"])
 
-    # Storage
-    if "storage_mb" in resources:
-        mapper.add_storage(resources["storage_mb"], "MB")
-    elif "storage_gb" in resources:
-        mapper.add_storage(resources["storage_gb"], "GB")
-    elif "storage" in resources:
+    # Storage (NCI volumes)
+    if "storage" in resources:
         mapper.add_storage(resources["storage"])
     elif "volumes" in resources:
         mapper.add_storage(resources["volumes"])
@@ -205,8 +203,6 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
             "disk_mb",
             "disk_gb",
             "jobfs",
-            "storage_mb",
-            "storage_gb",
             "storage",
             "volumes",
         ]:

@@ -101,8 +101,8 @@ fi
 
 # Test 7.5: Storage/volumes flags
 echo "[TEST] Storage/volumes flags (--volumes, --storage)"
-OUTPUT=$(qxub exec --dry --volumes 1TB --mem 8GB -- echo "Volumes test" 2>&1)
-if echo "$OUTPUT" | grep -q "storage=1TB" && echo "$OUTPUT" | grep -q "mem=8GB"; then
+OUTPUT=$(qxub exec --dry --volumes gdata/a56 --mem 8GB -- echo "Volumes test" 2>&1)
+if echo "$OUTPUT" | grep -q "storage=gdata/a56" && echo "$OUTPUT" | grep -q "mem=8GB"; then
     echo "[PASS] --volumes flag works"
 else
     echo "[FAIL] --volumes flag"
@@ -110,8 +110,8 @@ else
     exit 1
 fi
 
-OUTPUT=$(qxub exec --dry --storage 500GB --cpus 4 -- echo "Storage alias test" 2>&1)
-if echo "$OUTPUT" | grep -q "storage=500GB" && echo "$OUTPUT" | grep -q "ncpus=4"; then
+OUTPUT=$(qxub exec --dry --storage gdata/a56+scratch/a56 --cpus 4 -- echo "Storage alias test" 2>&1)
+if echo "$OUTPUT" | grep -q "storage=gdata/a56+scratch/a56" && echo "$OUTPUT" | grep -q "ncpus=4"; then
     echo "[PASS] --storage alias works"
 else
     echo "[FAIL] --storage alias"
@@ -184,7 +184,7 @@ echo "  ✅ --mem / --memory for memory specification"
 echo "  ✅ --cpus / --threads for CPU specification"
 echo "  ✅ --runtime / --time for walltime specification"
 echo "  ✅ --disk / --jobfs for disk specification"
-echo "  ✅ --volumes / --storage for storage specification"
+echo "  ✅ --volumes / --storage for NCI storage volume mounting"
 echo "  ✅ Proper integration with existing --resources option"
 echo "  ✅ Works with all execution contexts (conda, modules, etc.)"
 echo "  ✅ Proper error handling for invalid formats"

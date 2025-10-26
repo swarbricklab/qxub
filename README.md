@@ -62,7 +62,7 @@ qxub exec --shortcut python -- script.py
 | `--cpus` / `--threads` | CPU cores/threads (workflow-friendly) | `--cpus 8` or `--threads 4` |
 | `--runtime` / `--time` | Walltime limit (workflow-friendly) | `--runtime 2h30m` or `--time 1h` |
 | `--disk` / `--jobfs` | Local disk requirement (workflow-friendly) | `--disk 100GB` or `--jobfs 50GB` |
-| `--volumes` / `--storage` | Storage volume requirement (workflow-friendly) | `--volumes 1TB` or `--storage 500GB` |
+| `--volumes` / `--storage` | NCI storage volumes to mount | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
 | `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
 | `--name` | Job name | `--name myjob` |
 | `--project` | PBS project | `--project a56` |

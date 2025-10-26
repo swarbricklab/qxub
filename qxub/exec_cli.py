@@ -63,7 +63,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--volumes",
     "--storage",
-    help="Storage volume requirement (workflow-friendly). Examples: '500GB', '2TB'. Converted to PBS storage= automatically.",
+    help="Storage volumes to mount (NCI format). Examples: 'gdata/a56', 'gdata/a56+gdata/px14'. Converted to PBS storage= automatically.",
 )
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"
