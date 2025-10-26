@@ -24,13 +24,13 @@ qx dvc push                                      # Short for 'qxub exec -- dvc p
 qxtat 12345.gadi-pbs                             # Short for 'qxub status'
 qxet "command" --env base                        # Short for 'qxub config shortcut set "command" --env base'
 
-# Add PBS options before --
-qxub exec --resources mem=16GB --queue normal --env myenv -- python script.py
+# Resource specification - choose your style!
+qxub exec --mem 16GB --cpus 8 --runtime 2h --env myenv -- python script.py        # Workflow-friendly
+qxub exec --resources mem=16GB,ncpus=8,walltime=2:00:00 --env myenv -- python script.py  # Traditional PBS
 
 # Cost-optimized auto queue selection (recommended!)
-qxub exec --queue auto --resources mem=1200GB --env myenv -- python big_job.py    # → megamem (58% cheaper!)
-qxub exec --queue auto --resources ngpus=1 --env pytorch -- python train.py      # → gpuvolta
-qxub exec --queue auto --resources ncpus=5000 --env myenv -- python parallel.py  # → normalsr
+qxub exec --queue auto --mem 1200GB --env myenv -- python big_job.py    # → megamem (58% cheaper!)
+qxub exec --queue auto --cpus 5000 --env myenv -- python parallel.py    # → normalsr
 
 # Preview without running
 qxub exec --dry --env myenv -- python script.py
@@ -57,7 +57,12 @@ qxub exec --shortcut python -- script.py
 | `--sif` | Singularity container | `--sif container.sif` |
 | `--shortcut` | Use predefined shortcut | `--shortcut python` |
 | `--cmd` | Complex command (alternative to `--`) | `--cmd "echo \"Hello ${USER}\""` |
-| `--resources` | PBS resources | `--resources mem=16GB --resources ncpus=8` |
+| `--resources` | PBS resources (traditional format) | `--resources mem=16GB --resources ncpus=8` |
+| `--mem` / `--memory` | Memory requirement (workflow-friendly, default: configured) | `--mem 16GB` or `--memory 4GB` |
+| `--cpus` / `--threads` | CPU cores/threads (workflow-friendly, default: configured) | `--cpus 8` or `--threads 4` |
+| `--runtime` / `--time` | Walltime limit (workflow-friendly, default: configured) | `--runtime 2h30m` or `--time 1h` |
+| `--disk` / `--jobfs` | Local disk requirement (workflow-friendly, default: configured) | `--disk 100GB` or `--jobfs 50GB` |
+| `--volumes` / `--storage` | NCI storage volumes to mount (default: configured) | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
 | `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
 | `--name` | Job name | `--name myjob` |
 | `--project` | PBS project | `--project a56` |

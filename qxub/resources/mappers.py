@@ -113,6 +113,19 @@ class ResourceMapper:
             else:
                 raise ValueError(f"Invalid disk format: {disk}")
 
+    def add_storage(self, storage: str) -> None:
+        """Add storage volume specification for NCI storage mounts.
+
+        Args:
+            storage: Storage volumes to mount (e.g., 'gdata/a56', 'gdata/a56+gdata/px14')
+        """
+        if isinstance(storage, str):
+            # For NCI storage volumes, pass through directly to PBS
+            # Examples: 'gdata/a56', 'gdata/a56+gdata/px14', 'scratch/a56+gdata/a56'
+            self.pbs_resources.append(f"storage={storage}")
+        else:
+            raise ValueError(f"Storage must be a string specifying volumes: {storage}")
+
     def add_custom(self, key: str, value: str) -> None:
         """Add custom PBS resource specification."""
         self.pbs_resources.append(f"{key}={value}")
@@ -171,6 +184,12 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
     elif "jobfs" in resources:
         mapper.add_disk(resources["jobfs"])
 
+    # Storage (NCI volumes)
+    if "storage" in resources:
+        mapper.add_storage(resources["storage"])
+    elif "volumes" in resources:
+        mapper.add_storage(resources["volumes"])
+
     # Custom resources (passed through if they look like PBS resources)
     for key, value in resources.items():
         if key not in [
@@ -184,6 +203,8 @@ def map_snakemake_resources(resources: Dict) -> List[str]:
             "disk_mb",
             "disk_gb",
             "jobfs",
+            "storage",
+            "volumes",
         ]:
             # Check if it's a valid PBS resource name
             if isinstance(value, (str, int)):

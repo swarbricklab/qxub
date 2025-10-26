@@ -527,6 +527,12 @@ class ConfigManager:
                 "resources": ["mem=4GB", "ncpus=1"],
                 "out": "/scratch/{project}/{user}/qt/{timestamp}/out",
                 "err": "/scratch/{project}/{user}/qt/{timestamp}/err",
+                # Workflow-friendly resource defaults
+                "mem": "4GB",
+                "cpus": 2,
+                "runtime": "1h",
+                "disk": "10GB",
+                "volumes": "gdata/{project}",
                 "conda": {"env": "base", "pre": None, "post": None},
                 "module": {"mod": ["python3"], "pre": None, "post": None},
                 "sing": {

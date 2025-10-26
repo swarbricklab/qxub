@@ -61,7 +61,79 @@ qxet "ml-training" --env pytorch --resources ngpus=1  # Short for 'qxub config s
 qxub exec --shortcut python --name custom-job -- special_script.py
 ```
 
-## Complex Commands with Variables
+## Workflow-Friendly Resource Options
+
+qxub v3.1.0 introduces convenient resource flags that automatically convert to PBS format:
+
+```bash
+# New workflow-friendly syntax (recommended for most users)
+qxub exec --mem 16GB --cpus 8 --runtime 2h30m --disk 100GB --volumes gdata/a56 --env myenv -- python script.py
+
+# Equivalent traditional PBS syntax
+qxub exec --resources mem=16GB,ncpus=8,walltime=2:30:00,jobfs=100GB,storage=gdata/a56 --env myenv -- python script.py
+
+# Mix and match approaches
+qxub exec --mem 32GB --cpus 16 --volumes gdata/a56+scratch/a56 --env myenv -- python large_job.py
+
+# Alternative flag names (same functionality)
+qxub exec --memory 8GB --threads 4 --time 1h --jobfs 50GB --storage gdata/a56+gdata/px14 --env base -- python analysis.py
+
+# Flexible time formats
+qxub exec --runtime 2h30m --env base -- python script.py     # 2 hours 30 minutes
+qxub exec --runtime 90m --env base -- python script.py       # 90 minutes
+qxub exec --runtime 1:30:00 --env base -- python script.py   # HH:MM:SS format
+
+# Memory format variations
+qxub exec --mem 8GB --env base -- python script.py           # Gigabytes
+qxub exec --mem 4096MB --env base -- python script.py        # Megabytes
+
+# Quick examples for common scenarios
+qxub exec --mem 4GB --cpus 2 --time 30m --env base -- python quick_analysis.py
+qxub exec --mem 64GB --cpus 16 --time 4h --disk 200GB --volumes gdata/a56 --env pytorch -- python training.py
+qxub exec --mem 1TB --cpus 48 --time 12h --volumes gdata/a56+scratch/a56 --env bioinformatics -- ./genome_assembly.sh
+
+# GPU jobs with workflow-friendly resources
+qxub exec --mem 32GB --cpus 12 --time 8h --volumes gdata/a56+gdata/px14 --resources ngpus=1 --env pytorch -- python train_model.py
+
+# Perfect for Snakemake and other workflow engines
+snakemake --cluster "qxub exec --mem {resources.mem_gb}GB --cpus {threads} --time {resources.runtime}h --volumes {resources.storage} --"
+
+# Works with all execution contexts
+qxub exec --mem 8GB --cpus 4 --mod python3 -- python script.py               # Modules
+qxub exec --mem 16GB --cpus 8 --sif container.sif -- ./analysis               # Singularity
+qxub exec --mem 4GB --cpus 2 -- ./native_program                              # Direct submission
+```
+
+### Config Defaults for Workflow-Friendly Options
+
+Set default values for workflow-friendly options to avoid repeating common resource specifications:
+
+```bash
+# Set your typical resource defaults
+qxub config set mem "8GB"
+qxub config set cpus 4
+qxub config set runtime "2h"
+qxub config set disk "20GB"
+qxub config set volumes "gdata/a56+scratch/a56"
+
+# Now these are automatically applied
+qxub exec --env pytorch -- python script.py
+# Equivalent to: qxub exec --mem 8GB --cpus 4 --runtime 2h --disk 20GB --volumes gdata/a56+scratch/a56 --env pytorch -- python script.py
+
+# CLI options override config defaults
+qxub exec --mem 32GB --env pytorch -- python large_job.py
+# Uses 32GB memory but other defaults (cpus=4, runtime=2h, etc.)
+
+# View current config defaults
+qxub config list
+
+# Reset to remove all custom defaults
+qxub config reset
+```
+
+## Basic Execution
+
+```bash
 # Conda environment
 qxub exec --env pytorch -- python train.py
 
