@@ -61,7 +61,7 @@ ssh your_username@gadi.nci.org.au "echo 'Connection successful'"
 
 ```bash
 # Test remote connection
-qxub --remote gadi config list
+qxub exec --remote gadi config list
 ```
 
 This should show the remote system's configuration, confirming the connection works.
@@ -72,7 +72,7 @@ This should show the remote system's configuration, confirming the connection wo
 
 ```bash
 # Run a simple command on the remote HPC system
-qxub --remote gadi --default -- hostname
+qxub exec --remote gadi --default -- hostname
 ```
 
 **Expected output:**
@@ -96,7 +96,7 @@ The job runs on the HPC system, but you see real-time output on your laptop!
 
 ```bash
 # Use conda environment on remote system
-qxub --remote gadi --env dvc3 -- python3 -c "
+qxub exec --remote gadi --env dvc3 -- python3 -c "
 import pandas as pd
 import sys
 print(f'Python version: {sys.version.split()[0]}')
@@ -109,7 +109,7 @@ print('Running on HPC from laptop!')
 
 ```bash
 # Submit resource-intensive job from laptop
-qxub --remote gadi --mem 16GB --ncpus 4 --walltime 2:00:00 --env sc -- python3 -c "
+qxub exec --remote gadi --mem 16GB --ncpus 4 --walltime 2:00:00 --env sc -- python3 -c "
 import scanpy as sc
 import multiprocessing
 print(f'Single-cell analysis environment ready')
@@ -126,14 +126,14 @@ qxub can automatically sync your local files to the remote system:
 
 ```bash
 # Sync local directory and run remote job
-qxub --remote gadi --sync-up ~/my_project /scratch/a56/$USER/my_project --default -- python3 analysis.py
+qxub exec --remote gadi --sync-up ~/my_project /scratch/a56/$USER/my_project --default -- python3 analysis.py
 ```
 
 ### Sync and Download Results
 
 ```bash
 # Upload code, run analysis, download results
-qxub --remote gadi \
+qxub exec --remote gadi \
   --sync-up ~/my_analysis /scratch/a56/$USER/analysis \
   --sync-down /scratch/a56/$USER/analysis/results ~/results \
   --env dvc3 --mem 8GB \
@@ -144,10 +144,10 @@ qxub --remote gadi \
 
 ```bash
 # Set remote working directory
-qxub --remote gadi --work-dir /scratch/a56/$USER/project1 --default -- python3 script.py
+qxub exec --remote gadi --work-dir /scratch/a56/$USER/project1 --default -- python3 script.py
 
 # Use project-specific remote directory
-qxub --remote gadi --work-dir '{remote_work}/current_project' --env dvc3 -- python3 analysis.py
+qxub exec --remote gadi --work-dir '{remote_work}/current_project' --env dvc3 -- python3 analysis.py
 ```
 
 ## Development Workflows
@@ -168,10 +168,10 @@ print(result.head())
 EOF
 
 # Test on HPC with minimal resources
-qxub --remote gadi --sync-up . /scratch/a56/$USER/dev_test test --default -- python3 test_script.py
+qxub exec --remote gadi --sync-up . /scratch/a56/$USER/dev_test test --default -- python3 test_script.py
 
 # Scale up for production
-qxub --remote gadi --sync-up . /scratch/a56/$USER/production \
+qxub exec --remote gadi --sync-up . /scratch/a56/$USER/production \
   --env dvc3 --mem 16GB --ncpus 4 -- python3 production_script.py
 ```
 
@@ -186,7 +186,7 @@ for iteration in {1..3}; do
     sed -i "s/n_samples = .*/n_samples = $((iteration * 1000))/" analysis.py
 
     # Run remotely with results download
-    qxub --remote gadi \
+    qxub exec --remote gadi \
       --sync-up . /scratch/a56/$USER/iter_$iteration \
       --sync-down /scratch/a56/$USER/iter_$iteration/results ./results_iter_$iteration \
       --env dvc3 -- python3 analysis.py
@@ -203,7 +203,7 @@ done
 # Submit multiple remote jobs in parallel
 REMOTE_JOBS=()
 for param in 0.1 0.5 1.0 2.0; do
-    JOB_ID=$(qxub --remote gadi --terse --name "remote-param-$param" \
+    JOB_ID=$(qxub exec --remote gadi --terse --name "remote-param-$param" \
       --env dvc3 --mem 8GB \
       -- python3 -c "
 import time
@@ -222,7 +222,7 @@ done
 
 # Monitor all remote jobs from laptop
 echo "Monitoring ${#REMOTE_JOBS[@]} remote jobs..."
-qxub --remote gadi monitor --wait-for-completion "${REMOTE_JOBS[@]}"
+qxub exec --remote gadi monitor --wait-for-completion "${REMOTE_JOBS[@]}"
 echo "All remote parallel jobs completed!"
 ```
 
@@ -233,12 +233,12 @@ echo "All remote parallel jobs completed!"
 echo "Starting cross-platform analysis..."
 
 # Heavy computation on HPC
-HPC_JOB=$(qxub --remote gadi --terse --name "heavy-compute" \
+HPC_JOB=$(qxub exec --remote gadi --terse --name "heavy-compute" \
   --mem 64GB --ncpus 16 --walltime 4:00:00 \
   -- python3 heavy_computation.py)
 
 # Visualization on system with GPUs (example)
-# VIZ_JOB=$(qxub --remote gpu_cluster --terse --name "visualization" \
+# VIZ_JOB=$(qxub exec --remote gpu_cluster --terse --name "visualization" \
 #   --gpu 1 --mem 16GB \
 #   -- python3 create_visualizations.py)
 
@@ -246,7 +246,7 @@ echo "HPC computation job: $HPC_JOB"
 # echo "GPU visualization job: $VIZ_JOB"
 
 # Monitor both from laptop
-qxub --remote gadi monitor --wait-for-completion "$HPC_JOB"
+qxub exec --remote gadi monitor --wait-for-completion "$HPC_JOB"
 echo "Cross-platform analysis completed!"
 ```
 
@@ -303,13 +303,13 @@ jobs:
     - name: Run HPC tests
       run: |
         # Upload test code and run
-        qxub --remote gadi --sync-up . /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }} \
+        qxub exec --remote gadi --sync-up . /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }} \
           test -- python3 -m pytest tests/ -v
 
     - name: Run integration test
       run: |
         # Run more comprehensive test with proper resources
-        qxub --remote gadi --work-dir /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }} \
+        qxub exec --remote gadi --work-dir /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }} \
           --env dvc3 --mem 8GB --ncpus 2 --walltime 30:00 \
           -- python3 integration_test.py
 
@@ -317,7 +317,7 @@ jobs:
       if: always()
       run: |
         # Clean up test directory
-        qxub --remote gadi --default -- rm -rf /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }}
+        qxub exec --remote gadi --default -- rm -rf /scratch/${{ secrets.HPC_PROJECT }}/${{ secrets.HPC_USERNAME }}/ci_test_${{ github.run_id }}
 ```
 
 ### Automated Deployment Pipeline
@@ -344,11 +344,11 @@ jobs:
         # Setup SSH and config (as above)
 
         # Deploy analysis pipeline
-        qxub --remote gadi --sync-up . /scratch/a56/production/analysis_v${{ github.event.release.tag_name }} \
+        qxub exec --remote gadi --sync-up . /scratch/a56/production/analysis_v${{ github.event.release.tag_name }} \
           -- echo "Analysis pipeline v${{ github.event.release.tag_name }} deployed"
 
         # Run validation
-        qxub --remote gadi --work-dir /scratch/a56/production/analysis_v${{ github.event.release.tag_name }} \
+        qxub exec --remote gadi --work-dir /scratch/a56/production/analysis_v${{ github.event.release.tag_name }} \
           --env dvc3 -- python3 validate_deployment.py
 
         # Notify deployment success
@@ -366,15 +366,15 @@ upload_and_run_pipeline() {
     local remote_dir="/scratch/a56/$USER/$project_name"
 
     echo "Uploading project to HPC..."
-    qxub --remote gadi --sync-up . "$remote_dir" -- echo "Project uploaded"
+    qxub exec --remote gadi --sync-up . "$remote_dir" -- echo "Project uploaded"
 
     echo "Running DVC pipeline remotely..."
-    qxub --remote gadi --work-dir "$remote_dir" \
+    qxub exec --remote gadi --work-dir "$remote_dir" \
       --env dvc3 --mem 4GB --walltime 4:00:00 \
       -- dvc repro
 
     echo "Downloading results..."
-    qxub --remote gadi --sync-down "$remote_dir/results" ./remote_results \
+    qxub exec --remote gadi --sync-down "$remote_dir/results" ./remote_results \
       --sync-down "$remote_dir/metrics" ./remote_metrics \
       -- echo "Results downloaded"
 
@@ -392,7 +392,7 @@ upload_and_run_pipeline "my_analysis_$(date +%Y%m%d)"
 jupyter nbconvert --to script analysis.ipynb
 
 # Run notebook script on HPC
-qxub --remote gadi \
+qxub exec --remote gadi \
   --sync-up . /scratch/a56/$USER/notebook_run \
   --sync-down /scratch/a56/$USER/notebook_run/outputs ./notebook_outputs \
   --env jupyterlab --mem 16GB --ncpus 4 \
@@ -412,7 +412,7 @@ test_resources() {
         echo "Testing with $mem memory and $ncpus CPUs..."
 
         start_time=$(date +%s)
-        qxub --remote gadi --mem "$mem" --ncpus "$ncpus" --walltime 30:00 \
+        qxub exec --remote gadi --mem "$mem" --ncpus "$ncpus" --walltime 30:00 \
           --env dvc3 -- python3 "$script"
         end_time=$(date +%s)
 
@@ -431,10 +431,10 @@ test_resources "performance_test.py"
 
 ```bash
 # Test remote connection
-qxub --remote gadi --dry -- echo "Connection test"
+qxub exec --remote gadi --dry -- echo "Connection test"
 
 # Verbose connection debugging
-qxub --remote gadi -vv --dry -- echo "Debug connection"
+qxub exec --remote gadi -vv --dry -- echo "Debug connection"
 
 # Test SSH directly
 ssh -v your_username@gadi.nci.org.au "echo 'Direct SSH test'"
@@ -444,11 +444,11 @@ ssh -v your_username@gadi.nci.org.au "echo 'Direct SSH test'"
 
 ```bash
 # Test file synchronization
-qxub --remote gadi --sync-up test.txt /scratch/a56/$USER/sync_test/ \
+qxub exec --remote gadi --sync-up test.txt /scratch/a56/$USER/sync_test/ \
   --dry -- echo "Sync test"
 
 # Check remote file system
-qxub --remote gadi --default -- ls -la /scratch/a56/$USER/
+qxub exec --remote gadi --default -- ls -la /scratch/a56/$USER/
 ```
 
 ### Performance Optimization

@@ -9,13 +9,13 @@ from typing import List, Optional, Tuple
 
 import click
 
-from .execution import submit_and_monitor_job, validate_execution_context
-from .templates import (
+from ..core.templates import (
     get_conda_template,
     get_default_template,
     get_module_template,
     get_singularity_template,
 )
+from .core import submit_and_monitor_job
 
 
 def _handle_terse_execution(ctx, command, template_path, context_vars, pre, post):
@@ -30,8 +30,8 @@ def _handle_terse_execution(ctx, command, template_path, context_vars, pre, post
     # Import required functions
     from pathlib import Path
 
-    from .execution import build_submission_variables
-    from .scheduler import qsub
+    from ..core.scheduler import qsub
+    from .core import build_submission_variables
 
     out = Path(ctx_obj["out"])
     err = Path(ctx_obj["err"])

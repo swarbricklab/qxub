@@ -1,6 +1,6 @@
 # Basic Usage: Your First qxub Commands
 
-Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between t❌ Failed command: python failing_script.pyaditional PBS and qxub: **real-time output and simplified submission**.
+Welcome to your first hands-on experience with `qxub`! This section will demonstrate the fundamental difference between traditional PBS and qxub: **real-time output and simplified submission**.
 
 ## The qxub Philosophy
 
@@ -11,7 +11,7 @@ Traditional PBS workflow:
 4. Check output files later
 
 qxub workflow:
-1. Run `qxub --default -- your_command`
+1. Run `qxub exec [options] -- your_command`
 2. Watch output in real-time
 3. Get results immediately
 
@@ -20,7 +20,7 @@ qxub workflow:
 Let's start with something simple - a basic system information command:
 
 ```bash
-qxub --default -- hostname
+qxub exec -- hostname
 ```
 
 **Expected output:**
@@ -50,7 +50,23 @@ gadi-login-01
 Let's try something that takes a bit longer to really see the streaming in action:
 
 ```bash
-qxub --default -- python analysis.py
+qxub exec -- python -c "import time; print('Starting...'); time.sleep(3); print('Done!')"
+```
+
+## Shortcuts in Action
+
+qxub includes a powerful shortcuts system that automatically detects common commands:
+
+```bash
+# These commands automatically use predefined shortcuts:
+qxub exec -- python --version        # Uses 'python' shortcut (conda: base)
+qxub exec -- echo "Hello world"      # Uses 'echo' shortcut (default execution)
+
+# List available shortcuts
+qxub config shortcut list
+
+# See what shortcut would be used
+qxub exec --dry -- python script.py
 ```
 
 **What you'll see:**
@@ -76,7 +92,7 @@ Notice how each line appears as it's generated - no waiting for the job to finis
 Let's run a simple Python script:
 
 ```bash
-qxub --default -- python simple_calculation.py
+qxub exec -- python -c "print('Python version:'); import sys; print(sys.version); print('Computing something important...'); print('Result: 42')"
 ```
 
 **Expected output:**
@@ -86,12 +102,30 @@ qxub --default -- python simple_calculation.py
 ⏳ Job queued, waiting for execution...
 ✅ Job started, streaming output...
 
-Python version: 3.11.7 (main, Dec 15 2023, 12:09:04) [GCC 11.2.0] on linux
+Python version:
+3.11.7 (main, Dec 15 2023, 12:09:04) [GCC 11.2.0] on linux
 Computing something important...
 Result: 42
 
 🎉 Job completed successfully (exit code: 0)
 ```
+
+## Shorthand Commands for Speed
+
+For frequent use, qxub provides convenient shorthand commands:
+
+```bash
+# Instead of 'qxub exec', use 'qx' for speed
+qx -- python -c "print('Same functionality, shorter typing!')"
+
+# Also works with all the same options
+qx --resources mem=8GB -- python big_script.py
+```
+
+The shorthand commands available are:
+- **`qx`** - Short for `qxub exec` (fastest way to run jobs)
+- **`qxtat`** - Short for `qxub status` (check job status quickly)
+- **`qxet`** - Short for `qxub config shortcut set` (create shortcuts quickly)
 
 ## Understanding the Default Configuration
 
@@ -124,7 +158,7 @@ These defaults mean every job gets:
 Let's demonstrate how qxub handles both stdout and stderr by running a script that writes to both:
 
 ```bash
-qxub --default -- python debug_script.py
+qxub exec -- python -c "import sys; print('This goes to stdout'); print('This goes to stderr', file=sys.stderr); print('Back to stdout')"
 ```
 
 **You'll see both streams in real-time:**
@@ -151,7 +185,7 @@ The output files are still created separately:
 What happens when a command fails? Let's see:
 
 ```bash
-qxub --default -- python failing_script.py
+qxub exec -- python nonexistent_script.py
 ```
 
 **Expected output:**
@@ -170,7 +204,7 @@ qxub clearly reports failures and still provides resource usage information.
 You can interrupt running jobs with `Ctrl+C`. Let's try:
 
 ```bash
-qxub -- sleep 30
+qxub exec -- sleep 30
 # Press Ctrl+C after a few seconds
 ```
 
@@ -189,26 +223,59 @@ qxub -- sleep 30
 
 qxub automatically cleans up interrupted jobs - no orphaned processes!
 
+## Checking Job Status
+
+For longer-running jobs, you can check their status from another terminal:
+
+```bash
+# Check status of a specific job
+qxub status 12345678.gadi-pbs
+
+# Or use the shorthand
+qxtat 12345678.gadi-pbs
+
+# List all your recent jobs
+qxub status
+```
+
+**Expected output:**
+```
+📊 Job Status: 12345678.gadi-pbs
+├── Status: Running
+├── Queue: normal
+├── Resources: mem=4GB, ncpus=1, walltime=2:00:00
+├── Started: 2024-10-17 14:35:52
+├── Elapsed: 00:02:15
+└── Working Directory: /g/data/a56/jr9959/project
+```
+
 ## Key Takeaways
 
-1. **Simple syntax**: `qxub -- your_command` - that's it!
+1. **Simple syntax**: `qxub exec [options] -- your_command` or just `qx [options] -- your_command`
 2. **Real-time feedback**: See output as it happens, not after
-3. **Automatic cleanup**: Sensible defaults and automatic resource management
-4. **Error handling**: Clear reporting of both success and failure
-5. **Interruption safety**: Ctrl+C cleanly cancels jobs
+3. **Job monitoring**: Use `qxub status` or `qxtat` to check running jobs
+4. **Automatic cleanup**: Sensible defaults and automatic resource management
+5. **Error handling**: Clear reporting of both success and failure
+6. **Interruption safety**: Ctrl+C cleanly cancels jobs
+7. **Smart shortcuts**: Commands automatically use predefined execution contexts
+8. **Speed shortcuts**: Use `qx`, `qxtat`, and `qxet` for faster typing
 
 ## Next Steps
 
 Now that you've experienced the qxub basics, you're ready to learn about:
-- **[Debugging and Verbosity](03-debugging-and-verbosity.md)** - Essential tools for troubleshooting
 - **[Resources and Queues](02-resources-and-queues.md)** - Customizing resources and queue selection
+- **[Debugging and Verbosity](03-debugging-and-verbosity.md)** - Essential tools for troubleshooting
+- **[Execution Contexts](04-execution-contexts.md)** - Using conda environments, modules, and containers
 
 The real-time output feature alone makes qxub a game-changer for interactive HPC work. In the next sections, we'll explore how to customize resources and use different execution environments.
 
 ---
 
 **💡 Pro Tips:**
-- Use `qxub --help` to see all available options
+- Use `qx` instead of `qxub exec` for faster typing
+- Use `qxtat` to quickly check job status
+- Use `qxub --help` and `qxub exec --help` to see all available options
+- Use `qxub config shortcut list` to see available shortcuts
 - The `--` separator is crucial - everything after it is your command
 - Output files are always created even when you see real-time output
 - Job names include timestamps to avoid conflicts

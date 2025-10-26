@@ -9,19 +9,15 @@ import base64
 import logging
 import os
 import re
-import signal
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import click
 
+from .core.scheduler import monitor_job_single_thread, print_status, qsub
 from .history_manager import history_manager
-from .resource_tracker import resource_tracker
-from .scheduler import monitor_and_tail, print_status, qsub, start_job_monitoring
-
-# Global variable to track current job for signal handling
-_CURRENT_JOB_ID = None  # pylint: disable=invalid-name
+from .resources import resource_tracker
 
 
 def expand_submission_variables(cmd_str: str) -> str:
@@ -45,15 +41,12 @@ def expand_submission_variables(cmd_str: str) -> str:
 
         # Smart quote processing (enhanced)
         expand_submission_variables('"find /path -exec echo \\"User: ${USER}\\" \\;"')
-        # Returns: 'find /path -exec echo "User: jr9959" \;'
+        # Returns: 'find /path -exec echo "User: jr9959" \\;'
 
         # Literal dollar preservation
-        expand_submission_variables('"awk \\"{print \\\$1}\\" file"')
+        expand_submission_variables('"awk \\"{print \\\\$1}\\" file"')
         # Returns: 'awk "{print $1}" file'
     """
-    import logging
-    import os
-    import re
 
     # Check for smart quote processing (double-quote wrapped commands)
     if cmd_str.startswith('"') and cmd_str.endswith('"') and len(cmd_str) > 1:
@@ -147,7 +140,7 @@ def expand_variables_preserving_quotes(cmd_str: str, is_list: bool = False) -> s
 
     def save_escaped_var(match):
         escaped_vars.append(match.group(1))  # Save the $VAR part
-        return f"__ESCAPED_VAR_{len(escaped_vars)-1}__"
+        return f"__ESCAPED_VAR_{len(escaped_vars) - 1}__"
 
     result = re.sub(escaped_pattern, save_escaped_var, result)
 
@@ -171,26 +164,6 @@ def expand_variables_preserving_quotes(cmd_str: str, is_list: bool = False) -> s
         result = result.replace(f"__ESCAPED_VAR_{i}__", escaped_var)
 
     return result
-
-
-def _signal_handler(signum, frame):
-    """Handle SIGINT (Ctrl+C) by cleaning up submitted job"""
-    # pylint: disable=unused-argument
-    if _CURRENT_JOB_ID:
-        # Clear the current line completely before printing cleanup messages
-        print(" " * 100, end="", flush=True)
-        print("🛑 Interrupted! Cleaning up job...")
-        from .scheduler import qdel
-
-        success = qdel(_CURRENT_JOB_ID, quiet=False)
-        if success:
-            print("✅ Job cleanup completed")
-        else:
-            print(
-                f"⚠️  Job cleanup failed - you may need to manually run: qdel {_CURRENT_JOB_ID}"
-            )
-    print("👋 Goodbye!")
-    sys.exit(130)  # Standard exit code for SIGINT
 
 
 def build_submission_variables(
@@ -284,9 +257,6 @@ def submit_and_monitor_job(
     if context_vars is None:
         context_vars = {}
 
-    # Declare global variables
-    global _CURRENT_JOB_ID  # pylint: disable=global-statement
-
     ctx_obj = ctx.obj
     out = Path(ctx_obj["out"])
     err = Path(ctx_obj["err"])
@@ -316,12 +286,17 @@ def submit_and_monitor_job(
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
     logging.info("Submission command: %s", submission_command)
 
-    # Progress message: Job command constructed
-    if not ctx_obj["quiet"]:
+    # Progress message: Job command constructed (skip for terse mode)
+    if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
         print_status("🔧 Job command constructed", final=True)
 
     # Handle dry run
     if ctx_obj["dry"]:
+        # Handle terse mode - just show "DRY_RUN" for terse
+        if ctx_obj.get("terse", False):
+            click.echo("DRY_RUN")
+            return
+
         # Show expanded commands for user verification
         cmd_str = " ".join(command)
         cmd_expanded = expand_submission_variables(cmd_str)
@@ -351,8 +326,11 @@ def submit_and_monitor_job(
     # Submit job
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
-    # Track job ID globally for signal handler
-    _CURRENT_JOB_ID = job_id
+    # Handle terse mode - emit only job ID and return immediately
+    if ctx_obj.get("terse", False):
+        click.echo(job_id)
+        logging.info("Terse mode: emitted job ID %s and exiting", job_id)
+        return
 
     # Display job ID to user (unless in quiet mode)
     if not ctx_obj["quiet"]:
@@ -381,31 +359,33 @@ def submit_and_monitor_job(
         logging.info("Exiting in quiet mode")
         return
 
-    # Register signal handler for Ctrl+C cleanup
-    signal.signal(signal.SIGINT, _signal_handler)
-
-    # Start concurrent monitoring of job and log files
-    # Stream log files to STDOUT/STDERR as appropriate
+    # Prepare output files
     out.parent.mkdir(parents=True, exist_ok=True)
     err.parent.mkdir(parents=True, exist_ok=True)
     out.touch()
     err.touch()
 
-    # Start job monitoring and get coordinator for signaling
-    coordinator, wait_for_completion = start_job_monitoring(
-        job_id, out, err, quiet=ctx_obj["quiet"]
-    )
-
-    # Signal that submission messages are complete - spinner can start now
-    coordinator.signal_submission_complete()
-
+    # Use single-thread monitoring for simpler, more reliable operation
     try:
-        exit_status = wait_for_completion()
+        exit_status = monitor_job_single_thread(
+            job_id, out, err, quiet=ctx_obj["quiet"]
+        )
         # Exit with the job's exit status
         sys.exit(exit_status)
-    finally:
-        # Clear job ID when monitoring completes (successfully or via interrupt)
-        _CURRENT_JOB_ID = None
+    except KeyboardInterrupt:
+        # Handle Ctrl-C gracefully
+        print("\n🛑 Interrupted! Cleaning up job...")
+        from .core.scheduler import qdel
+
+        success = qdel(job_id, quiet=False)
+        if success:
+            print("✅ Job cleanup completed")
+            sys.exit(130)  # Standard exit code for SIGINT
+        else:
+            print(
+                f"⚠️  Job cleanup failed - you may need to manually run: qdel {job_id}"
+            )
+            sys.exit(1)
 
 
 def validate_execution_context(

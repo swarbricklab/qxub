@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from .remote_config import RemoteConfig, RemoteConfigError
+from .config import RemoteConfig, RemoteConfigError
 
 logger = logging.getLogger(__name__)
 

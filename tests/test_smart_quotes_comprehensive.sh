@@ -8,8 +8,9 @@ set -e
 echo "🧪 Testing Smart Quote Processing in --cmd Option"
 echo
 
-# Activate qxub environment
-source venv/bin/activate
+# Activate qxub environment (conda) - using same pattern as qconda.pbs
+eval "$(conda shell.bash hook)"
+conda activate qxub
 
 # Test counter
 test_count=0
@@ -25,8 +26,8 @@ run_test() {
     echo "Test $test_count: $test_name"
     echo "  Input: $cmd_input"
 
-    if result=$(qxub --env base --dry --cmd "$cmd_input" 2>&1); then
-        output=$(echo "$result" | grep "Command to execute:" | cut -d: -f2- | sed 's/^ *//')
+    if result=$(qxub exec --dry-run --env base --cmd "$cmd_input" 2>&1); then
+        output=$(echo "$result" | grep "would execute:" | cut -d: -f2- | sed 's/^ *//')
         echo "  Output: $output"
 
         if echo "$output" | grep -q "$expected_pattern"; then

@@ -285,6 +285,133 @@ def calculate_efficiency(used: int, requested: int) -> float:
     return round(efficiency, 1)
 
 
+def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse resource usage information from a PBS joblog file.
+
+    The joblog contains a resource usage section at the end that looks like:
+
+    ========================================================================
+    Resource Usage on 2025-10-21 11:14:48:
+       Job Id:             152942530.gadi-pbs
+       Project:            a56
+       Exit Status:        0
+       Service Units:      0.00
+       NCPUs Requested:    1                      NCPUs Used: 1
+       CPU Time Used: 00:00:02
+       Memory Requested:   4.0GB                 Memory Used: 131.66MB
+       Walltime requested: 02:00:00            Walltime Used: 00:00:05
+       JobFS requested:    100.0MB                JobFS used: 0B
+    ========================================================================
+
+    Args:
+        joblog_path: Path to the PBS joblog file
+
+    Returns:
+        Dictionary with parsed resource information, or None if parsing fails
+
+    Example:
+        >>> parse_joblog_resources("/path/to/joblog")
+        {
+            'job_id': '152942530.gadi-pbs',
+            'project': 'a56',
+            'exit_status': 0,
+            'service_units': 0.0,
+            'ncpus_requested': 1,
+            'ncpus_used': 1,
+            'cpu_time_used_seconds': 2,
+            'memory_requested_bytes': 4294967296,
+            'memory_used_bytes': 138131251,
+            'walltime_requested_seconds': 7200,
+            'walltime_used_seconds': 5,
+            'jobfs_requested_bytes': 104857600,
+            'jobfs_used_bytes': 0
+        }
+    """
+    try:
+        with open(joblog_path, "r") as f:
+            content = f.read()
+
+        # Look for the Resource Usage section - it's at the end of the file
+        # Pattern to match the resource usage block - more flexible regex
+        resource_section_pattern = r"Resource Usage on.*?:\s*\n(.*?)={10,}"
+        match = re.search(resource_section_pattern, content, re.DOTALL)
+
+        if not match:
+            return None
+
+        resource_text = match.group(1)
+
+        # Parse individual fields using regex patterns
+        result = {}
+
+        # Job ID
+        job_id_match = re.search(r"Job Id:\s*(\S+)", resource_text)
+        if job_id_match:
+            result["job_id"] = job_id_match.group(1)
+
+        # Project
+        project_match = re.search(r"Project:\s*(\S+)", resource_text)
+        if project_match:
+            result["project"] = project_match.group(1)
+
+        # Exit Status
+        exit_status_match = re.search(r"Exit Status:\s*(\d+)", resource_text)
+        if exit_status_match:
+            result["exit_status"] = int(exit_status_match.group(1))
+
+        # Service Units
+        service_units_match = re.search(r"Service Units:\s*([\d.]+)", resource_text)
+        if service_units_match:
+            result["service_units"] = float(service_units_match.group(1))
+
+        # NCPUs Requested and Used
+        ncpus_match = re.search(
+            r"NCPUs Requested:\s*(\d+)\s+NCPUs Used:\s*(\d+)", resource_text
+        )
+        if ncpus_match:
+            result["ncpus_requested"] = int(ncpus_match.group(1))
+            result["ncpus_used"] = int(ncpus_match.group(2))
+
+        # CPU Time Used
+        cpu_time_match = re.search(r"CPU Time Used:\s*(\d+:\d+:\d+)", resource_text)
+        if cpu_time_match:
+            result["cpu_time_used_seconds"] = time_to_seconds(cpu_time_match.group(1))
+
+        # Memory Requested and Used
+        memory_match = re.search(
+            r"Memory Requested:\s*([\d.]+\w+)\s+Memory Used:\s*([\d.]+\w+)",
+            resource_text,
+        )
+        if memory_match:
+            result["memory_requested_bytes"] = size_to_bytes(memory_match.group(1))
+            result["memory_used_bytes"] = size_to_bytes(memory_match.group(2))
+
+        # Walltime Requested and Used
+        walltime_match = re.search(
+            r"Walltime requested:\s*(\d+:\d+:\d+)\s+Walltime Used:\s*(\d+:\d+:\d+)",
+            resource_text,
+        )
+        if walltime_match:
+            result["walltime_requested_seconds"] = time_to_seconds(
+                walltime_match.group(1)
+            )
+            result["walltime_used_seconds"] = time_to_seconds(walltime_match.group(2))
+
+        # JobFS Requested and Used
+        jobfs_match = re.search(
+            r"JobFS requested:\s*([\d.]+\w+)\s+JobFS used:\s*([\d.]+\w+)", resource_text
+        )
+        if jobfs_match:
+            result["jobfs_requested_bytes"] = size_to_bytes(jobfs_match.group(1))
+            result["jobfs_used_bytes"] = size_to_bytes(jobfs_match.group(2))
+
+        return result if result else None
+
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     # Test the functions
     print("Testing size_to_bytes:")

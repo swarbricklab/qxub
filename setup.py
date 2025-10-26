@@ -15,7 +15,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="qxub",
-    version="2.3.6",
+    version="3.0.0",
     author="John Reeves",
     author_email="j.reeves@garvan.org.au",
     description="Simplified job submission to HPC",
@@ -35,6 +35,11 @@ setup(
     python_requires=">=3.6",
     install_requires=["omegaconf", "click", "tailer", "rich", "pyyaml"],
     entry_points={
-        "console_scripts": ["qxub=qxub.cli:qxub"],
+        "console_scripts": [
+            "qxub=qxub.cli:qxub",
+            "qx=qxub.config.aliases:qx_main",
+            "qxtat=qxub.config.aliases:qxtat_main",
+            "qxet=qxub.config.aliases:qxet_main",
+        ],
     },
 )

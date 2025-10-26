@@ -8,6 +8,7 @@ including defaults and aliases.
 # pylint: disable=broad-exception-caught,protected-access,raise-missing-from,unnecessary-pass,unused-variable
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -17,7 +18,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
-from .config_manager import config_manager
+from .config import config_manager
 from .history import history_logger
 
 console = Console()
@@ -147,13 +148,10 @@ def list_config(
 
     if user_only:
         config_to_show = config_manager.user_config
-        title_suffix = " (User Only)"
     elif system_only:
         config_to_show = config_manager.system_config
-        title_suffix = " (System Only)"
     else:
         config_to_show = config_manager.merged_config
-        title_suffix = ""
 
     if not config_to_show:
         if user_only:
@@ -554,7 +552,7 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
             project=alias_def.get("project", "test"),
             queue=alias_def.get("queue", "test"),
         )
-        resolved = config_manager.resolve_templates(alias_def, template_vars)
+        config_manager.resolve_templates(alias_def, template_vars)
         click.echo("✅ Template resolution successful")
     except Exception as e:
         errors.append(f"Template resolution failed: {e}")
@@ -597,7 +595,15 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
     "--mods", help="Multiple modules to load, comma-separated (for module subcommand)"
 )
 @click.option("--sif", help="Singularity container (for sing subcommand)")
-def set_alias(alias_name: str, **kwargs):
+@click.option(
+    "--user", "user_config", is_flag=True, help="Set alias in user config (default)"
+)
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Set alias in system config (requires appropriate permissions)",
+)
+def set_alias(alias_name: str, user_config: bool, system: bool, **kwargs):
     """Create or update an alias."""
     # Remove None values
     alias_def = {k: v for k, v in kwargs.items() if v is not None}
@@ -639,10 +645,23 @@ def set_alias(alias_name: str, **kwargs):
         if subcommand_opts:
             alias_def[subcommand] = subcommand_opts
 
+    # Check for mutually exclusive scope options
+    if user_config and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system. Choose one scope."
+        )
+
     try:
-        # Set the alias in user config
-        config_manager.set_user_config_value(f"aliases.{alias_name}", alias_def)
-        click.echo(f"✅ Set alias '{alias_name}'")
+        # Set the alias with appropriate scope
+        if system:
+            config_manager.set_system_config_value(f"aliases.{alias_name}", alias_def)
+            scope_desc = "(system-wide)"
+        else:
+            # Default to user config
+            config_manager.set_user_config_value(f"aliases.{alias_name}", alias_def)
+            scope_desc = "(user config)"
+
+        click.echo(f"✅ Set alias '{alias_name}' {scope_desc}")
 
         # Show the created alias
         click.echo("📋 Alias definition:")
@@ -650,6 +669,13 @@ def set_alias(alias_name: str, **kwargs):
         syntax = Syntax(yaml_str, "yaml", theme="monokai")
         console.print(syntax)
 
+    except (PermissionError, OSError) as e:
+        if "Permission denied" in str(e) or "Read-only file system" in str(e):
+            click.echo(f"❌ Permission denied writing to config file: {e}")
+            click.echo("💡 Hint: Use 'sudo' for system-wide configuration")
+        else:
+            click.echo(f"❌ Error writing config file: {e}")
+        raise click.Abort()
     except Exception as e:
         click.echo(f"❌ Error creating alias: {e}")
         raise click.Abort()
@@ -888,3 +914,503 @@ def history_to_alias(index, alias_name, overwrite):
 
     except Exception as e:
         console.print(f"❌ Error creating alias from history: {e}", style="red")
+
+
+# Shortcut management subcommands
+@config_cli.group(name="shortcut")
+def shortcut_config():
+    """Manage configuration shortcuts."""
+    pass
+
+
+@shortcut_config.command(name="set")
+@click.argument("command_prefix")
+@click.option("--env", help="Conda environment for execution")
+@click.option("--mod", multiple=True, help="Environment module to load (repeatable)")
+@click.option("--mods", help="Comma-separated list of environment modules")
+@click.option("--sif", help="Singularity container image")
+@click.option("--bind", help="Singularity bind mounts")
+@click.option("-l", "--resources", help="PBS resource requirements")
+@click.option("-q", "--queue", help="PBS queue name")
+@click.option("-N", "--name", help="PBS job name")
+@click.option("-P", "--project", help="PBS project code")
+@click.option("--template", help="Job script template")
+@click.option("--pre", help="Command to run before main command")
+@click.option("--post", help="Command to run after main command")
+@click.option("--cmd", help="Default command to execute (can be overridden)")
+@click.option(
+    "--user", "user_config", is_flag=True, help="Set shortcut in user config (default)"
+)
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Set shortcut in system config (requires appropriate permissions)",
+)
+def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options):
+    """
+    Create or update a shortcut.
+
+    Creates a shortcut for the specified command or command prefix.
+    The shortcut will store execution context (conda env, modules, etc.)
+    and PBS settings that will be automatically applied when you run
+    matching commands.
+
+    Examples:
+        # Create a Python shortcut (matches 'python', 'python3', 'python script.py', etc.)
+        qxub config shortcut set "python" --env datascience --queue express
+
+        # Create a Jupyter shortcut (matches 'jupyter', 'jupyter lab', etc.)
+        qxub config shortcut set "jupyter" --env jupyter -l "mem=16GB,walltime=4:00:00"
+
+        # Create a DVC shortcut (matches 'dvc', 'dvc doctor', 'dvc add', etc.)
+        qxub config shortcut set "dvc" --mod python3 --mod dvc
+
+        # Create a Singularity ML shortcut
+        qxub config shortcut set "tensorflow" --sif /path/to/tf.sif --bind /data:/mnt
+    """
+    from typing import Any, Dict
+
+    from .shortcut_manager import shortcut_manager
+
+    # Build shortcut definition
+    definition: Dict[str, Any] = {}
+
+    # Execution context (mutually exclusive)
+    execution_contexts = [options["env"], options["mod"], options["sif"]]
+    active_contexts = sum(bool(x) for x in execution_contexts)
+
+    if active_contexts > 1:
+        raise click.ClickException(
+            "Cannot specify multiple execution contexts. "
+            "Use only one of: --env, --mod/--mods, --sif"
+        )
+
+    # Set execution context
+    if options["env"]:
+        definition["env"] = options["env"]
+    elif options["mod"]:
+        definition["mod"] = list(options["mod"])
+    elif options["mods"]:
+        definition["mods"] = options["mods"]
+    elif options["sif"]:
+        definition["sif"] = options["sif"]
+        if options["bind"]:
+            definition["bind"] = options["bind"]
+
+    # PBS options
+    if options["resources"]:
+        definition["resources"] = [options["resources"]]
+    if options["queue"]:
+        definition["queue"] = options["queue"]
+    if options["name"]:
+        definition["name"] = options["name"]
+    if options["project"]:
+        definition["project"] = options["project"]
+
+    # Job script options
+    if options["template"]:
+        definition["template"] = options["template"]
+    if options["pre"]:
+        definition["pre"] = options["pre"]
+    if options["post"]:
+        definition["post"] = options["post"]
+
+    # Command and metadata
+    if options["cmd"]:
+        definition["cmd"] = options["cmd"]
+
+    # Validate we have at least some configuration
+    if not definition:
+        raise click.ClickException(
+            "Shortcut must specify at least one option (execution context, PBS settings, etc.)"
+        )
+
+    # Check for mutually exclusive scope options
+    if user_config and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system. Choose one scope."
+        )
+
+    # Save shortcut with appropriate scope
+    try:
+        if system:
+            shortcut_manager.add_system_shortcut(command_prefix, definition)
+            scope_desc = "(system-wide)"
+        else:
+            # Default to user config
+            shortcut_manager.add_shortcut(command_prefix, definition)
+            scope_desc = "(user config)"
+    except (PermissionError, OSError) as e:
+        if "Permission denied" in str(e) or "Read-only file system" in str(e):
+            raise click.ClickException(
+                f"❌ Permission denied writing to system config: {e}\n"
+                f"💡 Hint: Use 'sudo' for system-wide configuration"
+            )
+        else:
+            raise click.ClickException(f"❌ Error writing system config: {e}")
+
+    # Show confirmation
+    def _get_execution_context_description(definition: dict) -> str:
+        """Get human-readable description of execution context."""
+        if definition.get("env"):
+            return f"conda: {definition['env']}"
+        elif definition.get("mod"):
+            modules = definition["mod"]
+            if isinstance(modules, list):
+                return f"modules: {', '.join(modules)}"
+            return f"module: {modules}"
+        elif definition.get("mods"):
+            return f"modules: {definition['mods']}"
+        elif definition.get("sif"):
+            sif_desc = f"singularity: {definition['sif']}"
+            if definition.get("bind"):
+                sif_desc += f" (bind: {definition['bind']})"
+            return sif_desc
+        else:
+            return "default"
+
+    context_desc = _get_execution_context_description(definition)
+    click.echo(f"✅ Shortcut '{command_prefix}' saved successfully {scope_desc}")
+    click.echo(f"   Context: {context_desc}")
+    if definition.get("cmd"):
+        click.echo(f"   Command: {definition['cmd']}")
+
+    # Show usage example
+    click.echo(f"\n💡 Usage: qxub exec -- {command_prefix} [additional args]")
+    click.echo(f"💡 Or explicit: qxub exec --shortcut '{command_prefix}' -- [command]")
+
+
+@shortcut_config.command()
+@click.option(
+    "--show-origin", is_flag=True, help="Show origin (user/system) for each shortcut"
+)
+def list(show_origin: bool):
+    """List all available shortcuts."""
+    from .shortcut_manager import shortcut_manager
+
+    if show_origin:
+        shortcuts_data = shortcut_manager.list_shortcuts_with_origin()
+        if not shortcuts_data:
+            click.echo("No shortcuts defined yet.")
+            click.echo(
+                "\n💡 Create one with: qxub config shortcut set <command_prefix> --env <environment>"
+            )
+            return
+
+        # Create table with origin information
+        table = Table(title="Available Shortcuts")
+        table.add_column("Command Prefix", style="cyan", no_wrap=True)
+        table.add_column("Context", style="green")
+        table.add_column("Command", style="yellow")
+        table.add_column("Origin", style="dim")
+    else:
+        shortcuts = shortcut_manager.list_shortcuts()
+        if not shortcuts:
+            click.echo("No shortcuts defined yet.")
+            click.echo(
+                "\n💡 Create one with: qxub config shortcut set <command_prefix> --env <environment>"
+            )
+            return
+
+        # Create table without origin information
+        table = Table(title="Available Shortcuts")
+        table.add_column("Command Prefix", style="cyan", no_wrap=True)
+        table.add_column("Context", style="green")
+        table.add_column("Command", style="yellow")
+
+    def _get_execution_context_description(definition: dict) -> str:
+        """Get human-readable description of execution context."""
+        if definition.get("env"):
+            return f"conda: {definition['env']}"
+        elif definition.get("mod"):
+            modules = definition["mod"]
+            if isinstance(modules, list):
+                return f"modules: {', '.join(modules)}"
+            return f"module: {modules}"
+        elif definition.get("mods"):
+            return f"modules: {definition['mods']}"
+        elif definition.get("sif"):
+            sif_desc = f"singularity: {definition['sif']}"
+            if definition.get("bind"):
+                sif_desc += f" (bind: {definition['bind']})"
+            return sif_desc
+        else:
+            return "default"
+
+    if show_origin:
+        for name, data in sorted(shortcuts_data.items()):
+            definition = data["definition"]
+            origin = data["origin"]
+            context = _get_execution_context_description(definition)
+            cmd = definition.get("cmd", "(dynamic)")
+            table.add_row(name, context, cmd, origin)
+    else:
+        for name, definition in sorted(shortcuts.items()):
+            context = _get_execution_context_description(definition)
+            cmd = definition.get("cmd", "(dynamic)")
+            table.add_row(name, context, cmd)
+
+    console.print(table)
+
+    click.echo(
+        f"\n💡 Usage: qxub exec -- <command_prefix> [args] (automatic detection)"
+    )
+    click.echo(f"💡 Or explicit: qxub exec --shortcut <command_prefix> -- [command]")
+
+
+@shortcut_config.command()
+@click.argument("name")
+def show(name: str):
+    """Show detailed information about a specific shortcut."""
+    import json
+
+    from rich.syntax import Syntax
+
+    from .shortcut_manager import shortcut_manager
+
+    shortcut_def = shortcut_manager.get_shortcut(name)
+
+    if not shortcut_def:
+        click.echo(f"❌ Shortcut '{name}' not found")
+
+        # Show similar shortcuts
+        shortcuts = shortcut_manager.list_shortcuts()
+        if shortcuts:
+            click.echo("\n💡 Available shortcuts:")
+            for shortcut_name in sorted(shortcuts.keys()):
+                click.echo(f"  • {shortcut_name}")
+        sys.exit(2)
+
+    # Get source information
+    shortcuts_with_origin = shortcut_manager.list_shortcuts_with_origin()
+    source = shortcuts_with_origin.get(name, {}).get("origin", "unknown")
+    source_display = "🌐 system config" if source == "system" else "👤 user config"
+
+    # Display shortcut details
+    click.echo(f"🎯 Shortcut: {name}")
+    click.echo(f"   Source: {source_display}")
+
+    def _get_execution_context_description(definition: dict) -> str:
+        """Get human-readable description of execution context."""
+        if definition.get("env"):
+            return f"conda: {definition['env']}"
+        elif definition.get("mod"):
+            modules = definition["mod"]
+            if isinstance(modules, list):
+                return f"modules: {', '.join(modules)}"
+            return f"module: {modules}"
+        elif definition.get("mods"):
+            return f"modules: {definition['mods']}"
+        elif definition.get("sif"):
+            sif_desc = f"singularity: {definition['sif']}"
+            if definition.get("bind"):
+                sif_desc += f" (bind: {definition['bind']})"
+            return sif_desc
+        else:
+            return "default"
+
+    # Display shortcut details
+    click.echo(f"🎯 Shortcut: {name}")
+
+    # Execution context
+    context = _get_execution_context_description(shortcut_def)
+    click.echo(f"   Context: {context}")
+
+    # PBS settings
+    pbs_settings = []
+    if shortcut_def.get("queue"):
+        pbs_settings.append(f"queue={shortcut_def['queue']}")
+    if shortcut_def.get("resources"):
+        pbs_settings.append(f"resources={shortcut_def['resources']}")
+    if shortcut_def.get("name"):
+        pbs_settings.append(f"job_name={shortcut_def['name']}")
+    if shortcut_def.get("project"):
+        pbs_settings.append(f"project={shortcut_def['project']}")
+
+    if pbs_settings:
+        click.echo(f"   PBS: {', '.join(pbs_settings)}")
+
+    # Commands
+    if shortcut_def.get("cmd"):
+        click.echo(f"   Command: {shortcut_def['cmd']}")
+    if shortcut_def.get("pre"):
+        click.echo(f"   Pre-command: {shortcut_def['pre']}")
+    if shortcut_def.get("post"):
+        click.echo(f"   Post-command: {shortcut_def['post']}")
+
+    # Description
+    if shortcut_def.get("description"):
+        click.echo(f"   Description: {shortcut_def['description']}")
+
+    # Show raw JSON for advanced users
+    if click.confirm("\n🔍 Show raw configuration?", default=False):
+        json_content = json.dumps(shortcut_def, indent=2, sort_keys=True)
+        syntax = Syntax(json_content, "json", theme="monokai", line_numbers=False)
+        console.print(syntax)
+
+    # Usage example
+    click.echo(f"\n💡 Usage: qxub exec -- {name} [args] (automatic detection)")
+    click.echo(f"💡 Or explicit: qxub exec --shortcut '{name}' -- [command]")
+
+
+@shortcut_config.command()
+@click.argument("name")
+@click.option("--user", is_flag=True, help="Delete from user config (default)")
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Delete from system config (requires write permissions)",
+)
+@click.option("--yes", is_flag=True, help="Confirm deletion without prompting")
+def delete(name: str, user: bool, system: bool, yes: bool):
+    """Delete a shortcut."""
+    from .shortcut_manager import shortcut_manager
+
+    # Validate mutually exclusive scope flags
+    if user and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system flags. Choose one or omit both for default (user)."
+        )
+
+    # Manual confirmation if --yes not provided
+    if not yes:
+        if not click.confirm("Are you sure you want to delete this shortcut?"):
+            click.echo("❌ Deletion cancelled")
+            return
+
+    try:
+        if system:
+            success = shortcut_manager.remove_system_shortcut(name)
+            location = "system config"
+        else:
+            # Default to user if neither flag specified, or if --user explicitly set
+            success = shortcut_manager.remove_shortcut(name)
+            location = "user config"
+
+        if success:
+            click.echo(f"✅ Shortcut '{name}' deleted successfully from {location}")
+        else:
+            click.echo(f"❌ Shortcut '{name}' not found in {location}")
+
+            # Show available shortcuts
+            shortcuts = shortcut_manager.list_shortcuts()
+            if shortcuts:
+                click.echo("\n💡 Available shortcuts:")
+                for shortcut_name in sorted(shortcuts.keys()):
+                    click.echo(f"  • {shortcut_name}")
+
+    except PermissionError:
+        raise click.ClickException(
+            f"Permission denied: Cannot write to system shortcuts file. "
+            f"Check write permissions for {shortcut_manager._system_shortcuts_file}"
+        )
+
+
+@shortcut_config.command()
+@click.argument("old_name")
+@click.argument("new_name")
+@click.option("--user", is_flag=True, help="Rename in user config (default)")
+@click.option(
+    "--system",
+    is_flag=True,
+    help="Rename in system config (requires write permissions)",
+)
+def rename(old_name: str, new_name: str, user: bool, system: bool):
+    """Rename a shortcut."""
+    from .shortcut_manager import shortcut_manager
+
+    # Validate mutually exclusive scope flags
+    if user and system:
+        raise click.ClickException(
+            "Cannot specify both --user and --system flags. Choose one or omit both for default (user)."
+        )
+
+    # Get existing shortcut - need to check the appropriate config
+    shortcuts_with_origin = shortcut_manager.list_shortcuts_with_origin()
+    shortcut_info = shortcuts_with_origin.get(old_name)
+
+    if not shortcut_info:
+        click.echo(f"❌ Shortcut '{old_name}' not found")
+        return
+
+    shortcut_def = shortcut_info["definition"]
+    shortcut_source = shortcut_info["origin"]
+
+    # Determine target scope
+    if system:
+        target_scope = "system"
+    else:
+        target_scope = "user"  # Default behavior
+
+    # Warn if trying to rename across scopes
+    if shortcut_source != target_scope:
+        click.echo(
+            f"⚠️  Warning: '{old_name}' exists in {shortcut_source} config but you're targeting {target_scope} config"
+        )
+        if not click.confirm(f"Continue with rename in {target_scope} config?"):
+            click.echo("❌ Rename cancelled")
+            return
+
+    # Check if new name already exists in target scope
+    existing_new = shortcut_manager.get_shortcut(new_name)
+    if existing_new:
+        new_info = shortcuts_with_origin.get(new_name)
+        if new_info and new_info["origin"] == target_scope:
+            if not click.confirm(
+                f"Shortcut '{new_name}' already exists in {target_scope} config. Overwrite?"
+            ):
+                click.echo("❌ Rename cancelled")
+                return
+
+    try:
+        # Add with new name in target scope
+        if target_scope == "system":
+            shortcut_manager.add_system_shortcut(new_name, shortcut_def)
+        else:
+            shortcut_manager.add_shortcut(new_name, shortcut_def)
+
+        # Remove old name from original scope
+        if shortcut_source == "system":
+            shortcut_manager.remove_system_shortcut(old_name)
+        else:
+            shortcut_manager.remove_shortcut(old_name)
+
+        click.echo(
+            f"✅ Shortcut renamed from '{old_name}' to '{new_name}' in {target_scope} config"
+        )
+
+    except PermissionError:
+        raise click.ClickException(
+            f"Permission denied: Cannot write to system shortcuts file. "
+            f"Check write permissions for {shortcut_manager._system_shortcuts_file}"
+        )
+
+
+@shortcut_config.command()
+def files():
+    """Show shortcuts configuration file locations."""
+    from .shortcut_manager import shortcut_manager
+
+    config_files = shortcut_manager.get_config_files()
+
+    table = Table(title="Shortcuts Configuration Files")
+    table.add_column("Type", style="cyan")
+    table.add_column("Path", style="green")
+    table.add_column("Exists", style="yellow")
+
+    for file_type, (path, exists) in config_files.items():
+        exists_str = "✅ Yes" if exists else "❌ No"
+        table.add_row(file_type.title(), str(path), exists_str)
+
+    console.print(table)
+
+
+@shortcut_config.command()
+def refresh():
+    """Refresh shortcuts cache (reload from files)."""
+    from .shortcut_manager import shortcut_manager
+
+    shortcut_manager.refresh_cache()
+    shortcuts = shortcut_manager.list_shortcuts()
+    count = len(shortcuts)
+    click.echo(f"✅ Shortcuts cache refreshed ({count} shortcuts loaded)")

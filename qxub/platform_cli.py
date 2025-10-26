@@ -6,21 +6,16 @@ and cost estimation using the qxub platform abstraction system.
 """
 
 import sys
-from pathlib import Path
-from typing import Any, Dict, Optional
 
 import click
 
-from .config_manager import config_manager, setup_logging
 from .platform import (
-    Platform,
-    QueueSelectionResult,
     get_current_platform,
     get_platform,
     list_platforms,
     select_best_queue,
 )
-from .resource_utils import format_walltime, parse_memory_size, parse_walltime
+from .resources import format_walltime, parse_walltime
 
 
 @click.group(name="platform")

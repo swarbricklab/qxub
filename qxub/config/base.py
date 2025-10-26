@@ -15,7 +15,6 @@ config_manager.ConfigManager instead.
 
 import logging
 import os
-import sys
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -64,7 +63,7 @@ class QxubConfig:
         for config_path in user_config_paths:
             if config_path.exists():
                 try:
-                    with open(config_path) as f:
+                    with open(config_path, encoding="utf-8") as f:
                         self._user_config = yaml.safe_load(f) or {}
                     logger.debug(f"Loaded user config from {config_path}")
                     break
@@ -86,7 +85,7 @@ class QxubConfig:
             config_file = config_dir / "config.yaml"
             if config_file.exists():
                 try:
-                    with open(config_file) as f:
+                    with open(config_file, encoding="utf-8") as f:
                         self._system_config = yaml.safe_load(f) or {}
                     logger.debug(f"Loaded system config from {config_file}")
                     return  # Use the first found config
@@ -117,14 +116,14 @@ class QxubConfig:
             # Support both single path and colon-separated paths
             if ":" in env_paths:
                 return [Path(p.strip()) for p in env_paths.split(":")]
-            else:
-                return [Path(env_paths)]
+
+            return [Path(env_paths)]
 
         # Then check config with template resolution
         configured_paths = self.get("platform_search_paths", [])
         if configured_paths:
             # Import here to avoid circular import
-            from .config_manager import ConfigManager
+            from .manager import ConfigManager
 
             config_manager = ConfigManager()
 

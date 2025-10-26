@@ -40,11 +40,46 @@ echo "📍 Current directory: $(pwd)"
 # Strict mode with error handling
 set -e
 
+# Create status directory for file-based monitoring
+STATUS_DIR="${out%/*}/status"
+mkdir -p "$STATUS_DIR"
+
+# Signal job started with timestamp and job ID
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "🚀 Job started at $(date -Iseconds)"
+
+# Update database status to 'running'
+update_job_status() {
+    local status="$1"
+    if command -v python3 > /dev/null 2>&1; then
+        python3 -c "
+import sys, os
+sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+try:
+    from qxub.resource_tracker import resource_tracker
+    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
+except Exception as e:
+    pass  # Silently ignore database update failures
+" 2>/dev/null || true
+    fi
+}
+
+# Mark job as running
+update_job_status "running"
+
 # Error handler function
 error_handler() {
     local exit_code=$?
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
+    # Write error exit code to status
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+
+    # Update database status to 'failed'
+    update_job_status "failed"
+
     exit $exit_code
 }
 
@@ -88,32 +123,84 @@ fi
 # Execute pre-command if provided
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Executing pre-command..."
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+
     if [ "$quiet" = "true" ]; then
         eval "$pre_cmd"
+        PRE_EXIT_CODE=$?
     else
         eval "$exec_prefix; $pre_cmd"
+        PRE_EXIT_CODE=$?
+    fi
+
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+
+    if [ $PRE_EXIT_CODE -ne 0 ]; then
+        echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $PRE_EXIT_CODE
     fi
     echo "✅ Pre-command completed"
 fi
 
 # Execute main command
 echo "💻 Executing main command..."
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
+
 if [ "$quiet" = "true" ]; then
     eval "$cmd"
+    MAIN_EXIT_CODE=$?
 else
     eval "$exec_prefix; $cmd"
+    MAIN_EXIT_CODE=$?
+fi
+
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+
+if [ $MAIN_EXIT_CODE -ne 0 ]; then
+    echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    exit $MAIN_EXIT_CODE
 fi
 echo "✅ Command completed successfully"
 
 # Execute post-command if provided
 if [ -n "$post_cmd" ]; then
     echo "🏁 Executing post-command..."
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+
     if [ "$quiet" = "true" ]; then
         eval "$post_cmd"
+        POST_EXIT_CODE=$?
     else
         eval "$exec_prefix; $post_cmd"
+        POST_EXIT_CODE=$?
+    fi
+
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+
+    if [ $POST_EXIT_CODE -ne 0 ]; then
+        echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $POST_EXIT_CODE
     fi
     echo "✅ Post-command completed"
 fi
+
+# Determine final exit code (should be 0 if we reach here)
+FINAL_EXIT_CODE=${MAIN_EXIT_CODE:-0}
+
+# Write final exit code and completion marker
+echo "$FINAL_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+
+# Update database status to 'completed'
+update_job_status "completed"
 
 echo "🎉 Job completed successfully"

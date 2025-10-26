@@ -275,12 +275,12 @@ Different pipeline stages often need different software environments:
 stages:
 
   data_download:
-    cmd: qxub --env aws -- python3 src/download_data.py
+    cmd: qxub exec --env aws -- python3 src/download_data.py
     outs:
       - data/raw/dataset.csv
 
   quality_control:
-    cmd: qxub --env dvc3 --mem 8GB -- python3 src/quality_check.py
+    cmd: qxub exec --env dvc3 --mem 8GB -- python3 src/quality_check.py
     deps:
       - src/quality_check.py
       - data/raw/dataset.csv
@@ -289,7 +289,7 @@ stages:
       - data/processed/clean_dataset.csv
 
   genomic_analysis:
-    cmd: qxub --env pysam --mem 32GB --ncpus 8 -- python3 src/genomic_analysis.py
+    cmd: qxub exec --env pysam --mem 32GB --ncpus 8 -- python3 src/genomic_analysis.py
     deps:
       - src/genomic_analysis.py
       - data/processed/clean_dataset.csv
@@ -297,7 +297,7 @@ stages:
       - results/genomic_results.csv
 
   visualization:
-    cmd: qxub --env tidyverse --mem 4GB -- Rscript src/create_plots.R
+    cmd: qxub exec --env tidyverse --mem 4GB -- Rscript src/create_plots.R
     deps:
       - src/create_plots.R
       - results/genomic_results.csv
@@ -305,7 +305,7 @@ stages:
       - plots/analysis_plots.pdf
 
   report_generation:
-    cmd: qxub --env pandoc -- pandoc report.md -o report.pdf
+    cmd: qxub exec --env pandoc -- pandoc report.md -o report.pdf
     deps:
       - report.md
       - plots/analysis_plots.pdf
@@ -348,7 +348,7 @@ stages:
       - results/large_results.csv
 
   memory_intensive_ml:
-    cmd: qxub --mem 128GB --ncpus 16 --walltime 8:00:00 --queue hugemem -- python3 src/train_large_model.py
+    cmd: qxub exec --mem 128GB --ncpus 16 --walltime 8:00:00 --queue hugemem -- python3 src/train_large_model.py
     deps:
       - src/train_large_model.py
       - results/large_results.csv
@@ -370,7 +370,7 @@ stages:
       # Submit parallel jobs
       job_ids=()
       for sample in sample1 sample2 sample3 sample4; do
-        job_id=$(qxub --terse --name "analyze-$sample" sc --mem 16GB -- python3 src/analyze_sample.py --sample $sample)
+        job_id=$(qxub exec --terse --name "analyze-$sample" sc --mem 16GB -- python3 src/analyze_sample.py --sample $sample)
         job_ids+=($job_id)
         echo "Submitted $sample: $job_id"
       done
@@ -405,7 +405,7 @@ stages:
       # Create job submission function
       submit_analysis_job() {
         local sample=$1
-        local job_id=$(qxub --terse --name "process-$sample" \
+        local job_id=$(qxub exec --terse --name "process-$sample" \
           --env dvc3 --mem 8GB --ncpus 2 --walltime 1:00:00 \
           -- python3 src/process_sample.py --sample "$sample" --output "results/${sample}_output.csv")
         echo "$job_id"
@@ -461,7 +461,7 @@ stages:
       for lr in "${learning_rates[@]}"; do
         for bs in "${batch_sizes[@]}"; do
           job_name="train-lr${lr}-bs${bs}"
-          job_id=$(qxub --terse --name "$job_name" \
+          job_id=$(qxub exec --terse --name "$job_name" \
             --env dvc3 --mem 16GB --ncpus 4 --walltime 2:00:00 \
             -- python3 src/train_model.py --lr $lr --batch_size $bs --output_dir "models/lr${lr}_bs${bs}")
           job_ids+=($job_id)
@@ -498,7 +498,7 @@ stages:
       # Submit cross-validation jobs
       job_ids=()
       for fold in {1..5}; do
-        job_id=$(qxub --terse --name "cv-fold-$fold" \
+        job_id=$(qxub exec --terse --name "cv-fold-$fold" \
           --env dvc3 --mem 12GB --ncpus 3 --walltime 1:30:00 \
           -- python3 src/cross_validate.py --fold $fold --output_dir "cv_results/fold_$fold")
         job_ids+=($job_id)
@@ -543,7 +543,7 @@ stages:
       job_ids=()
       for chunk_file in data/chunks/chunk_*.csv; do
         chunk_name=$(basename "$chunk_file" .csv)
-        job_id=$(qxub --terse --name "process-$chunk_name" \
+        job_id=$(qxub exec --terse --name "process-$chunk_name" \
           --env dvc3 --mem 8GB --ncpus 2 --walltime 30:00 \
           -- python3 src/process_chunk.py --input "$chunk_file" --output "results/processed_$chunk_name.csv")
         job_ids+=($job_id)
@@ -593,7 +593,7 @@ stages:
       fi
 
       # Run experiment
-      job_id=$(qxub --terse --name "exp-$model_type" $alias_name \
+      job_id=$(qxub exec --terse --name "exp-$model_type" $alias_name \
         -- python3 src/run_experiment.py \
           --model_type "$model_type" \
           --n_estimators "$n_estimators" \
@@ -657,9 +657,9 @@ stages:
       echo "Starting robust stage..."
 
       # Test command with dry run first (in development)
-      # qxub --dry py -- python3 src/script.py
+      # qxub exec --dry py -- python3 src/script.py
 
-      job_id=$(qxub --terse py -- python3 src/script.py)
+      job_id=$(qxub exec --terse py -- python3 src/script.py)
       echo "Job submitted: $job_id"
 
       if qxub monitor --wait-for-completion "$job_id"; then
@@ -696,7 +696,7 @@ echo "Output directory: $OUTPUT_DIR"
 job_ids=()
 for input_file in $INPUT_PATTERN; do
     basename=$(basename "$input_file")
-    job_id=$(qxub --terse --name "analyze-$basename" $ALIAS -- python3 "$SCRIPT_NAME" --input "$input_file" --output "$OUTPUT_DIR")
+    job_id=$(qxub exec --terse --name "analyze-$basename" $ALIAS -- python3 "$SCRIPT_NAME" --input "$input_file" --output "$OUTPUT_DIR")
     job_ids+=($job_id)
     echo "Submitted $basename: $job_id"
 done
@@ -743,7 +743,7 @@ DVC + qxub creates powerful, reproducible data science pipelines that scale from
 ---
 
 **💡 Pro Tips:**
-- Use `qxub --dry` during pipeline development to test resource allocations
+- Use `qxub exec --dry` during pipeline development to test resource allocations
 - Create project-specific aliases for common stage patterns
 - Use `qxub monitor --wait-for-completion` to make DVC stages block properly
 - Include error handling in complex parallel stages

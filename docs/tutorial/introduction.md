@@ -8,9 +8,10 @@ Welcome to `qxub`, the modern PBS job submission wrapper that eliminates boilerp
 - **Eliminates boilerplate**: No more writing PBS scripts for simple jobs
 - **Provides real-time output**: Watch your job output as it runs, just like a local command
 - **Intelligent queue selection**: Automatically chooses the best queue for your resources
-- **Unified CLI**: All options before `--`, command after - simple and consistent
+- **Unified CLI**: All options before `--`, command after - using the `qxub exec` subcommand
 - **Rich execution contexts**: Run in conda environments, with modules, or in containers
 - **Built-in monitoring**: Track multiple jobs and get efficiency reports
+- **Smart shortcuts**: Automatic command detection with predefined contexts
 
 ## Prerequisites
 
@@ -25,6 +26,9 @@ conda activate dvc3
 
 # Verify qxub is available
 qxub --version
+
+# Check available commands
+qxub --help
 ```
 
 ## Quick Configuration Check

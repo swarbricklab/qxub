@@ -14,39 +14,85 @@ qxub config set --project qxub.defaults.queue "normal"
 qxub config set --local qxub.defaults.queue "express"
 
 # Now jobs use project defaults automatically
-qxub --env pytorch -- python train.py
+qxub exec --env pytorch -- python train.py
 ```
 
-## Basic Usage
+## Shortcuts System
 
 ```bash
+# List available shortcuts
+qxub config shortcut list
+
+# Show shortcuts with source information (system vs user)
+qxub config shortcut list --show-origin
+
+# Create user shortcuts for personal workflows
+qxub config shortcut set "python" --env base --description "Python with base conda environment"
+qxub config shortcut set "pytorch" --env pytorch --queue gpuvolta --resources ngpus=1 --description "PyTorch GPU training"
+qxub config shortcut set "gcc" --mod gcc --description "GCC compiler with modules"
+
+# Create system-wide shortcuts for team use (requires admin permissions)
+qxub config shortcut set "dvc data status" --system --env dvc3 --resources mem=64GB,ncpus=16 --description "DVC data pipeline status check"
+
+# Use shortcuts (automatic detection by command prefix)
+qxub exec -- python script.py               # Uses 'python' shortcut
+qxub exec -- pytorch train.py               # Uses 'pytorch' shortcut
+qxub exec -- gcc -o program source.c        # Uses 'gcc' shortcut
+
+# Explicit shortcut usage
+qxub exec --shortcut python -- script.py
+
+# Show shortcut details with source information
+qxub config shortcut show python
+
+# Delete shortcuts
+qxub config shortcut delete "old-shortcut"
+qxub config shortcut delete "system-shortcut" --system --yes   # Delete system shortcut without prompt
+
+# Rename shortcuts
+qxub config shortcut rename "old-name" "new-name"
+qxub config shortcut rename "old-name" "new-name" --system     # Rename system shortcut
+
+# Built-in command aliases for faster workflow
+qx --env pytorch -- train.py                # Short for 'qxub exec'
+qxet "ml-training" --env pytorch --resources ngpus=1  # Short for 'qxub config shortcut set'
+
+# Override shortcut settings
+qxub exec --shortcut python --name custom-job -- special_script.py
+```
+
+## Complex Commands with Variables
 # Conda environment
-qxub --env pytorch -- python train.py
+qxub exec --env pytorch -- python train.py
 
 # Environment modules
-qxub --mod python3 --mod gcc -- python analysis.py
+qxub exec --mod python3 --mod gcc -- python analysis.py
 
 # Singularity container
-qxub --sif /containers/blast.sif -- blastn -query input.fa -db nt
+qxub exec --sif /containers/blast.sif -- blastn -query input.fa -db nt
 
 # Direct submission (no environment)
-qxub -- ./my_program
+qxub exec -- ./my_program
+
+# Shortcuts (automatic detection)
+qxub exec -- python train.py     # Auto-detects 'python' shortcut
+qxub exec -- gcc --version       # Auto-detects 'gcc' shortcut
 ```
 
 ## With PBS Options
 
 ```bash
 # Memory and CPU
-qxub -l mem=32GB -l ncpus=8 --env myenv -- python script.py
+qxub exec -l mem=32GB -l ncpus=8 --env myenv -- python script.py
 
 # GPU job (auto-selects cost-effective queue)
-qxub --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
+qxub exec --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
 
 # Large memory job (auto-selects megamem for best cost)
-qxub --queue auto -l mem=1500GB --env myenv -- python big_memory_job.py
+qxub exec --queue auto -l mem=1500GB --env myenv -- python big_memory_job.py
 
 # Long-running job
-qxub -l walltime=24:00:00 --env myenv -- python long_script.py
+qxub exec -l walltime=24:00:00 --env myenv -- python long_script.py
 ```
 
 ## Configuration
@@ -57,7 +103,7 @@ qxub config set defaults.project "a56"
 qxub config set defaults.queue "normal"
 
 # Now just use
-qxub --env myenv -- python script.py
+qxub exec --env myenv -- python script.py
 ```
 
 ## Complex Commands with Variables
@@ -70,38 +116,38 @@ Use double quotes around `--cmd` for automatic quote handling:
 
 ```bash
 # Clean, readable syntax with smart quotes
-qxub --env base --cmd "find /data -name \"*.txt\" -exec echo \"Found: {}\" \;"
+qxub exec --env base --cmd "find /data -name \"*.txt\" -exec echo \"Found: {}\" \;"
 
 # Complex shell commands with nested quotes
-qxub --env base --cmd "sh -c \"echo \\\"Processing file: \$1\\\"\" arg"
+qxub exec --env base --cmd "sh -c \"echo \\\"Processing file: \$1\\\"\" arg"
 
 # Mixed variables: submission-time and execution-time
-qxub --env base --cmd "echo \"User ${USER} running job ${{PBS_JOBID}}\""
+qxub exec --env base --cmd "echo \"User ${USER} running job ${{PBS_JOBID}}\""
 
 # AWK commands with field references preserved
-qxub --env base --cmd "awk \"{print \\\$1, \\\$2}\" data.txt"
+qxub exec --env base --cmd "awk \"{print \\\$1, \\\$2}\" data.txt"
 
 # JSON-like output with complex escaping
-qxub --env base --cmd "echo \"{\\\"user\\\": \\\"${USER}\\\", \\\"cost\\\": \\\"\$50\\\"}\""
+qxub exec --env base --cmd "echo \"{\\\"user\\\": \\\"${USER}\\\", \\\"cost\\\": \\\"\$50\\\"}\""
 ```
 
 ### Traditional Syntax (Backward Compatible)
 
 ```bash
 # Submission-time variables (expanded when you submit)
-qxub --env base --cmd "python script.py --input ${HOME}/data.txt --user ${USER}"
+qxub exec --env base --cmd "python script.py --input ${HOME}/data.txt --user ${USER}"
 
 # Execution-time variables (expanded when job runs)
-qxub --env base --cmd 'echo "Job ${{PBS_JOBID}} running on node ${{HOSTNAME}}"'
+qxub exec --env base --cmd 'echo "Job ${{PBS_JOBID}} running on node ${{HOSTNAME}}"'
 
 # Mixed variables
-qxub --env base --cmd 'python analyze.py --input ${HOME}/data --output ${{TMPDIR}}/results-${USER}/'
+qxub exec --env base --cmd 'python analyze.py --input ${HOME}/data --output ${{TMPDIR}}/results-${USER}/'
 
 # Complex Python commands with quotes
-qxub --env base --cmd 'python -c "import sys; print(f\"Args: {sys.argv[1:]}\"); print(\"Job: ${{PBS_JOBID}}\")"'
+qxub exec --env base --cmd 'python -c "import sys; print(f\"Args: {sys.argv[1:]}\"); print(\"Job: ${{PBS_JOBID}}\")"'
 
 # AWK/shell commands (literal $ preserved)
-qxub --env base --cmd 'awk "{print \$1, \$2}" data.txt | head -10'
+qxub exec --env base --cmd 'awk "{print \$1, \$2}" data.txt | head -10'
 ```
 
 ### Variable Substitution Rules
@@ -144,18 +190,18 @@ Submit multiple jobs and monitor them as a group:
 
 ```bash
 # Process multiple files in parallel
-find data/ -name "*.csv" -exec qxub --terse --env pandas -- python process.py {} \; | qxub monitor
+find data/ -name "*.csv" -exec qxub exec --terse --env pandas -- python process.py {} \; | qxub monitor
 
 # Submit batch of analysis jobs
 for sample in sample_*.fastq; do
-    qxub --terse --env biotools -- analyze.py $sample
+    qxub exec --terse --env biotools -- analyze.py $sample
 done | qxub monitor --quiet
 
 # Monitor specific job IDs
 qxub monitor 12345.gadi-pbs 12346.gadi-pbs 12347.gadi-pbs
 
 # DVC pipeline stage with parallel execution
-find input/ -name "*.txt" -exec qxub --terse --env nlp -- process.py {} \; | qxub monitor
+find input/ -name "*.txt" -exec qxub exec --terse --env nlp -- process.py {} \; | qxub monitor
 # This blocks until all jobs complete, then DVC can verify outputs exist
 ```
 
@@ -165,12 +211,12 @@ The `--terse` flag emits only the job ID for pipeline use:
 
 ```bash
 # Normal output
-qxub --env myenv -- python script.py
+qxub exec --env myenv -- python script.py
 # ✅ Job submitted successfully! Job ID: 12345.gadi-pbs
 # [monitoring and output continues...]
 
 # Terse output
-qxub --terse --env myenv -- python script.py
+qxub exec --terse --env myenv -- python script.py
 # 12345.gadi-pbs
 # [returns immediately]
 ```
@@ -235,12 +281,12 @@ qxub monitor --quiet 12345.gadi-pbs 12346.gadi-pbs
 ```bash
 # Process samples in parallel
 for sample in samples/*.fastq.gz; do
-    qxub --terse --env biotools -l mem=32GB -- \
+    qxub exec --terse --env biotools -l mem=32GB -- \
         fastqc "$sample" --outdir results/
 done | qxub monitor --suffix .gadi-pbs --name-only
 
 # Summary mode for large cohorts
-ls cohort/*.bam | xargs -I {} qxub --terse --env gatk -- \
+ls cohort/*.bam | xargs -I {} qxub exec --terse --env gatk -- \
     gatk HaplotypeCaller -I {} -O {}.vcf | \
     qxub monitor --summary --interval 120
 ```
@@ -251,7 +297,7 @@ ls cohort/*.bam | xargs -I {} qxub --terse --env gatk -- \
 # Hyperparameter sweep
 for lr in 0.01 0.001 0.0001; do
     for batch in 32 64 128; do
-        qxub --terse --env pytorch --queue auto -l ngpus=1 --cmd \
+        qxub exec --terse --env pytorch --queue auto -l ngpus=1 --cmd \
             "python train.py --lr $lr --batch-size $batch --name lr${lr}_batch${batch}"
     done
 done | qxub monitor --suffix .gadi-pbs --summary
@@ -265,12 +311,12 @@ done | qxub monitor --suffix .gadi-pbs --summary
 
 ```bash
 # Stage 1: Preprocessing (many small jobs)
-find raw_data/ -name "*.csv" -exec qxub --terse --env pandas -- preprocess.py {} \; | \
+find raw_data/ -name "*.csv" -exec qxub exec --terse --env pandas -- preprocess.py {} \; | \
     qxub monitor --summary --quiet > stage1_complete.flag
 
 # Stage 2: Analysis (fewer, larger jobs)
 if [ -f stage1_complete.flag ]; then
-    ls processed_data/*.parquet | xargs -I {} qxub --terse --env analytics \
+    ls processed_data/*.parquet | xargs -I {} qxub exec --terse --env analytics \
         -l mem=64GB -l ncpus=16 -- analyze.py {} | \
         qxub monitor --name-only
 fi
@@ -280,12 +326,57 @@ fi
 
 ```bash
 # Preview what qxub would do
-qxub --dry --env myenv -- python script.py
+qxub exec --dry --env myenv -- python script.py
 
 # See variable expansion
-qxub --dry --env myenv --cmd 'echo "User ${USER} job ${{PBS_JOBID}}"'
+qxub exec --dry --env myenv --cmd 'echo "User ${USER} job ${{PBS_JOBID}}"'
 
 # Terse dry run
-qxub --terse --dry --env myenv -- python script.py
+qxub exec --terse --dry --env myenv -- python script.py
 # DRY_RUN
+```
+
+## Performance and Monitoring
+
+### File-Based Job Monitoring (v3.0+)
+
+Starting with v3.0, qxub uses file-based monitoring for significantly improved performance:
+
+```bash
+# File-based monitoring is now the default (15x faster completion detection)
+qxub exec --env myenv -- python long_job.py
+
+# Optional: Force legacy qstat polling (not recommended)
+QXUB_USE_QSTAT_MONITORING=true qxub exec --env myenv -- python job.py
+```
+
+**Performance improvements:**
+- **2-second response time** for job completion detection (vs 30-second qstat polling)
+- **Reduced PBS scheduler load** by eliminating frequent qstat calls
+- **Background resource collection** with 60-second delay for detailed statistics
+- **Real-time status files** in `<output_dir>/status/` for external monitoring
+
+**Status file monitoring:**
+```bash
+# Status files created automatically in job output directory
+ls /scratch/$USER/qt/*/status/
+# job_started       - Job began execution
+# main_started      - Main command started
+# pre_exit_code     - Pre-command result
+# main_exit_code    - Main command result
+# post_exit_code    - Post-command result
+# final_exit_code   - Final job result
+```
+
+**External monitoring example:**
+```bash
+# Monitor job progress externally
+JOB_DIR="/scratch/a56/user/qt/20251020_194025"
+while [ ! -f "$JOB_DIR/status/final_exit_code" ]; do
+    if [ -f "$JOB_DIR/status/main_started" ]; then
+        echo "Job is running main command..."
+    fi
+    sleep 5
+done
+echo "Job completed with exit code: $(head -n1 $JOB_DIR/status/final_exit_code)"
 ```

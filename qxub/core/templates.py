@@ -7,7 +7,6 @@ execution contexts (conda, modules, singularity, default).
 
 import os
 from pathlib import Path
-from typing import Dict
 
 
 def get_template(template_type: str, custom_template: str = None) -> str:
@@ -27,8 +26,8 @@ def get_template(template_type: str, custom_template: str = None) -> str:
     if custom_template and custom_template != "None":
         if os.path.exists(custom_template):
             return custom_template
-        else:
-            raise FileNotFoundError(f"Custom template not found: {custom_template}")
+
+        raise FileNotFoundError(f"Custom template not found: {custom_template}")
 
     # Template filename mapping
     template_files = {

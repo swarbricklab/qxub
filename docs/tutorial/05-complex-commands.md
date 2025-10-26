@@ -12,9 +12,9 @@ For complex logic, create a script file and run it:
 
 ```bash
 # ✅ Simple and maintainable
-qxub --env myenv -- python analysis.py
-qxub --default -- ./process_data.sh
-qxub --mods gcc/11.1.0 -- ./compile_and_run.sh
+qxub exec --env myenv -- python analysis.py
+qx --default -- ./process_data.sh      # 'qx' is shorthand for 'qxub exec'
+qx --mods gcc/11.1.0 -- ./compile_and_run.sh
 ```
 
 ### 2. Test Complex Commands First
@@ -28,7 +28,7 @@ echo "$cmd"  # See how the shell interprets it
 eval "$cmd"  # Test it works
 
 # Then use --dry to verify the PBS script
-qxub --dry --default -- bash -c "$cmd"
+qxub exec --dry --default -- bash -c "$cmd"
 ```
 
 ### 3. When to Use This Tutorial
@@ -59,7 +59,7 @@ For commands with spaces or special characters:
 
 ```bash
 # Single quotes preserve everything literally
-qxub --default -- echo 'Hello World! $USER will not be expanded'
+qxub exec --default -- echo 'Hello World! $USER will not be expanded'
 ```
 
 **Expected output:**
@@ -69,7 +69,7 @@ Hello World! $USER will not be expanded
 
 ```bash
 # Double quotes allow variable expansion
-qxub --default -- echo "Hello World! Current user is $USER"
+qxub exec --default -- echo "Hello World! Current user is $USER"
 ```
 
 **Expected output:**
@@ -84,7 +84,7 @@ Variables are expanded by the shell when you type the command:
 ```bash
 # Variable expanded on the login node (when you type it)
 MY_VAR="my custom value"
-qxub --default -- echo "My variable: $MY_VAR"
+qxub exec --default -- echo "My variable: $MY_VAR"
 ```
 
 **Expected output:**
@@ -97,10 +97,10 @@ But be careful with variables that should be expanded on the compute node:
 ```bash
 # This expands $HOSTNAME on the login node (probably not what you want)
 # This expands $HOSTNAME at submission time
-qxub --default -- echo "Running on: $HOSTNAME"
+qxub exec --default -- echo "Running on: $HOSTNAME"
 
 # This preserves $HOSTNAME for execution time
-qxub --default -- echo "Running on: \$HOSTNAME"
+qxub exec --default -- echo "Running on: \$HOSTNAME"
 ```
 
 **Expected output:**
@@ -114,7 +114,7 @@ Running on: gadi-cpu-clx-XXXX
 
 ```bash
 ```bash
-qxub --default -- bash -c '
+qxub exec --default -- bash -c '
 for i in {1..5}; do
     echo "Processing item $i"
     sleep 1
@@ -145,7 +145,7 @@ Script completed successfully
 ### Python Multi-line Scripts
 
 ```bash
-qxub --env dvc3 -- python3 -c '
+qxub exec --env dvc3 -- python3 -c '
 import pandas as pd
 import numpy as np
 
@@ -168,7 +168,7 @@ print(f"Average score: {df.score.mean():.1f}")
 ### R Multi-line Scripts
 
 ```bash
-qxub --env tidyverse -- Rscript -e '
+qxub exec --env tidyverse -- Rscript -e '
 library(tidyverse)
 
 cat("Creating sample data...\n")
@@ -198,13 +198,13 @@ The `--cmd` option provides an alternative way to specify commands, especially u
 
 ```bash
 # Instead of using --
-qxub --cmd 'echo "Hello from --cmd"'
+qxub exec --cmd 'echo "Hello from --cmd"'
 ```
 
 This is equivalent to:
 ```bash
 # ❌ This won't work as expected
-qxub --default -- echo "Hello from --cmd"
+qxub exec --default -- echo "Hello from --cmd"
 ```
 
 ### When to Use `--cmd`
@@ -225,14 +225,14 @@ hostname' > /tmp/my_script.sh
 
 Then run it:
 ```bash
-qxub --cmd "bash /tmp/my_script.sh"
+qxub exec --cmd "bash /tmp/my_script.sh"
 ```
 
 ### Complex Quoting with `--cmd`
 
 ```bash
 # Handling nested quotes
-qxub --cmd 'python3 -c "
+qxub exec --cmd 'python3 -c "
 import subprocess
 result = subprocess.run([\"echo\", \"nested quotes work\"], capture_output=True, text=True)
 print(f\"Output: {result.stdout.strip()}\")
@@ -245,7 +245,7 @@ print(f\"Output: {result.stdout.strip()}\")
 
 ```bash
 # Variables expanded on compute node
-qxub -- bash -c '
+qxub exec -- bash -c '
 echo "Job running on: $HOSTNAME"
 echo "Working directory: $PWD"
 echo "User: $USER"
@@ -259,10 +259,10 @@ echo "Number of CPUs: $PBS_NCPUS"
 ```bash
 # Method 1: Export and reference
 export DATA_DIR="/scratch/a56/$USER/data"
-qxub --default -- bash -c "echo 'Data directory: $DATA_DIR'"
+qxub exec --default -- bash -c "echo 'Data directory: $DATA_DIR'"
 
 # Method 2: Inline definition
-qxub --default -- bash -c 'DATA_DIR="/scratch/a56/$USER/data"; echo "Data directory: $DATA_DIR"'
+qxub exec --default -- bash -c 'DATA_DIR="/scratch/a56/$USER/data"; echo "Data directory: $DATA_DIR"'
 ```
 
 ### Template Variable Expansion
@@ -271,7 +271,7 @@ qxub supports template variables in job names and paths:
 
 ```bash
 # These are expanded by qxub, not the shell
-qxub --name "analysis-{timestamp}" --out "/scratch/a56/{user}/results-{timestamp}.out" -- echo "Template test"
+qxub exec --name "analysis-{timestamp}" --out "/scratch/a56/{user}/results-{timestamp}.out" -- echo "Template test"
 ```
 
 ## Practical Complex Examples
@@ -279,7 +279,7 @@ qxub --name "analysis-{timestamp}" --out "/scratch/a56/{user}/results-{timestamp
 ### Data Processing Pipeline
 
 ```bash
-qxub --env dvc3 --resources mem=8GB,walltime=1:00:00 -- bash -c '
+qxub exec --env dvc3 --resources mem=8GB,walltime=1:00:00 -- bash -c '
 echo "Starting data processing pipeline..."
 
 # Set up directories
@@ -315,7 +315,7 @@ echo "Results saved in: $WORK_DIR"
 ### Bioinformatics Example
 
 ```bash
-qxub --env pysam --resources mem=16GB,ncpus=4 -- bash -c '
+qxub exec --env pysam --resources mem=16GB,ncpus=4 -- bash -c '
 echo "Bioinformatics analysis starting..."
 
 # Set analysis parameters
@@ -352,7 +352,7 @@ print(\"Analysis pipeline completed!\")
 ```bash
 # Running analysis with different parameters
 for param in 0.1 0.5 1.0; do
-    qxub --name "param-$param" --env dvc3 -- python3 -c "
+    qxub exec --name "param-$param" --env dvc3 -- python3 -c "
 import numpy as np
 import time
 
@@ -377,7 +377,7 @@ done
 Always test complex commands with `--dry` first:
 
 ```bash
-qxub --dry --env dvc3 -- bash -c '
+qxub exec --dry --env dvc3 -- bash -c '
 echo "Complex script..."
 for i in {1..3}; do
     echo "Step $i"
@@ -392,31 +392,31 @@ This shows you exactly how your command will be encoded and executed.
 #### Problem: Variable Expansion Timing
 ```bash
 # ❌ Wrong: $USER expanded on login node
-qxub --default -- echo "User: $USER"
+qxub exec --default -- echo "User: $USER"
 
 # ✅ Right: \$USER expanded on compute node
-qxub --default -- echo "User: \$USER"
+qxub exec --default -- echo "User: \$USER"
 ```
 
 #### Problem: Nested Quotes
 ```bash
 # ❌ Wrong: Quote confusion
-qxub --default -- python3 -c "print("Hello")"
+qxub exec --default -- python3 -c "print("Hello")"
 
 # ✅ Right: Escape inner quotes
-qxub --default -- python3 -c "print(\"Hello\")"
+qxub exec --default -- python3 -c "print(\"Hello\")"
 
 # ✅ Alternative: Use single quotes outside
-qxub --default -- python3 -c 'print("Hello")'
+qxub exec --default -- python3 -c 'print("Hello")'
 ```
 
 #### Problem: Special Characters
 ```bash
 # ❌ Wrong: Semicolon interpreted by login shell
-qxub --default -- echo "First"; echo "Second"
+qxub exec --default -- echo "First"; echo "Second"
 
 # ✅ Right: Wrap in bash -c
-qxub --default -- bash -c 'echo "First"; echo "Second"'
+qxub exec --default -- bash -c 'echo "First"; echo "Second"'
 ```
 
 ## File-based Scripts
@@ -448,7 +448,7 @@ chmod +x /tmp/analysis_script.py
 
 ### Run Script File
 ```bash
-qxub --env dvc3 --resources mem=8GB -- python3 /tmp/analysis_script.py
+qxub exec --env dvc3 --resources mem=8GB -- python3 /tmp/analysis_script.py
 ```
 
 ## Key Takeaways

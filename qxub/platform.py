@@ -15,16 +15,14 @@ Platform definitions are loaded from YAML files in standard locations:
 
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-from .resource_utils import (
+from .resources import (
     evaluate_condition,
-    format_walltime,
     parse_memory_size,
     parse_walltime,
     suggest_resource_adjustment,
@@ -248,7 +246,7 @@ class PlatformLoader:
             self.search_paths = search_paths
         else:
             # Import here to avoid circular import
-            from .config_manager import config_manager
+            from .config import config_manager
 
             self.search_paths = config_manager.get_platform_search_paths()
 
@@ -408,14 +406,6 @@ class PlatformLoader:
         """Reload all platform definitions."""
         self.platforms.clear()
         self._load_platforms()
-
-    def get_platform(self, name: str) -> Optional[Platform]:
-        """Get platform by name."""
-        return self.platforms.get(name)
-
-    def list_platforms(self) -> List[str]:
-        """List all available platform names."""
-        return list(self.platforms.keys())
 
     def reload_platforms(self):
         """Reload all platform definitions."""
@@ -778,7 +768,7 @@ def select_best_queue(
         QueueSelectionResult with selection details
     """
     # Import here to avoid circular import
-    from .config_manager import config_manager
+    from .config import config_manager
 
     # Get platform
     if platform_name:

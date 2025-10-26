@@ -4,7 +4,7 @@ Alias CLI commands for qxub.
 
 import click
 
-from .config_manager import config_manager
+from .config import config_manager
 
 
 @click.command(name="alias")
@@ -33,6 +33,11 @@ from .config_manager import config_manager
 def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):
     """Execute an alias with optional overrides and command arguments.
 
+    ⚠️  DEPRECATION WARNING: This command is deprecated.
+    Use 'qxub exec --alias <alias_name>' instead.
+
+    This command will be removed in a future version.
+
     Special management commands:
         qxub alias list - List all available aliases
         qxub alias test <alias_name> - Test an alias without executing
@@ -43,6 +48,19 @@ def alias_cli(ctx, alias_name: str, command_args: tuple, **overrides):
         qxub alias analysis -- input.bam output.bam
         qxub alias quick_task --cmd "python script.py"
     """
+    # Show deprecation warning
+    import warnings
+
+    warnings.warn(
+        "qxub alias is deprecated. Use 'qxub exec --alias <alias_name>' instead. "
+        "This command will be removed in a future version.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    click.echo("⚠️  DEPRECATION WARNING: 'qxub alias' is deprecated.")
+    click.echo("💡 Use 'qxub exec --alias <alias_name>' instead.")
+    click.echo()
+
     # Handle special management commands
     if alias_name == "list":
         _handle_alias_list()

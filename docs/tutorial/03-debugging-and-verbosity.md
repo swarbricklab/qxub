@@ -9,7 +9,7 @@ The most important debugging tool is `--dry` (or `--dry-run`). It shows you exac
 ### Basic Dry Run
 
 ```bash
-qxub --dry -- hostname
+qxub exec --dry -- hostname
 ```
 
 **Expected output:**
@@ -31,7 +31,7 @@ This shows you:
 Let's see what happens with custom resources:
 
 ```bash
-qxub --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python parallel_script.py
+qxub exec --dry --resources mem=8GB,ncpus=2,walltime=30:00 -- python parallel_script.py
 ```
 
 **Expected output:**
@@ -64,13 +64,13 @@ qxub supports multiple verbosity levels to help you understand what's happening:
 
 ### Default Verbosity (Quiet)
 ```bash
-qxub --default -- echo "Hello"
+qxub exec --default -- echo "Hello"
 ```
 Shows only essential information during job execution.
 
 ### Verbose (`-v`)
 ```bash
-qxub --default -v -- echo "Hello"
+qxub exec --default -v -- echo "Hello"
 ```
 
 **Expected output:**
@@ -110,7 +110,7 @@ Shows detailed internal operations including config loading, platform detection,
 If you get "command not found" errors:
 
 ```bash
-qxub --dry -- some_unknown_command
+qxub exec --dry -- some_unknown_command
 ```
 
 The dry run will show you the working directory and environment. You might need:
@@ -123,7 +123,7 @@ The dry run will show you the working directory and environment. You might need:
 If jobs are rejected or queued indefinitely:
 
 ```bash
-qxub --dry --resources mem=500GB,ncpus=48,walltime=72:00:00 -- echo "test"
+qxub exec --dry --resources mem=500GB,ncpus=48,walltime=72:00:00 -- echo "test"
 ```
 
 The dry run might reveal:
@@ -136,13 +136,13 @@ The dry run might reveal:
 To see exactly where your command will run:
 
 ```bash
-qxub --dry -- pwd
+qxub exec --dry -- pwd
 ```
 
 This shows the working directory in the PBS script. If you need to run somewhere else:
 
 ```bash
-qxub --dry -- ./run_in_scratch.sh
+qxub exec --dry -- ./run_in_scratch.sh
 ```
 
 ### 4. Environment Problems
@@ -164,7 +164,7 @@ qxub provides helpful error messages with suggestions:
 
 ### Invalid Resource Format
 ```bash
-qxub --resources mem=4g -- echo "test"  # Wrong format
+qxub exec --resources mem=4g -- echo "test"  # Wrong format
 ```
 
 **Error output:**
@@ -176,7 +176,7 @@ qxub --resources mem=4g -- echo "test"  # Wrong format
 
 ### Unknown Queue
 ```bash
-qxub --queue nonexistent -- echo "test"
+qxub exec --queue nonexistent -- echo "test"
 ```
 
 **Error output:**
@@ -188,7 +188,7 @@ qxub --queue nonexistent -- echo "test"
 
 ### Multiple Execution Contexts
 ```bash
-qxub --env dvc3 --mod python3/3.11.7 -- echo "test"
+qxub exec --env dvc3 --mod python3/3.11.7 -- echo "test"
 ```
 
 **Error output:**
@@ -204,7 +204,7 @@ When things go wrong, follow this process:
 
 1. **Start with `--dry`**: See what would happen
    ```bash
-   qxub --dry [your options] -- [your command]
+   qxub exec --dry [your options] -- [your command]
    ```
 
 2. **Add verbosity**: Get more details
@@ -224,7 +224,7 @@ When things go wrong, follow this process:
 
 5. **Test with minimal options**: Strip down to basics
    ```bash
-   qxub --default -- [simple version of command]
+   qxub exec --default -- [simple version of command]
    ```
 
 ## Getting Help
@@ -232,10 +232,10 @@ When things go wrong, follow this process:
 qxub has built-in help at multiple levels:
 
 ```bash
-qxub --help                    # Main help
+qxub exec --help                    # Main help
 qxub config --help             # Config system help
 qxub monitor --help            # Monitoring help
-qxub --help | grep -A5 resource  # Search help for topics
+qxub exec --help | grep -A5 resource  # Search help for topics
 ```
 
 ## When to File Bug Reports
@@ -250,7 +250,7 @@ Include in your bug report:
 - The exact command that failed
 - Output from `qxub -vv --dry [your command]`
 - Your platform (usually `nci_gadi`)
-- qxub version (`qxub --version`)
+- qxub version (`qxub exec --version`)
 
 ## Key Takeaways
 

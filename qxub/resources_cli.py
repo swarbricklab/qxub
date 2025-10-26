@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .resource_tracker import resource_tracker
+from .resources import resource_tracker
 
 console = Console()
 
@@ -274,7 +274,7 @@ def export(output_path, limit):
 @click.argument("job_id")
 def show(job_id):
     """Show detailed resource information for a specific job."""
-    from .scheduler import get_job_resource_data
+    from .core.scheduler import get_job_resource_data
 
     try:
         # Get fresh data from PBS

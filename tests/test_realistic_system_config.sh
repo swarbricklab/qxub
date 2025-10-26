@@ -5,9 +5,9 @@
 
 set -e  # Exit on error
 
-echo "🧪 Starting realistic system config tests..."run_test "CLI args override user config (dry run)" \
-    "qxub --dry-run --project cli_override_project --queue express conda --env test_env echo 'test'" \
-    "-q express -P cli_override_project" Colors for output
+echo "🧪 Starting realistic system config tests..."
+
+# Colors for output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
@@ -121,7 +121,7 @@ run_test "System config provides organization templates" \
     "MyOrganization"
 
 run_test "System config provides organization aliases" \
-    "qxub config alias list-aliases" \
+    "qxub config alias list" \
     "org_backup"
 
 echo -e "${YELLOW}[INFO]${NC} === Testing User Override Scenarios ==="
@@ -181,22 +181,22 @@ run_test "System templates still accessible" \
     "MyOrganization"
 
 run_test "User and system aliases both available" \
-    "qxub config alias list-aliases" \
+    "qxub config alias list" \
     "org_backup"
 
 echo -e "${YELLOW}[INFO]${NC} === Testing Realistic Job Execution Scenarios ==="
 
 # Test 3: Actual job execution with system/user config precedence
 run_test "Job inherits system defaults with user overrides (dry run)" \
-    "qxub --dry-run conda --env test_env echo 'test job'" \
+    "qxub exec --dry-run --env test_env -- echo 'test job'" \
     "-q normal -P px14"
 
 run_test "CLI args override user config (dry run)" \
-    "qxub --dry-run --project cli_override_project --queue express conda --env test_env echo 'test'" \
+    "qxub exec --dry-run --project cli_override_project --queue express --env test_env -- echo 'test'" \
     "-q express -P cli_override_project"
 
 run_test "Job uses merged resource requirements" \
-    "qxub --dry-run conda --env test_env echo 'test'" \
+    "qxub exec --dry-run --env test_env -- echo 'test'" \
     "mem=8GB.*ncpus=2"
 
 echo -e "${YELLOW}[INFO]${NC} === Testing Alias Inheritance and Overrides ==="
@@ -211,18 +211,18 @@ run_test "System alias still works" \
     "bc07"
 
 run_test "Alias execution with overrides (dry run)" \
-    "qxub --dry-run alias personal_analysis" \
+    "qxub exec --dry-run --alias personal_analysis" \
     "-P px14"
 
 run_test "Alias override at runtime (dry run)" \
-    "qxub --dry-run alias personal_analysis --queue express" \
+    "qxub exec --dry-run --alias personal_analysis --queue express" \
     "-q express"
 
 echo -e "${YELLOW}[INFO]${NC} === Testing Template Variable Resolution ==="
 
 # Test 5: Template variables work across config levels
 run_test "System templates resolve in user alias" \
-    "qxub --dry-run alias org_backup" \
+    "qxub exec --dry-run --alias org_backup" \
     "copyq.*bc07"
 
 # Create an alias that uses both system and user templates
@@ -274,7 +274,7 @@ aliases:
 EOF
 
 run_test "Mixed template variable resolution" \
-    "qxub --dry-run alias template_test" \
+    "qxub exec --dry-run --alias template_test" \
     "MyOrganization.*work.*backup"
 
 echo -e "${YELLOW}[INFO]${NC} === Testing Admin Tools ==="

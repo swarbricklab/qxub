@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import click
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 
 class CommandHistoryLogger:
