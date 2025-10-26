@@ -162,6 +162,27 @@ which qxub
 python tests/run_platform_tests.py
 ```
 
+### Version Management
+When bumping versions for a new release, **ALWAYS update version numbers in BOTH locations**:
+
+1. **`qxub/__init__.py`** - Contains `__version__ = "x.y.z"`
+2. **`setup.py`** - Contains `version="x.y.z"` in the setup() call
+
+```bash
+# Example version bump workflow:
+# 1. Edit qxub/__init__.py
+__version__ = "3.2.3"
+
+# 2. Edit setup.py
+version="3.2.3"
+
+# 3. Commit both together
+git add qxub/__init__.py setup.py
+git commit -m "Bump version to 3.2.3"
+```
+
+**Critical**: The GitHub release workflow reads from `setup.py`, so both files must match!
+
 ## Common Patterns
 
 ### Error Handling
