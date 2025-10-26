@@ -1,5 +1,9 @@
 # Documentation
 
+## Start Here
+
+- Read the Documentation Guide for structure, conventions, and how to add runnable examples: **[Documentation Guide](documentation-guide.md)**
+
 ## Essential Guides
 
 - **[Configuration](configuration.md)** - Set defaults and create aliases
