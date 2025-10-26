@@ -15,7 +15,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="qxub",
-    version="3.2.0",
+    version="3.2.3",
     author="John Reeves",
     author_email="j.reeves@garvan.org.au",
     description="Simplified job submission to HPC",
