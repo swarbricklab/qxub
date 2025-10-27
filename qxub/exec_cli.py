@@ -534,6 +534,13 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     all_resources = list(options["resources"]) if options["resources"] else []
     all_resources.extend(workflow_resources)
 
+    # Track whether CPUs were explicitly specified (for graceful queue adjustment)
+    cpus_explicit = (
+        options.get("cpus") is not None
+        or options.get("threads") is not None
+        or any(r.startswith("ncpus=") for r in (options["resources"] or []))
+    )
+
     # Extract PBS-specific options for processing
     params = {
         "resources": tuple(all_resources),  # Use merged resources
@@ -551,6 +558,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         "quiet": options["quiet"],
         "terse": options["terse"],
         "verbose": verbose,
+        "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
     }
 
     # Process configuration using the existing config system

@@ -78,6 +78,7 @@ class ResourceValidationResult:
     is_valid: bool = True
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    adjustments: Dict[str, Any] = field(default_factory=dict)  # Auto-adjusted resources
     suggestions: List[str] = field(default_factory=list)
 
 
@@ -116,7 +117,8 @@ class Queue:
         cpus = resources.get("cpus", 1)
         if self.limits.max_cpus and cpus > self.limits.max_cpus:
             result.errors.append(
-                f"CPU count {cpus} exceeds queue maximum {self.limits.max_cpus}"
+                f"CPU count {cpus} exceeds queue '{self.name}' maximum {self.limits.max_cpus}. "
+                f"Either reduce --cpus/-l ncpus to {self.limits.max_cpus} or choose a different queue."
             )
         if self.limits.min_cpus and cpus < self.limits.min_cpus:
             result.errors.append(
