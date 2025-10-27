@@ -33,7 +33,7 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.6",
-    install_requires=["omegaconf", "click", "tailer", "rich", "pyyaml"],
+    install_requires=["omegaconf", "click", "tailer", "rich", "pyyaml", "requests"],
     entry_points={
         "console_scripts": [
             "qxub=qxub.cli:qxub",

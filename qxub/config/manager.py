@@ -709,6 +709,70 @@ class ConfigManager:
                 "auto_select": True,
             }
 
+    def get_platform_config(self, platform_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get platform configuration from the platforms registry.
+
+        Args:
+            platform_name: Name of the platform
+
+        Returns:
+            Platform configuration dict or None if not found
+
+        Platform config structure:
+            name: Platform identifier
+            definition: Path/URL to platform definition file
+            remote: Optional remote execution config
+                host: SSH hostname (from ~/.ssh/config)
+                working_dir: Remote working directory
+                conda_init: Optional conda initialization commands
+        """
+        if not self.merged_config or "platforms" not in self.merged_config:
+            return None
+
+        platforms = self.merged_config.platforms
+        if platform_name not in platforms:
+            return None
+
+        platform_config = OmegaConf.to_container(platforms[platform_name], resolve=True)
+        return platform_config
+
+    def list_platforms(self) -> List[str]:
+        """
+        List all configured platforms.
+
+        Returns:
+            List of platform names
+        """
+        if not self.merged_config or "platforms" not in self.merged_config:
+            return []
+        return list(self.merged_config.platforms.keys())
+
+    def get_default_platform_name(self) -> Optional[str]:
+        """
+        Get the default platform name from config.
+
+        Returns:
+            Platform name from defaults.platform, or None
+        """
+        defaults = self.get_defaults()
+        return defaults.get("platform")
+
+    def has_remote_config(self, platform_name: str) -> bool:
+        """
+        Check if a platform has remote execution configuration.
+
+        Args:
+            platform_name: Name of the platform
+
+        Returns:
+            True if platform has remote section, False otherwise
+        """
+        platform_config = self.get_platform_config(platform_name)
+        if not platform_config:
+            return False
+        return "remote" in platform_config and platform_config["remote"] is not None
+
 
 def setup_logging(verbosity: int = None):
     """
