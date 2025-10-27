@@ -181,6 +181,19 @@ git add -A
 
 **Why**: Blanket staging creates zombie files, commits temp scripts, and bundles unrelated changes.
 
+**Run pre-commit checks manually before committing:**
+
+```bash
+# Run pre-commit on staged files (fast, only checks what you're committing)
+pre-commit run
+
+# This catches formatting issues before commit
+# Fix any issues, then re-stage the fixed files
+# Then commit normally
+```
+
+This ensures your commit succeeds on the first try. The commit hook then acts as a final safety check.
+
 ### Refactoring Workflow
 
 **When moving/reorganizing code, see `docs/dev/refactoring-checklist.md`**
