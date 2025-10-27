@@ -23,36 +23,34 @@ These defaults work well for:
 
 ## Specifying Custom Resources
 
-### Memory Specification
+qxub provides two ways to specify resources: **workflow-friendly options** (recommended) and traditional PBS format.
 
-qxub accepts various memory formats:
+### Workflow-Friendly Resource Options (Recommended)
+
+These intuitive options make it easy to specify resources:
 
 ```bash
-# Request 8GB of memory (also accepts MB: mem=8000MB)
-qxub exec --dry --resources mem=8GB -- python analysis.py
+# Memory with --mem (accepts GB, MB, etc.)
+qxub exec --dry --mem 8GB -- python analysis.py
+
+# CPUs with --cpus
+qxub exec --dry --cpus 4 -- python parallel_analysis.py
+
+# Runtime/walltime with --time (accepts 2h, 30m, 1h30m, or HH:MM:SS)
+qxub exec --dry --time 2h -- python long_analysis.py
+
+# Disk/jobfs with --disk
+qxub exec --dry --disk 50GB -- python temp_files.py
+
+# Storage volumes with --volumes
+qxub exec --dry --volumes "gdata/a56+scratch/a56" -- python data_processing.py
 ```
 
-### CPU Specification
+### Combining Workflow-Friendly Options
 
 ```bash
-# Request 4 CPUs for parallel processing
-qxub exec --dry --resources ncpus=4 -- python parallel_analysis.py
-```
-
-### Walltime Specification
-
-qxub accepts flexible walltime formats:
-
-```bash
-# Walltime formats: MM:SS or H:MM:SS
-qxub exec --dry --default --resources walltime=1:30:00 -- python long_analysis.py
-```
-
-### Combining Resources
-
-```bash
-# A job that needs more resources
-qxub exec --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo "Resource-intensive job"
+# Combine multiple resource options
+qxub exec --dry --mem 16GB --cpus 4 --time 4h -- python analysis.py
 ```
 
 **Expected dry run output:**
@@ -61,6 +59,57 @@ qxub exec --dry --default --resources mem=16GB,ncpus=4,walltime=4:00:00 -- echo 
 ├── Resources: mem=16GB, ncpus=4, walltime=4:00:00
 ├── Queue: normal
 ...
+```
+
+### Traditional PBS Format (Alternative)
+
+You can also use traditional PBS resource format:
+
+```bash
+# PBS format with --resources or -l
+qxub exec --dry --resources mem=16GB,ncpus=4,walltime=4:00:00 -- python analysis.py
+
+# Or using -l (traditional PBS shorthand)
+qxub exec --dry -l mem=16GB -l ncpus=4 -- python analysis.py
+```
+
+### Format Examples
+
+#### Memory Formats
+```bash
+--mem 8GB        # Gigabytes
+--mem 2000MB     # Megabytes
+--mem 16g        # Case insensitive
+```
+
+#### Time Formats
+```bash
+--time 2h        # 2 hours
+--time 30m       # 30 minutes
+--time 1h30m     # 1 hour 30 minutes
+--time 02:30:00  # 2 hours 30 minutes (HH:MM:SS)
+```
+
+#### Disk Formats
+```bash
+--disk 50GB      # Gigabytes
+--disk 1000MB    # Megabytes
+```
+
+### Resource Priority
+
+When options are combined, qxub follows this priority (highest to lowest):
+
+1. Workflow-friendly CLI options (`--mem`, `--cpus`, `--time`)
+2. Traditional PBS options (`--resources`, `-l`)
+3. Shortcut/alias resources
+4. Config file defaults
+
+**Example:**
+```bash
+# Config has cpus: 4, your command has --cpus 8
+qxub exec --cpus 8 -- python script.py
+# Result: Uses 8 CPUs (CLI overrides config)
 ```
 
 ## Automatic Queue Selection
@@ -188,8 +237,8 @@ hugemem:
 ### Data Analysis Job
 
 ```bash
-# Typical pandas/analysis job
-qxub exec --queue auto --resources mem=16GB,ncpus=2,walltime=2:00:00 -- python3 -c "
+# Typical pandas/analysis job with workflow-friendly options
+qxub exec --queue auto --mem 16GB --cpus 2 --time 2h -- python3 -c "
 import pandas as pd
 import numpy as np
 print('Running data analysis...')
@@ -197,12 +246,18 @@ print('Running data analysis...')
 import time; time.sleep(5)
 print('Analysis complete!')
 "
+
+# Or with traditional PBS format
+qxub exec --queue auto --resources mem=16GB,ncpus=2,walltime=2:00:00 -- python analysis.py
 ```
 
 ### Machine Learning Training
 
 ```bash
-# ML training with multiple cores
+# ML training with multiple cores (workflow-friendly)
+qxub exec --queue auto --mem 32GB --cpus 8 --time 6h -- python train_model.py
+
+# Same with PBS format
 qxub exec --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python train_model.py
 ```
 
@@ -210,7 +265,7 @@ qxub exec --queue auto --resources mem=32GB,ncpus=8,walltime=6:00:00 -- python t
 
 ```bash
 # Fast turnaround for debugging
-qxub exec --queue express --resources walltime=15:00 -- python quick_test.py
+qxub exec --queue express --time 15m -- python quick_test.py
 ```
 
 ## Resource Validation and Warnings
@@ -248,31 +303,41 @@ qxub exec --dry --resources ncpus=48,walltime 24:00:00 --queue normal -- echo "L
 ### 1. Start Conservative, Scale Up
 
 ```bash
-# Start small for testing
-qxub exec --dry --resources mem=4GB,walltime=30:00 -- python3 my_script.py
+# Start small for testing (workflow-friendly)
+qxub exec --dry --mem 4GB --time 30m -- python3 my_script.py
 
 # Scale up after confirming it works
-qxub exec --dry --resources mem=16GB,walltime=2:00:00 -- python3 my_script.py
+qxub exec --dry --mem 16GB --time 2h -- python3 my_script.py
 ```
 
-### 2. Use Auto Queue Selection
+### 2. Use Workflow-Friendly Options
+
+```bash
+# Easier to read and write
+qxub exec --mem 8GB --cpus 4 --time 2h -- my_analysis.py
+
+# Instead of:
+qxub exec --resources mem=8GB,ncpus=4,walltime=2:00:00 -- my_analysis.py
+```
+
+### 3. Use Auto Queue Selection
 
 ```bash
 # Let qxub optimize for you
-qxub exec --queue auto --resources mem=8GB,ncpus=4 -- my_analysis.py
+qxub exec --queue auto --mem 8GB --cpus 4 -- my_analysis.py
 ```
 
-### 3. Match Resources to Workload
+### 4. Match Resources to Workload
 
 - **I/O intensive**: More memory, fewer CPUs
 - **CPU intensive**: More CPUs, standard memory
 - **Memory intensive**: High memory, appropriate queue
 
-### 4. Consider Walltime Carefully
+### 5. Consider Walltime Carefully
 
 ```bash
 # Better to overestimate slightly than underestimate
-qxub exec --resources walltime=1:30:00 -- long_running_task.py  # If you think it takes 1 hour
+qxub exec --time 1h30m -- long_running_task.py  # If you think it takes 1 hour
 ```
 
 ## Monitoring Resource Usage
@@ -280,7 +345,7 @@ qxub exec --resources walltime=1:30:00 -- long_running_task.py  # If you think i
 After jobs complete, qxub shows actual usage:
 
 ```bash
-qxub exec --resources mem=8GB,walltime=1:00:00 -- python3 -c "
+qxub exec --mem 8GB --time 1h -- python3 -c "
 import time
 print('Working...')
 time.sleep(10)
@@ -293,16 +358,18 @@ print('Done!')
 🎉 Job completed successfully (exit code: 0)
 📊 Walltime used: 00:00:15 / 01:00:00 (25% efficiency)
 💾 Memory used: 0.3GB / 8.0GB (4% efficiency)
-💡 Suggestion: This job could use --resources mem=1GB,walltime=30:00
+💡 Suggestion: This job could use --mem 1GB --time 30m
 ```
 
 ## Key Takeaways
 
-1. **Smart defaults**: The system provides sensible starting points
-2. **Flexible formats**: Memory and walltime accept various formats
-3. **Auto queue selection**: Use `--queue auto` for optimization
-4. **Validation helps**: qxub warns about problematic resource requests
-5. **Monitor efficiency**: Learn from actual usage patterns
+1. **Use workflow-friendly options**: `--mem`, `--cpus`, `--time` are easier than PBS format
+2. **Smart defaults**: The system provides sensible starting points
+3. **Flexible formats**: Accept various formats (GB/MB, 2h/1h30m/HH:MM:SS)
+4. **Auto queue selection**: Use `--queue auto` for optimization
+5. **Priority matters**: CLI options override shortcuts, aliases, and config defaults
+6. **Validation helps**: qxub warns about problematic resource requests
+7. **Monitor efficiency**: Learn from actual usage patterns
 
 ## Next Steps
 
@@ -315,7 +382,9 @@ Resource specification becomes intuitive with practice. The automatic queue sele
 ---
 
 **💡 Pro Tips:**
+- **Use workflow-friendly options** (`--mem 8GB --cpus 4`) instead of PBS format for readability
 - Use `--queue auto` unless you have specific queue requirements
 - Always use `--dry` to verify resource requests before submitting
 - Monitor efficiency reports to optimize future resource allocations
 - Start with conservative estimates and scale up based on actual usage
+- CLI options always override shortcuts, aliases, and config defaults

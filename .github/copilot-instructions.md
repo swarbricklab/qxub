@@ -1,5 +1,28 @@
 # qxub Copilot Instructions
 
+## ⚠️ CRITICAL: Environment Setup
+
+**ABSOLUTELY REQUIRED: The `qxub` conda environment MUST be activated before running ANY qxub commands!**
+
+```bash
+# MANDATORY before EVERY qxub command or test
+cd /g/data/a56/software/qsub_tools
+conda activate qxub
+
+# Verify qxub is available (should show conda environment path)
+which qxub
+qxub --version
+```
+
+**DO NOT run qxub commands in a fresh terminal without first running `conda activate qxub`!**
+
+This is the #1 most common error. If you get errors running qxub commands:
+1. **FIRST**: Check if `qxub` conda environment is active in your terminal
+2. **SECOND**: Activate it if not active
+3. **THIRD**: Run the command again
+
+The system qxub installation may be outdated or broken - always use the conda environment version!
+
 ## Project Overview
 
 qxub is a sophisticated PBS job submission wrapper for HPC environments that eliminates boilerplate when running jobs in conda environments, with modules, or in containers. The codebase follows a unified CLI architecture with execution contexts, intelligent queue selection, and comprehensive configuration management.
@@ -101,21 +124,35 @@ cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 
 ## Development Workflows
 
-### Environment Setup
-- **Conda environment**: Always activate the `qxub` conda environment before development
-- **Environment verification**: Check `qxub --version` to ensure correct installation
-- **Terminal sessions**: Activate environment in each new terminal session
-- **Documentation first**: Always read relevant docs before implementing features
+### Environment Setup - CRITICAL
+
+**⚠️ THE FIRST STEP IS ALWAYS: `conda activate qxub`**
+
+Before running ANY qxub command (testing, development, or usage):
+
+1. **ACTIVATE THE ENVIRONMENT**: `conda activate qxub`
+2. **VERIFY IT WORKED**: `which qxub` should show path containing `conda` or `qxub` environment
+3. **THEN proceed** with your qxub commands
+
+**Common mistake**: Opening a new terminal and running `qxub config shortcut show ...` immediately will fail because the conda environment is not active in that terminal session.
+
+**Correct approach**: Every new terminal session requires `conda activate qxub` first.
 
 ```bash
-# Activate qxub conda environment
+# ✅ CORRECT: Activate environment first
 cd /g/data/a56/software/qsub_tools
 conda activate qxub
+qxub --version        # Now this will work
+qxub config shortcut show "dvc pull"  # This will work too
 
-# Verify qxub is available
-qxub --version
-which qxub
+# ❌ WRONG: Running qxub without activating environment
+qxub config shortcut show "dvc pull"  # Will fail or use wrong version
 ```
+
+- **Conda environment**: The `qxub` conda environment is the ONLY supported way to run qxub during development
+- **Environment verification**: Always check `which qxub` shows the conda environment path
+- **Terminal sessions**: Each new terminal needs `conda activate qxub` - activation does not persist
+- **Documentation first**: Always read relevant docs before implementing features
 
 ### Documentation Workflow
 - **Before coding**: Read `README.md` and relevant `docs/*.md` files to understand existing patterns
@@ -145,6 +182,27 @@ which qxub
 # Platform system validation
 python tests/run_platform_tests.py
 ```
+
+### Version Management
+When bumping versions for a new release, **ALWAYS update version numbers in BOTH locations**:
+
+1. **`qxub/__init__.py`** - Contains `__version__ = "x.y.z"`
+2. **`setup.py`** - Contains `version="x.y.z"` in the setup() call
+
+```bash
+# Example version bump workflow:
+# 1. Edit qxub/__init__.py
+__version__ = "3.2.3"
+
+# 2. Edit setup.py
+version="3.2.3"
+
+# 3. Commit both together
+git add qxub/__init__.py setup.py
+git commit -m "Bump version to 3.2.3"
+```
+
+**Critical**: The GitHub release workflow reads from `setup.py`, so both files must match!
 
 ## Common Patterns
 

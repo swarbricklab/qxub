@@ -188,3 +188,164 @@ Variables: `{user}`, `{project}`, `{timestamp}`
 - **Test**: `.qx/test.yaml` - CI/testing settings
 
 **Priority**: CLI args > Test > Local > Project > User > System > Defaults
+
+## Resource Resolution (v3.2.3+)
+
+Resources are resolved with intelligent per-resource-type precedence to give you fine-grained control:
+
+### Resolution Priority (Highest → Lowest)
+
+1. **CLI Workflow Options** (`--mem`, `--cpus`, `--time`, `--disk`, `--volumes`)
+   - Always takes precedence when specified
+   - Example: `qxub exec --cpus 48 --mem 128GB -- python script.py`
+
+2. **CLI `--resources` Option**
+   - Direct PBS resource specifications
+   - Example: `qxub exec --resources ncpus=48,mem=128GB -- python script.py`
+
+3. **Shortcut/Alias Resources**
+   - Applied only if not overridden by CLI
+   - Shortcuts and aliases are mutually exclusive
+
+4. **Config Workflow Defaults** (per-resource-type)
+   - Applied intelligently: each resource type only if not already specified
+   - Config precedence: User > System
+   - Example: If you specify `--cpus 48` but not `--mem`, config mem defaults still apply
+
+5. **Config `resources` List**
+   - Applied only if NO resources specified anywhere else
+
+### Smart Per-Resource Resolution
+
+The key feature of v3.2.3+ is **per-resource-type intelligence**:
+
+```bash
+# User config has: cpus: 4, mem: 8GB, runtime: 2h
+
+# Specify only cpus on CLI
+qxub exec --cpus 48 -- python script.py
+# Result: ncpus=48 (CLI), mem=8GB (config), walltime=2:00:00 (config)
+
+# Mix --resources and workflow options
+qxub exec --resources ncpus=48 --mem 32GB -- python script.py
+# Result: ncpus=48 (--resources), mem=32GB (--mem override), walltime=2:00:00 (config)
+
+# Shortcut with partial CLI override
+# Shortcut 'bigdata': resources=[mem=64GB, ncpus=24]
+qxub exec --shortcut bigdata --cpus 48 -- process.py
+# Result: mem=64GB (shortcut), ncpus=48 (CLI override), walltime=2:00:00 (config)
+```
+
+### Config Merging
+
+Configuration files merge hierarchically:
+
+```yaml
+# System config (/etc/xdg/qxub/config.yaml):
+defaults:
+  project: a56
+  queue: normal
+
+  # Workflow-friendly resource defaults (recommended)
+  cpus: 4
+  mem: 8GB
+  runtime: 2h
+  disk: 15GB
+  volumes: gdata/a56
+
+  # OR traditional PBS format (deprecated)
+  resources:
+    - ncpus=4
+    - mem=8GB
+    - walltime=2:00:00
+
+# User config (~/.config/qxub/config.yaml):
+defaults:
+  # Overrides system defaults
+  cpus: 8
+  mem: 16GB
+  # Inherits: runtime=2h, disk=15GB from system
+
+# Final merged defaults:
+# cpus: 8 (user override)
+# mem: 16GB (user override)
+# runtime: 2h (inherited from system)
+# disk: 15GB (inherited from system)
+# volumes: gdata/a56 (inherited from system)
+```
+
+### Two Ways to Specify Resource Defaults
+
+**Method 1: Workflow-Friendly (Recommended)**
+
+Place workflow-friendly keys directly under `defaults`:
+
+```yaml
+defaults:
+  project: a56
+  queue: normal
+
+  # Workflow-friendly resource keys
+  mem: 8GB
+  cpus: 4
+  runtime: 2h
+  disk: 15GB
+  volumes: gdata/a56+gdata/px14
+```
+
+**Benefits:**
+- Easier to read and write
+- Flexible time formats (`2h`, `30m`, `1h30m`)
+- Friendly naming (`cpus` vs `ncpus`, `runtime` vs `walltime`)
+- Per-key override behavior
+
+**Method 2: PBS Format (Legacy)**
+
+Use the `resources` list for traditional PBS format:
+
+```yaml
+defaults:
+  resources:
+    - mem=8GB
+    - ncpus=4
+    - walltime=2:00:00
+    - jobfs=15GB
+    - storage=gdata/a56+gdata/px14
+```
+
+**Hybrid Approach (Recommended for Advanced Cases):**
+
+Use workflow-friendly keys for common resources, `resources` list for uncommon PBS options:
+
+```yaml
+defaults:
+  # Common resources (workflow-friendly)
+  mem: 8GB
+  cpus: 4
+  runtime: 2h
+
+  # Uncommon PBS options
+  resources:
+    - wd=true
+    - software=matlab
+```
+
+### Resource Key Mapping
+
+When resolving resources, qxub maps between naming conventions:
+
+| Workflow Key | PBS Key | Example Values |
+|--------------|---------|----------------|
+| `mem` | `mem` | `8GB`, `2000MB`, `16g` |
+| `cpus` | `ncpus` | `4`, `16`, `48` |
+| `runtime` | `walltime` | `2h`, `30m`, `1h30m`, `02:30:00` |
+| `disk` | `jobfs` | `50GB`, `1000MB` |
+| `volumes` | `storage` | `gdata/a56`, `gdata/a56+scratch/a56` |
+
+### Key Behaviors
+
+**Prevents Duplication**: If you specify `--resources ncpus=48`, config defaults won't add `ncpus=4`. But they will still add `mem=8GB` if memory wasn't specified.
+
+**Resource Key Mapping**: PBS keys (`ncpus`, `walltime`, `jobfs`, `storage`) are mapped to workflow keys (`cpus`, `runtime`, `disk`, `volumes`) to detect what's already specified.
+
+**All or Nothing for Config**: The old-style `defaults.resources: ["mem=4GB", "ncpus=1"]` list is only applied if NO resources are specified via CLI, shortcuts, or aliases.

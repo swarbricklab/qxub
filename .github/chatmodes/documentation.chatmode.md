@@ -1,3 +1,18 @@
+---
+description: 'Chat mode for maintaining documentation quality'
+tools:
+  # Core, read-only
+  - search
+  - codebase
+  - fileSearch
+  - readFile
+  - editFiles
+  - usages
+  - problems
+  - changes
+  - fetch
+model: GPT-5
+---
 # Documentation Chat Mode
 
 This chat mode focuses on maintaining clear, consistent, and validated documentation.

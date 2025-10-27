@@ -118,8 +118,11 @@ For frequent use, qxub provides convenient shorthand commands:
 # Instead of 'qxub exec', use 'qx' for speed
 qx -- python -c "print('Same functionality, shorter typing!')"
 
-# Also works with all the same options
-qx --resources mem=8GB -- python big_script.py
+# Also works with all the same options (workflow-friendly)
+qx --mem 8GB --cpus 4 -- python big_script.py
+
+# Or with traditional PBS format
+qx --resources mem=8GB,ncpus=4 -- python big_script.py
 ```
 
 The shorthand commands available are:

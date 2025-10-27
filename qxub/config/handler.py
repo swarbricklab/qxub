@@ -231,6 +231,84 @@ def build_qsub_options(params):
     return options
 
 
+def adjust_resources_for_queue(params):
+    """Adjust resources to respect queue limits for explicitly specified queues.
+
+    Mimics PBS qsub behavior: if user explicitly specifies a queue but doesn't
+    explicitly specify ncpus, automatically cap ncpus at the queue's maximum.
+    If user explicitly specifies ncpus that exceed the queue max, validation
+    will catch it later with a helpful error.
+    """
+    queue_name = params.get("queue")
+    if not queue_name or queue_name == "auto":
+        # Auto queue selection handles this differently
+        return params
+
+    resources = params.get("resources", [])
+    if not resources:
+        return params
+
+    # Check if CPUs were explicitly specified by user (tracked in exec_cli.py)
+    cpus_explicit = params.get("cpus_explicit", False)
+
+    if cpus_explicit:
+        # User explicitly set CPUs - let validation handle any issues
+        return params
+
+    # User didn't explicitly set CPUs - check if we need to adjust for queue limits
+    try:
+        from pathlib import Path
+
+        from qxub.platform import PlatformLoader
+
+        # Check for QXUB_PLATFORM_PATHS environment variable
+        platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
+        if platform_paths_env:
+            search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
+            loader = PlatformLoader(search_paths=search_paths)
+        else:
+            loader = PlatformLoader()
+
+        # Try to find the queue in any loaded platform
+        for platform_name in loader.list_platforms():
+            platform = loader.get_platform(platform_name)
+            if not platform:
+                continue
+
+            queue = platform.get_queue(queue_name)
+            if queue and queue.limits.max_cpus:
+                # Found the queue - check if we need to adjust CPUs
+                current_ncpus = None
+                for r in resources:
+                    if r.startswith("ncpus="):
+                        current_ncpus = int(r.split("=")[1])
+                        break
+
+                if current_ncpus and current_ncpus > queue.limits.max_cpus:
+                    # Default CPU count exceeds queue limit - adjust it gracefully
+                    logging.info(
+                        f"Automatically adjusting ncpus from {current_ncpus} to {queue.limits.max_cpus} "
+                        f"for queue '{queue_name}' (default exceeds queue maximum)"
+                    )
+                    # Replace the ncpus value in resources
+                    new_resources = [
+                        (
+                            f"ncpus={queue.limits.max_cpus}"
+                            if r.startswith("ncpus=")
+                            else r
+                        )
+                        for r in resources
+                    ]
+                    params["resources"] = new_resources
+                break
+
+    except Exception as e:
+        # Platform system not available or other error - don't adjust
+        logging.debug(f"Could not adjust resources for queue: {e}")
+
+    return params
+
+
 def process_job_options(params, config_manager):
     """Complete job option processing pipeline."""
     # Process configuration
@@ -238,6 +316,9 @@ def process_job_options(params, config_manager):
 
     # Handle auto queue selection
     params = select_auto_queue(params)
+
+    # Adjust resources for explicitly specified queues
+    params = adjust_resources_for_queue(params)
 
     # Build qsub options
     options = build_qsub_options(params)
