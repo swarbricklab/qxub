@@ -5,18 +5,21 @@ This package provides job execution functionality including:
 - Core job submission and monitoring (core module)
 - Context-specific executors (executors module)
 - Unified execution context handling (context module)
+- Execution mode detection for local vs remote (mode module)
 
 The execution system supports:
 - Conda environments
 - Module loading
 - Singularity containers
 - Default (bare) execution
+- Local and remote execution modes
 
 Architecture:
 - Single-threaded design for simplicity and reliability
 - Unified job submission and monitoring via core.submit_and_monitor_job
 - Context validation and variable expansion
 - Resource tracking and history logging integration
+- Platform-aware execution routing (local vs remote)
 """
 
 # Unified execution context system
@@ -46,6 +49,14 @@ from .executors import (
     execute_singularity,
 )
 
+# Execution mode detection
+from .mode import (
+    ExecutionMode,
+    get_execution_mode,
+    get_remote_config,
+    validate_remote_config,
+)
+
 # Public API exports
 __all__ = [
     # Core execution functions
@@ -66,6 +77,11 @@ __all__ = [
     "create_module_context",
     "create_singularity_context",
     "create_default_context",
+    # Execution mode detection
+    "ExecutionMode",
+    "get_execution_mode",
+    "get_remote_config",
+    "validate_remote_config",
 ]
 
 

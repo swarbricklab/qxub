@@ -10,7 +10,12 @@ import click
 
 from .config import config_manager
 from .config.handler import process_job_options
-from .execution import ExecutionContext, execute_unified
+from .execution import (
+    ExecutionContext,
+    ExecutionMode,
+    execute_unified,
+    get_execution_mode,
+)
 
 
 def _get_shortcut_context_description(definition: dict) -> str:
@@ -102,6 +107,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
     "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
 )
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
+@click.option("--platform", help="Target platform for execution (default: from config)")
 @click.option("--env", help="Conda environment name for execution")
 @click.option(
     "--mod",
@@ -570,7 +576,56 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     ctx.obj.update(processed_params)
     ctx.obj["options"] = qsub_options
 
-    # Execute the job using unified execution
+    # Platform selection and execution mode detection
+    platform_name = (
+        options.get("platform") or config_manager.get_default_platform_name()
+    )
+    platform_config = None
+    execution_mode = ExecutionMode.LOCAL  # Default to local
+
+    if platform_name:
+        platform_config = config_manager.get_platform_config(platform_name)
+        if not platform_config:
+            # List available platforms for helpful error message
+            available_platforms = config_manager.list_platforms()
+            if available_platforms:
+                platforms_str = ", ".join(available_platforms)
+                raise click.ClickException(
+                    f"Platform '{platform_name}' not found in configuration. "
+                    f"Available platforms: {platforms_str}"
+                )
+            else:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' not found. "
+                    f"No platforms configured in {config_manager._get_user_config_dir() / 'config.yaml'}"
+                )
+
+        # Determine execution mode based on platform config
+        execution_mode = get_execution_mode(platform_config)
+
+        if execution_mode == ExecutionMode.REMOTE:
+            # Remote execution path
+            from .remote.executor import RemoteExecutorFactory
+
+            remote_config_dict = platform_config.get("remote")
+            if not remote_config_dict:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' is configured for remote execution "
+                    "but missing 'remote' configuration section"
+                )
+
+            # Build remote command that recreates the qxub invocation
+            # TODO: Implement command serialization in Phase 4
+            raise click.ClickException(
+                "Remote execution is not yet fully implemented. "
+                "This will be completed in Phase 4 of the implementation plan."
+            )
+
+        # Local execution continues below
+        if verbose >= 1:
+            click.echo(f"📍 Executing on platform: {platform_name} (local)", err=True)
+
+    # Execute the job using unified execution (local path)
     execute_unified(
         ctx,
         command,
