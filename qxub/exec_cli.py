@@ -605,7 +605,8 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
 
         if execution_mode == ExecutionMode.REMOTE:
             # Remote execution path
-            from .remote.executor import RemoteExecutorFactory
+            from .remote.command_builder import build_remote_command
+            from .remote.platform_executor import PlatformRemoteExecutor
 
             remote_config_dict = platform_config.get("remote")
             if not remote_config_dict:
@@ -615,11 +616,38 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
                 )
 
             # Build remote command that recreates the qxub invocation
-            # TODO: Implement command serialization in Phase 4
-            raise click.ClickException(
-                "Remote execution is not yet fully implemented. "
-                "This will be completed in Phase 4 of the implementation plan."
+            # Combine options for serialization (don't include --platform since we're already on the platform)
+            remote_options = dict(options)
+            remote_options.update(
+                {
+                    "verbose": verbose,
+                    "dry": options.get("dry", False),
+                    "quiet": options.get("quiet", False),
+                    "terse": options.get("terse", False),
+                }
             )
+
+            # Serialize the execution context and options back to CLI arguments
+            remote_command = build_remote_command(
+                execution_context, remote_options, list(command)
+            )
+
+            if verbose >= 1:
+                click.echo(
+                    f"🌐 Remote execution on platform: {platform_name}", err=True
+                )
+
+            # Create and execute via SSH
+            try:
+                executor = PlatformRemoteExecutor(platform_name, remote_config_dict)
+                exit_code = executor.execute(
+                    remote_command,
+                    stream_output=not options.get("quiet", False),
+                    verbose=verbose,
+                )
+                ctx.exit(exit_code)
+            except Exception as e:
+                raise click.ClickException(f"Remote execution failed: {e}")
 
         # Local execution continues below
         if verbose >= 1:
