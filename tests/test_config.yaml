@@ -1,34 +1,82 @@
-# Test configuration for qxub v2.2 remote execution
-# Usage: qxub --config tests/test_config.yaml --remote <remote_name> --dry-run -- echo "test"
+# Test configuration for qxub v3.3.0 remote execution from laptop/CI
 #
-# This file contains example remote configurations for testing the --config option
-# and remote execution functionality.
+# Usage:
+#   qxub exec --config tests/test_config.yaml --platform gadi_remote -- python script.py
+#
+# Prerequisites for remote execution:
+#   1. SSH access configured in ~/.ssh/config with hostname 'gadi'
+#      Example ~/.ssh/config entry:
+#        Host gadi
+#          HostName gadi.nci.org.au
+#          User <your-username>
+#          IdentityFile ~/.ssh/id_rsa
+#
+#   2. qxub installed on remote platform (in conda environment)
+#      ssh gadi "conda activate qxub && qxub --version"
+#
+#   3. Working directory exists on remote platform
+#      ssh gadi "ls -d /scratch/a56/\$USER"
+#
+# Test commands:
+#   # Test remote execution (dry run)
+#   qxub exec --config tests/test_config.yaml --platform gadi_remote --dry -- echo "hello"
+#
+#   # Test with conda environment on remote
+#   qxub exec --config tests/test_config.yaml --platform gadi_remote --env qxub -- qxub --version
+#
+#   # Test actual job submission (remove --dry)
+#   qxub exec --config tests/test_config.yaml --platform gadi_remote --env qxub -- python -c "import sys; print(sys.version)"
+#
+#   # Test local execution (if running on Gadi)
+#   qxub exec --config tests/test_config.yaml --platform gadi_local --dry -- echo "hello"
 
-remotes:
-  # NCI Gadi configuration
-  nci_gadi:
-    url: ssh://gadi.nci.org.au
-    qxub_env: qxub-prod
-    platform_file: /g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml
-    project_root_dir: /scratch/${PROJECT}/${USER}/projects
+# Default settings
+defaults:
+  platform: gadi_remote  # Use remote by default for laptop/CI testing
+  project: a56           # ⚠️ CHANGE THIS to your NCI project code
+  walltime: "1:00:00"
+  mem: 4GB
+  cpus: 1
+  storage: gdata/a56+gdata/px14  # ⚠️ CHANGE THIS to your required storage
 
-  # Local test configuration (useful for testing SSH connectivity)
-  localhost:
-    url: ssh://localhost
-    qxub_env: base  # or whatever conda env exists locally
-    platform_file: /g/data/a56/software/qsub_tools/tests/test_platforms/localhost.yaml
-    project_root_dir: /tmp/qxub-test-projects
+# Platform configurations
+platforms:
+  # Remote Gadi platform - for execution from laptop/CI via SSH
+  gadi_remote:
+    name: gadi_remote
+    # Option 1: Use platform definition from GitHub (requires internet)
+    definition: https://raw.githubusercontent.com/swarbricklab/qxub-platforms/main/nci_gadi.yaml
+    # Option 2: Use local file path (uncomment to use)
+    # definition: file:///g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml
+    remote:
+      host: gadi  # SSH hostname from ~/.ssh/config
+      working_dir: /scratch/a56/{user}  # ⚠️ CHANGE 'a56' to your project
+      conda_init: |
+        # Initialize conda for remote execution
+        eval "$(conda shell.bash hook)"
+        # If qxub is in a specific conda env, activate it:
+        conda activate qxub
 
-  # Example remote cluster configuration
-  example_cluster:
-    url: ssh://cluster.example.edu
-    qxub_env: /opt/miniconda/envs/qxub
-    platform_file: /shared/configs/cluster.yaml
-    project_root_dir: /home/${USER}/scratch
+  # Local Gadi platform - for direct PBS submission when on Gadi
+  gadi_local:
+    name: gadi_local
+    definition: https://raw.githubusercontent.com/swarbricklab/qxub-platforms/main/nci_gadi.yaml
+    # No 'remote' section = local execution via direct PBS submission
 
-  # Example with custom port
-  custom_port_host:
-    url: ssh://myhost.example.com:2222
-    qxub_env: qxub-env
-    platform_file: /etc/qxub/platform.yaml
-    project_root_dir: /scratch/${PROJECT}/${USER}
+  # Alternative: Gadi remote with local platform definition file
+  # (useful if testing without internet or with custom platform files)
+  gadi_remote_file:
+    name: gadi_remote_file
+    definition: file:///g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml
+    remote:
+      host: gadi
+      working_dir: /scratch/a56/{user}
+      conda_init: 'eval "$(conda shell.bash hook)"'
+
+# Optional: Override other settings for testing
+# Additional settings you can override:
+#   log_dir: /scratch/a56/{user}/qxub/logs
+#   jobfs: 10GB
+#   queue: normal
+#   email: your.email@example.com
+#   email_opts: abe
