@@ -8,7 +8,6 @@ comprehensive interface.
 
 import click
 
-from .config import config_manager
 from .config.handler import process_job_options
 from .execution import (
     ExecutionContext,
@@ -16,6 +15,13 @@ from .execution import (
     execute_unified,
     get_execution_mode,
 )
+
+
+def _get_config_manager():
+    """Get the current config manager instance (supports override)."""
+    from .config import manager
+
+    return manager.config_manager
 
 
 def _get_shortcut_context_description(definition: dict) -> str:
@@ -33,6 +39,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
 
 
 @click.command(name="exec")
+@click.option(
+    "--config",
+    help="Override config file for testing or alternative configurations",
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+)
 @click.option(
     "-l",
     "--resources",
@@ -129,7 +140,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--alias", help="Use a predefined alias for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
+def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -164,12 +175,25 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         qxub exec --alias myalias -- additional args
         qxub exec --alias myalias  # if alias has default command
 
+    \b
+    Override config:
+        qxub exec --config tests/test_config.yaml --platform remote -- echo "test"
+
     Commands can be specified either after -- or using --cmd:
 
     \b
         qxub exec --env myenv -- python script.py arg1 arg2
         qxub exec --env myenv --cmd "python script.py arg1 arg2"
     """
+    # Handle config override if specified
+    if config:
+        from .config.manager import set_config_override
+
+        set_config_override(config)
+
+    # Get current config manager (will be the overridden one if --config was used)
+    config_manager = _get_config_manager()
+
     # Set up logging verbosity using the count-based system
     from .config.manager import setup_logging
 
