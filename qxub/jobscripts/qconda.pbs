@@ -132,7 +132,9 @@ if ! conda activate $env 2>&1; then
 fi
 
 # Verify that the environment was actually activated
-if [ "$CONDA_DEFAULT_ENV" != "$env" ]; then
+# Note: CONDA_DEFAULT_ENV may be just the name or a full path depending on conda configuration
+ACTIVATED_ENV_NAME=$(basename "$CONDA_DEFAULT_ENV")
+if [ "$ACTIVATED_ENV_NAME" != "$env" ]; then
     echo "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
     echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
