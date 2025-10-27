@@ -9,7 +9,7 @@ v2.3 adds parallel job execution with --terse output and 'qxub monitor' for pipe
 
 # __init__.py
 
-__version__ = "3.2.3"
+__version__ = "3.2.4"
 
 # Import main CLI
 from . import cli as cli_module
