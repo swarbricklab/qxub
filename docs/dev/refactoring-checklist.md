@@ -10,11 +10,14 @@ During refactoring (especially file moves/reorganizations), old files are often 
 
 ## Mandatory Checklist for Code Reorganization
 
+**💡 TIP: Use the refactoring chat mode (`.github/chatmodes/refactoring.chatmode.md`) for guided assistance.**
+
 ### Before Starting
 
 - [ ] **Document the current state**: List all files that will be moved/renamed
 - [ ] **Plan the new structure**: Write down exact new locations
 - [ ] **Identify all imports**: Search for all current import statements
+- [ ] **Review conscious git tracking**: See `docs/dev/conscious-git-tracking.md`
 
 ### During Refactoring
 
@@ -28,6 +31,16 @@ During refactoring (especially file moves/reorganizations), old files are often 
   # Find all imports of the old location
   git grep "from.*old_module import"
   git grep "import.*old_module"
+  ```
+
+- [ ] **Stage files consciously** (never `git add .`)
+  ```bash
+  # Good: Stage specific files
+  git add qxub/config/manager.py
+  git add qxub/exec_cli.py
+
+  # Verify what's staged
+  git diff --staged --name-only
   ```
 
 - [ ] **Verify old imports are gone**:

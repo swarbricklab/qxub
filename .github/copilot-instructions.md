@@ -160,6 +160,37 @@ qxub config shortcut show "dvc pull"  # Will fail or use wrong version
 - **After implementation**: Update affected documentation immediately
 - **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
 
+### Git Workflow - CRITICAL
+
+**ALWAYS stage files consciously. NEVER use `git add .`**
+
+See `docs/dev/conscious-git-tracking.md` for full guide. Quick reference:
+
+```bash
+# ✅ Good: Stage individually
+git add qxub/config/manager.py
+git add qxub/execution/mode.py
+
+# ✅ Good: Verify before committing
+git diff --staged
+
+# ❌ Bad: Blanket staging (adds zombies, temp files)
+git add .
+git add -A
+```
+
+**Why**: Blanket staging creates zombie files, commits temp scripts, and bundles unrelated changes.
+
+### Refactoring Workflow
+
+**When moving/reorganizing code, see `docs/dev/refactoring-checklist.md`**
+
+Critical rules:
+- Use `git mv` (not copy + modify)
+- Delete old files in same commit
+- Verify no zombies: `git grep "from.*old_module import"` returns nothing
+- Use `.github/chatmodes/refactoring.chatmode.md` for guided refactoring
+
 ### Code Style
 - **Black formatting**: Line length 88, Python 3.10+ target
 - **Pre-commit hooks**: Black, isort, trailing whitespace, YAML validation
