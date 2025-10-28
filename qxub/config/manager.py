@@ -745,12 +745,13 @@ class ConfigManager:
             Platform configuration dict or None if not found
 
         Platform config structure:
-            name: Platform identifier
-            definition: Path/URL to platform definition file
+            definition: Path/URL to platform definition file (optional for delegation)
             remote: Optional remote execution config
                 host: SSH hostname (from ~/.ssh/config)
                 working_dir: Remote working directory
                 conda_init: Optional conda initialization commands
+
+        Note: Platform name is the YAML key, no separate 'name' field needed.
         """
         if not self.merged_config or "platforms" not in self.merged_config:
             return None

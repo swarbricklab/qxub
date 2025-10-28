@@ -711,6 +711,94 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         if execution_mode == ExecutionMode.REMOTE:
             return
 
+        if execution_mode == ExecutionMode.REMOTE_DELEGATED:
+            # Delegated remote execution - no local platform definition needed
+            from .remote.command_builder import build_remote_command
+            from .remote.platform_executor import PlatformRemoteExecutor
+
+            remote_config_dict = platform_config.get("remote")
+            if not remote_config_dict:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' is configured for delegated remote execution "
+                    "but missing 'remote' configuration section"
+                )
+
+            # Build remote command for delegation - preserve platform name but delegate definition
+            remote_options = dict(options)
+            remote_options.update(
+                {
+                    "platform": platform_name,  # Preserve platform name for remote to find its definition
+                    "config": config,  # Preserve config file choice if specified
+                    "verbose": verbose,
+                    "dry": options.get("dry", False),
+                    "quiet": options.get("quiet", False),
+                    "terse": options.get("terse", False),
+                }
+            )
+
+            # Serialize the execution context and options back to CLI arguments
+            remote_command = build_remote_command(
+                execution_context, remote_options, list(command)
+            )
+
+            if verbose >= 1:
+                click.echo(
+                    f"🌐 Delegated remote execution on platform: {platform_name}",
+                    err=True,
+                )
+            if verbose >= 2:
+                click.echo(
+                    f"🔄 Remote qxub will resolve platform definition for '{platform_name}'",
+                    err=True,
+                )
+
+            # Create and execute via SSH
+            try:
+                executor = PlatformRemoteExecutor(platform_name, remote_config_dict)
+                exit_code = executor.execute(
+                    remote_command,
+                    stream_output=not options.get("quiet", False),
+                    verbose=verbose,
+                )
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Delegated remote command completed with exit code: {exit_code}",
+                        err=True,
+                    )
+
+                # For successful execution, just return normally instead of ctx.exit()
+                if exit_code == 0:
+                    if verbose >= 3:
+                        click.echo(
+                            "🔍 Delegated remote execution successful, returning normally",
+                            err=True,
+                        )
+                    return
+                else:
+                    # For non-zero exit codes, still use ctx.exit to propagate the error code
+                    if verbose >= 3:
+                        click.echo(
+                            f"🔍 Delegated remote execution failed with code {exit_code}, using ctx.exit",
+                            err=True,
+                        )
+                    ctx.exit(exit_code)
+
+            except click.exceptions.Exit:
+                # Let Click Exit exceptions pass through - they're not errors
+                if verbose >= 3:
+                    click.echo("🔍 Click Exit exception caught and re-raised", err=True)
+                raise
+            except Exception as e:
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Exception caught: type={type(e)}, value={e}", err=True
+                    )
+                raise click.ClickException(f"Delegated remote execution failed: {e}")
+
+        # Delegated remote execution completed, skip local execution
+        if execution_mode == ExecutionMode.REMOTE_DELEGATED:
+            return
+
         # Local execution continues below
         if verbose >= 1:
             click.echo(f"📍 Executing on platform: {platform_name} (local)", err=True)

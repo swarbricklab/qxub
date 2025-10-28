@@ -17,6 +17,7 @@ class ExecutionMode(Enum):
 
     LOCAL = "local"
     REMOTE = "remote"
+    REMOTE_DELEGATED = "remote_delegated"
 
 
 def get_execution_mode(
@@ -26,15 +27,16 @@ def get_execution_mode(
     Determine execution mode from platform configuration.
 
     The execution mode is determined by the presence of a 'remote' section
-    in the platform configuration:
-    - Has 'remote' section → REMOTE execution (SSH to platform)
+    and 'definition' in the platform configuration:
+    - Has 'remote' section + 'definition' → REMOTE execution (local validation + SSH)
+    - Has 'remote' section, no 'definition' → REMOTE_DELEGATED execution (pure SSH delegation)
     - No 'remote' section → LOCAL execution (direct PBS submission)
 
     Args:
         platform_config: Platform configuration dictionary from config manager
 
     Returns:
-        ExecutionMode.LOCAL or ExecutionMode.REMOTE
+        ExecutionMode.LOCAL, ExecutionMode.REMOTE, or ExecutionMode.REMOTE_DELEGATED
 
     Examples:
         >>> # Local platform config (no remote section)
@@ -45,17 +47,28 @@ def get_execution_mode(
         >>> get_execution_mode(config)
         ExecutionMode.LOCAL
 
-        >>> # Remote platform config (has remote section)
+        >>> # Remote platform config with definition (standard remote)
         >>> config = {
         ...     'name': 'nci_gadi',
         ...     'definition': 'https://github.com/.../nci_gadi.yaml',
         ...     'remote': {
-        ...         'host': 'gadi',
+        ...         'hostname': 'gadi',
         ...         'working_dir': '/scratch/a56/{user}'
         ...     }
         ... }
         >>> get_execution_mode(config)
         ExecutionMode.REMOTE
+
+        >>> # Remote platform config without definition (delegated)
+        >>> config = {
+        ...     'name': 'nci_gadi',
+        ...     'remote': {
+        ...         'hostname': 'gadi',
+        ...         'working_dir': '/scratch/a56/{user}'
+        ...     }
+        ... }
+        >>> get_execution_mode(config)
+        ExecutionMode.REMOTE_DELEGATED
     """
     # If no platform config, default to local
     if not platform_config:
@@ -64,11 +77,19 @@ def get_execution_mode(
 
     # Check for remote section
     if "remote" in platform_config and platform_config["remote"]:
-        logger.debug(
-            f"Platform {platform_config.get('name', 'unknown')} has remote config, "
-            "using remote execution"
-        )
-        return ExecutionMode.REMOTE
+        # Remote execution - check if we have platform definition
+        if platform_config.get("definition"):
+            logger.debug(
+                f"Platform {platform_config.get('name', 'unknown')} has remote config "
+                "with definition, using standard remote execution"
+            )
+            return ExecutionMode.REMOTE
+        else:
+            logger.debug(
+                f"Platform {platform_config.get('name', 'unknown')} has remote config "
+                "without definition, using delegated remote execution"
+            )
+            return ExecutionMode.REMOTE_DELEGATED
 
     logger.debug(
         f"Platform {platform_config.get('name', 'unknown')} has no remote config, "

@@ -43,7 +43,6 @@ defaults:
 platforms:
   # Remote Gadi platform - for execution from laptop/CI via SSH
   gadi_remote:
-    name: gadi_remote
     # Option 1: Use platform definition from GitHub (requires internet)
     definition: https://raw.githubusercontent.com/swarbricklab/qxub-platforms/main/nci_gadi.yaml
     # Option 2: Use local file path (uncomment to use)
@@ -59,14 +58,22 @@ platforms:
 
   # Local Gadi platform - for direct PBS submission when on Gadi
   gadi_local:
-    name: gadi_local
     definition: https://raw.githubusercontent.com/swarbricklab/qxub-platforms/main/nci_gadi.yaml
     # No 'remote' section = local execution via direct PBS submission
+
+  # Delegated remote platform - platform definition resolved by remote qxub
+  nci_gadi:
+    # NO definition field - delegates definition resolution to remote
+    remote:
+      host: gadi
+      working_dir: /scratch/a56/{user}
+      conda_init: |
+        eval "$(conda shell.bash hook)"
+        conda activate qxub
 
   # Alternative: Gadi remote with local platform definition file
   # (useful if testing without internet or with custom platform files)
   gadi_remote_file:
-    name: gadi_remote_file
     definition: file:///g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml
     remote:
       host: gadi
