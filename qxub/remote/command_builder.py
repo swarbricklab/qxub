@@ -57,6 +57,9 @@ def build_remote_command(
     elif execution_context.context_type == "default":
         parts.append("--default")
 
+    # Serialize CLI-level options
+    _add_cli_options(parts, options)
+
     # Serialize PBS resource options
     _add_pbs_options(parts, options)
 
@@ -72,6 +75,30 @@ def build_remote_command(
         parts.extend(shlex.quote(str(arg)) for arg in command)
 
     return " ".join(parts)
+
+
+def _add_cli_options(parts: List[str], options: Dict[str, Any]) -> None:
+    """Add CLI-level options to command parts."""
+    # Platform selection - critical for preserving user's explicit choice
+    if options.get("platform"):
+        parts.extend(["--platform", shlex.quote(str(options["platform"]))])
+
+    # Config file override
+    if options.get("config"):
+        parts.extend(["--config", shlex.quote(str(options["config"]))])
+
+    # Verbose flags
+    verbose = options.get("verbose", 0)
+    if verbose > 0:
+        parts.extend(["-" + "v" * verbose])
+
+    # Other CLI flags
+    if options.get("dry", False):
+        parts.append("--dry-run")
+    if options.get("quiet", False):
+        parts.append("--quiet")
+    if options.get("terse", False):
+        parts.append("--terse")
 
 
 def _add_pbs_options(parts: List[str], options: Dict[str, Any]) -> None:
@@ -152,19 +179,6 @@ def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
         parts.extend(["--pre", shlex.quote(str(options["pre"]))])
     if options.get("post"):
         parts.extend(["--post", shlex.quote(str(options["post"]))])
-
-    # Execution flags
-    if options.get("dry"):
-        parts.append("--dry")
-    if options.get("quiet"):
-        parts.append("--quiet")
-    if options.get("terse"):
-        parts.append("--terse")
-
-    # Verbosity (count-based, add -v for each level)
-    verbose_level = options.get("verbose", 0)
-    if verbose_level > 0:
-        parts.append("-" + "v" * verbose_level)
 
 
 def parse_options_from_ctx(ctx_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:

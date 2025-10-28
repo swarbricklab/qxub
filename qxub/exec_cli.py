@@ -640,10 +640,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                 )
 
             # Build remote command that recreates the qxub invocation
-            # Combine options for serialization (don't include --platform since we're already on the platform)
+            # Include --platform to preserve user's explicit choice and prevent config override
             remote_options = dict(options)
             remote_options.update(
                 {
+                    "platform": platform_name,  # Preserve explicit platform choice
+                    "config": config,  # Preserve config file choice if specified
                     "verbose": verbose,
                     "dry": options.get("dry", False),
                     "quiet": options.get("quiet", False),
@@ -670,6 +672,9 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                     verbose=verbose,
                 )
                 ctx.exit(exit_code)
+            except SystemExit:
+                # Let SystemExit pass through - it's not an error
+                raise
             except Exception as e:
                 raise click.ClickException(f"Remote execution failed: {e}")
 
