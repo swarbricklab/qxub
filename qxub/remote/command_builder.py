@@ -83,9 +83,9 @@ def _add_cli_options(parts: List[str], options: Dict[str, Any]) -> None:
     if options.get("platform"):
         parts.extend(["--platform", shlex.quote(str(options["platform"]))])
 
-    # Config file override
-    if options.get("config"):
-        parts.extend(["--config", shlex.quote(str(options["config"]))])
+    # NOTE: --config option is NOT passed to remote qxub
+    # The config file is for laptop→remote setup, remote qxub should use its own local config
+    # This enables proper platform definition delegation
 
     # Verbose flags
     verbose = options.get("verbose", 0)
