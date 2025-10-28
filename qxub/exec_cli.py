@@ -671,12 +671,45 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                     stream_output=not options.get("quiet", False),
                     verbose=verbose,
                 )
-                ctx.exit(exit_code)
-            except SystemExit:
-                # Let SystemExit pass through - it's not an error
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Remote command completed with exit code: {exit_code}",
+                        err=True,
+                    )
+
+                # For successful execution, just return normally instead of ctx.exit()
+                # This avoids Click exception handling complications
+                if exit_code == 0:
+                    if verbose >= 3:
+                        click.echo(
+                            "🔍 Remote execution successful, returning normally",
+                            err=True,
+                        )
+                    return
+                else:
+                    # For non-zero exit codes, still use ctx.exit to propagate the error code
+                    if verbose >= 3:
+                        click.echo(
+                            f"🔍 Remote execution failed with code {exit_code}, using ctx.exit",
+                            err=True,
+                        )
+                    ctx.exit(exit_code)
+
+            except click.exceptions.Exit:
+                # Let Click Exit exceptions pass through - they're not errors
+                if verbose >= 3:
+                    click.echo("🔍 Click Exit exception caught and re-raised", err=True)
                 raise
             except Exception as e:
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Exception caught: type={type(e)}, value={e}", err=True
+                    )
                 raise click.ClickException(f"Remote execution failed: {e}")
+
+        # Remote execution completed successfully, skip local execution
+        if execution_mode == ExecutionMode.REMOTE:
+            return
 
         # Local execution continues below
         if verbose >= 1:
