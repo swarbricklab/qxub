@@ -62,7 +62,7 @@ platforms:
     # No 'remote' section = local execution via direct PBS submission
 
   # Delegated remote platform - platform definition resolved by remote qxub
-  nci_gadi:
+  test_delegation:
     # NO definition field - delegates definition resolution to remote
     remote:
       host: gadi

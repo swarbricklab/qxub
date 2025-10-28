@@ -69,26 +69,28 @@ class PlatformRemoteExecutor:
         Expand template variables in path strings.
 
         Supported variables:
-        - {user}: Current username
-        - {project}: $PROJECT environment variable
+        - {user}: Deferred to remote host as $USER (for remote evaluation)
+        - {project}: $PROJECT environment variable (expanded locally)
+        - {{user}}: Escaped to {user} for remote resolution
 
         Args:
             path: Path string with optional variables
 
         Returns:
-            Expanded path string
+            Path string with local variables expanded and remote variables deferred
         """
-        import getpass
         import os
 
-        expansions = {
-            "user": getpass.getuser(),
-            "project": os.environ.get("PROJECT", ""),
-        }
+        # Handle escaped variables first ({{user}} -> {user} for remote resolution)
+        result = path.replace("{{user}}", "{user}")
 
-        result = path
-        for key, value in expansions.items():
-            result = result.replace(f"{{{key}}}", value)
+        # Expand project locally (available in CI/laptop environment)
+        project = os.environ.get("PROJECT", "")
+        result = result.replace("{project}", project)
+
+        # Defer user resolution to remote host by converting to shell variable
+        # {user} -> $USER (will be resolved by remote shell)
+        result = result.replace("{user}", "$USER")
 
         return result
 
@@ -201,8 +203,13 @@ class PlatformRemoteExecutor:
 
         # Initialize conda if specified
         if self.conda_init:
-            # Use custom conda initialization
-            commands.append(self.conda_init)
+            # Use custom conda initialization - handle multi-line strings
+            # Split by newlines and add each line as a separate command
+            init_lines = self.conda_init.strip().split("\n")
+            for line in init_lines:
+                line = line.strip()
+                if line:  # Skip empty lines
+                    commands.append(line)
         else:
             # Use standard conda initialization
             commands.append('eval "$(conda shell.bash hook)"')
