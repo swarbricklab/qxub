@@ -68,10 +68,15 @@ class PlatformRemoteExecutor:
         """
         Expand template variables in path strings.
 
+        Follows the same pattern as compute node variable resolution:
+        - {var}: Resolved on config system (laptop/CI environment)
+        - {{var}}: Resolved on remote system (Gadi execution environment)
+
         Supported variables:
-        - {user}: Deferred to remote host as $USER (for remote evaluation)
+        - {user}: Current username from config system (laptop/CI user)
+        - {{user}}: Deferred to remote host as $USER (remote user)
         - {project}: $PROJECT environment variable (expanded locally)
-        - {{user}}: Escaped to {user} for remote resolution
+        - {{project}}: Deferred to remote host as $PROJECT (remote env)
 
         Args:
             path: Path string with optional variables
@@ -79,18 +84,24 @@ class PlatformRemoteExecutor:
         Returns:
             Path string with local variables expanded and remote variables deferred
         """
+        import getpass
         import os
 
-        # Handle escaped variables first ({{user}} -> {user} for remote resolution)
-        result = path.replace("{{user}}", "{user}")
+        # First handle double-brace variables (remote evaluation)
+        # {{user}} -> $USER (will be resolved by remote shell)
+        result = path.replace("{{user}}", "$USER")
 
-        # Expand project locally (available in CI/laptop environment)
-        project = os.environ.get("PROJECT", "")
-        result = result.replace("{project}", project)
+        # {{project}} -> $PROJECT (will be resolved by remote shell)
+        result = result.replace("{{project}}", "$PROJECT")
 
-        # Defer user resolution to remote host by converting to shell variable
-        # {user} -> $USER (will be resolved by remote shell)
-        result = result.replace("{user}", "$USER")
+        # Then handle single-brace variables (local evaluation)
+        # {user} -> actual username from config system
+        local_user = getpass.getuser()
+        result = result.replace("{user}", local_user)
+
+        # {project} -> actual project from local environment
+        local_project = os.environ.get("PROJECT", "")
+        result = result.replace("{project}", local_project)
 
         return result
 
@@ -225,20 +236,19 @@ class PlatformRemoteExecutor:
 
     def _should_allocate_tty(self) -> bool:
         """
-        Auto-detect if TTY allocation would be beneficial.
+        Determine if TTY allocation would be beneficial for remote execution.
 
-        Allocates TTY if local session is interactive, which preserves
-        progress indicators, colors, and other TTY-dependent features.
+        For qxub remote execution, we generally want clean output without
+        interactive progress indicators that can cause staggered output.
+        TTY allocation can cause the remote qxub to output progress indicators
+        to /dev/tty which interferes with clean command output.
 
         Returns:
-            True if TTY should be allocated, False otherwise
+            False - Disable TTY allocation for cleaner remote execution output
         """
-        try:
-            # Allocate TTY if local session has both stdout and stderr as TTYs
-            return sys.stdout.isatty() and sys.stderr.isatty()
-        except (AttributeError, OSError):
-            # Fallback to False if TTY detection fails
-            return False
+        # Always return False for now to avoid staggered output issues
+        # TODO: Consider making this configurable if interactive features are needed
+        return False
 
     def _execute_with_streaming(self, ssh_command: list) -> int:
         """
