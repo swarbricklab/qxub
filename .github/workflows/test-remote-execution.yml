@@ -25,7 +25,7 @@ jobs:
         pip install -e .
 
     - name: Set up SSH for Gadi
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         # Create SSH directory
         mkdir -p ~/.ssh
@@ -53,7 +53,7 @@ jobs:
         chmod 600 ~/.ssh/config
 
     - name: Create v3.3.0 test configuration
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         cat > ci_test_config.yaml << EOF
         # CI test configuration for qxub v3.3.0 remote execution
@@ -87,37 +87,37 @@ jobs:
         EOF
 
     - name: Test SSH connectivity
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         echo "Testing SSH connection to Gadi..."
         ssh gadi "echo 'SSH connection successful' && hostname && whoami"
 
     - name: Test remote qxub installation
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         echo "Testing remote qxub installation..."
         ssh gadi "conda activate qxub && qxub --version"
 
     - name: Test remote execution (dry run)
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         echo "Testing standard remote execution (dry run)..."
         qxub exec --config ci_test_config.yaml --platform gadi_remote --dry -vv -- echo "Hello from CI remote execution"
 
     - name: Test delegated remote execution (dry run)
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         echo "Testing delegated remote execution (dry run)..."
         qxub exec --config ci_test_config.yaml --platform gadi_delegated --dry -vv -- echo "Hello from CI delegated execution"
 
     - name: Test actual job submission
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
       run: |
         echo "Testing actual job submission..."
         qxub exec --config ci_test_config.yaml --platform gadi_remote --walltime "0:01:00" --queue copyq -vv -- echo "Actual CI job submission"
 
     - name: Test with conda environment
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
       run: |
         echo "Testing execution with conda environment..."
         qxub exec --config ci_test_config.yaml --platform gadi_remote --env qxub --walltime "0:01:00" --queue copyq -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
@@ -130,7 +130,7 @@ jobs:
         # Keep known_hosts as it's not sensitive
 
     - name: Skip remote tests (no credentials)
-      if: ${{ secrets.GADI_SSH_PRIVATE_KEY == '' }}
+      if: ${{ !secrets.GADI_SSH_PRIVATE_KEY }}
       run: |
         echo "Skipping remote execution tests - no SSH credentials configured"
         echo "To enable v3.3.0 remote testing, configure these GitHub secrets:"
