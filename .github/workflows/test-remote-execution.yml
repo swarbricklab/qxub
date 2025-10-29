@@ -107,7 +107,7 @@ jobs:
       if: env.HAS_SSH_KEY == 'true'
       run: |
         echo "Testing conda environment execution (dry run)..."
-        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --dry -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --dry -vv -- python --version
 
     - name: Test resource specifications (dry run)
       if: env.HAS_SSH_KEY == 'true'
@@ -137,7 +137,7 @@ jobs:
       if: env.HAS_SSH_KEY == 'true' && env.ENABLE_REAL_TESTS == 'true'
       run: |
         echo "Testing execution with conda environment (real submission)..."
-        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --time "0:01:00" --queue copyq -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --time "0:01:00" --queue copyq -vv -- python --version
 
     - name: Clean up SSH keys
       if: always()
