@@ -1,10 +1,11 @@
-name: Test Remote Execution
+name: Test Remote Execution v3.3.0
 
 on:
   push:
-    branches: [ main, feature/v2.2-development ]
+    branches: [ main, feature/v3.3.0-remote-execution ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch: # Allow manual trigger
 
 jobs:
   test-remote-execution:
@@ -18,95 +19,126 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install dependencies
+    - name: Install qxub
       run: |
         python -m pip install --upgrade pip
         pip install -e .
-        pip install pytest
 
-    - name: Set up SSH for NCI Gadi
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+    - name: Set up SSH for Gadi
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
+        # Create SSH directory
         mkdir -p ~/.ssh
-        echo "${{ secrets.NCI_SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-        chmod 600 ~/.ssh/id_ed25519
-        echo "${{ secrets.NCI_SSH_HOST_KEY }}" >> ~/.ssh/known_hosts
+        chmod 700 ~/.ssh
 
-        # Create SSH config for Gadi
+        # Add private key
+        echo "${{ secrets.GADI_SSH_PRIVATE_KEY }}" > ~/.ssh/gadi_ci
+        chmod 600 ~/.ssh/gadi_ci
+
+        # Add known hosts
+        echo "${{ secrets.GADI_SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+
+        # Create SSH config for v3.3.0
         cat >> ~/.ssh/config << EOF
-        Host gadi.nci.org.au
+        Host gadi
           HostName gadi.nci.org.au
           User ${{ secrets.NCI_USERNAME }}
-          IdentityFile ~/.ssh/id_ed25519
+          IdentityFile ~/.ssh/gadi_ci
+          StrictHostKeyChecking yes
           ServerAliveInterval 60
           ServerAliveCountMax 3
           ConnectTimeout 30
-          StrictHostKeyChecking yes
         EOF
+        chmod 600 ~/.ssh/config
 
-    - name: Create test configuration
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+    - name: Create v3.3.0 test configuration
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
-        mkdir -p ~/.config/qxub
-        cat > ~/.config/qxub/config.yaml << EOF
-        remotes:
-          nci_gadi:
-            url: ssh://gadi.nci.org.au
-            qxub_env: ${{ secrets.NCI_QXUB_ENV || 'base' }}
-            platform_file: ${{ secrets.NCI_PLATFORM_FILE || '/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml' }}
-            project_root_dir: /scratch/\${PROJECT}/\${USER}/ci-test
+        cat > ci_test_config.yaml << EOF
+        # CI test configuration for qxub v3.3.0 remote execution
+        defaults:
+          platform: gadi_remote
+          project: ${{ secrets.NCI_PROJECT }}
+          walltime: "0:05:00"  # Short walltime for CI tests
+          mem: 1GB
+          cpus: 1
+          storage: gdata/${{ secrets.NCI_PROJECT }}
+
+        platforms:
+          # Standard remote execution with definition
+          gadi_remote:
+            definition: https://raw.githubusercontent.com/swarbricklab/qxub-platforms/main/nci_gadi.yaml
+            remote:
+              host: gadi
+              working_dir: /scratch/${{ secrets.NCI_PROJECT }}/{{user}}
+              conda_init: |
+                eval "\$(conda shell.bash hook)"
+                conda activate qxub
+
+          # Delegated remote execution (no definition)
+          gadi_delegated:
+            remote:
+              host: gadi
+              working_dir: /scratch/${{ secrets.NCI_PROJECT }}/{{user}}
+              conda_init: |
+                eval "\$(conda shell.bash hook)"
+                conda activate qxub
         EOF
 
     - name: Test SSH connectivity
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
-        echo "Testing SSH connection to NCI Gadi..."
-        ssh -o ConnectTimeout=30 gadi.nci.org.au echo "SSH connection successful"
+        echo "Testing SSH connection to Gadi..."
+        ssh gadi "echo 'SSH connection successful' && hostname && whoami"
 
     - name: Test remote qxub installation
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
-      env:
-        NCI_QXUB_ENV: ${{ secrets.NCI_QXUB_ENV || 'base' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
         echo "Testing remote qxub installation..."
-        ssh gadi.nci.org.au "source ~/.bashrc && conda activate $NCI_QXUB_ENV && qxub --version"
-
-    - name: Test platform file access
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
-      env:
-        NCI_PLATFORM_FILE: ${{ secrets.NCI_PLATFORM_FILE || '/g/data/a56/software/qsub_tools/docs/platforms/nci_gadi.yaml' }}
-      run: |
-        echo "Testing platform file access..."
-        ssh gadi.nci.org.au "test -f '$NCI_PLATFORM_FILE' && echo 'Platform file exists' || echo 'Platform file not found'"
+        ssh gadi "conda activate qxub && qxub --version"
 
     - name: Test remote execution (dry run)
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' }}
-      env:
-        PROJECT: ${{ secrets.NCI_PROJECT || 'a56' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
-        echo "Testing remote execution with dry run..."
-        qxub --remote nci_gadi --env base --dry -vv -- echo "Hello from CI"
+        echo "Testing standard remote execution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform gadi_remote --dry -vv -- echo "Hello from CI remote execution"
 
-    - name: Test remote execution (actual)
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
-      env:
-        PROJECT: ${{ secrets.NCI_PROJECT || 'a56' }}
+    - name: Test delegated remote execution (dry run)
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       run: |
-        echo "Testing actual remote execution..."
-        qxub --remote nci_gadi --env base --queue copyq --walltime 00:01:00 -vv -- echo "Hello from CI remote execution"
+        echo "Testing delegated remote execution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform gadi_delegated --dry -vv -- echo "Hello from CI delegated execution"
+
+    - name: Test actual job submission
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
+      run: |
+        echo "Testing actual job submission..."
+        qxub exec --config ci_test_config.yaml --platform gadi_remote --walltime "0:01:00" --queue copyq -vv -- echo "Actual CI job submission"
+
+    - name: Test with conda environment
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' && secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
+      run: |
+        echo "Testing execution with conda environment..."
+        qxub exec --config ci_test_config.yaml --platform gadi_remote --env qxub --walltime "0:01:00" --queue copyq -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
+
+    - name: Clean up SSH keys
+      if: always()
+      run: |
+        # Remove SSH keys for security
+        rm -f ~/.ssh/gadi_ci ~/.ssh/config
+        # Keep known_hosts as it's not sensitive
 
     - name: Skip remote tests (no credentials)
-      if: ${{ secrets.NCI_SSH_PRIVATE_KEY == '' }}
+      if: ${{ secrets.GADI_SSH_PRIVATE_KEY == '' }}
       run: |
         echo "Skipping remote execution tests - no SSH credentials configured"
-        echo "To enable remote testing, configure these GitHub secrets:"
-        echo "  - NCI_SSH_PRIVATE_KEY: SSH private key for NCI Gadi"
-        echo "  - NCI_SSH_HOST_KEY: Host key for gadi.nci.org.au"
-        echo "  - NCI_USERNAME: Your NCI username"
-        echo "  - NCI_PROJECT: Your NCI project (default: a56)"
-        echo "  - NCI_QXUB_ENV: Conda environment with qxub (default: base)"
-        echo "  - NCI_PLATFORM_FILE: Path to platform file (default: /g/data/a56/...)"
-        echo "  - ENABLE_ACTUAL_REMOTE_TEST: Set to 'true' to run actual jobs (optional)"
+        echo "To enable v3.3.0 remote testing, configure these GitHub secrets:"
+        echo "  - GADI_SSH_PRIVATE_KEY: SSH private key for Gadi"
+        echo "  - GADI_SSH_KNOWN_HOSTS: Result of 'ssh-keyscan -H gadi.nci.org.au'"
+        echo "  - NCI_USERNAME: Your Gadi username"
+        echo "  - NCI_PROJECT: Your NCI project code"
+        echo "  - ENABLE_ACTUAL_REMOTE_TEST: Set to 'true' to run real jobs (optional)"
 
     - name: Test local functionality
       run: |
