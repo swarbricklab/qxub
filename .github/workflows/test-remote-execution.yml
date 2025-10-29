@@ -62,7 +62,7 @@ jobs:
         cat > ci_test_config.yaml << EOF
         # CI test configuration for qxub v3.3.0 remote execution
         defaults:
-          platform: gadi_remote
+          platform: nci_gadi
           project: ${{ secrets.NCI_PROJECT }}
           walltime: "0:05:00"  # Short walltime for CI tests
           mem: 1GB
@@ -95,25 +95,25 @@ jobs:
       if: env.HAS_SSH_KEY == 'true'
       run: |
         echo "Testing standard remote execution (dry run)..."
-        qxub exec --config ci_test_config.yaml --platform gadi_remote --dry -vv -- echo "Hello from CI remote execution"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --dry -vv -- echo "Hello from CI remote execution"
 
     - name: Test delegated remote execution (dry run)
       if: env.HAS_SSH_KEY == 'true'
       run: |
         echo "Testing delegated remote execution (dry run)..."
-        qxub exec --config ci_test_config.yaml --platform gadi_delegated --dry -vv -- echo "Hello from CI delegated execution"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --dry -vv -- echo "Hello from CI delegated execution"
 
     - name: Test actual job submission
       if: env.HAS_SSH_KEY == 'true' && env.ENABLE_REAL_TESTS == 'true'
       run: |
         echo "Testing actual job submission..."
-        qxub exec --config ci_test_config.yaml --platform gadi_remote --walltime "0:01:00" --queue copyq -vv -- echo "Actual CI job submission"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --walltime "0:01:00" --queue copyq -vv -- echo "Actual CI job submission"
 
     - name: Test with conda environment
       if: env.HAS_SSH_KEY == 'true' && env.ENABLE_REAL_TESTS == 'true'
       run: |
         echo "Testing execution with conda environment..."
-        qxub exec --config ci_test_config.yaml --platform gadi_remote --env qxub --walltime "0:01:00" --queue copyq -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --walltime "0:01:00" --queue copyq -vv -- python -c "import sys; print(f'Python version: {sys.version}')"
 
     - name: Clean up SSH keys
       if: always()
