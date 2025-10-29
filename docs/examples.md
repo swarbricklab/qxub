@@ -151,6 +151,75 @@ qxub exec -- python train.py     # Auto-detects 'python' shortcut
 qxub exec -- gcc --version       # Auto-detects 'gcc' shortcut
 ```
 
+## Remote Execution (v3.3.0)
+
+Execute jobs on remote HPC systems via SSH with platform definition delegation.
+
+### Setup
+
+Create a configuration file for remote execution:
+
+```yaml
+# laptop_config.yaml - for laptop → Gadi execution
+defaults:
+  platform: nci_gadi
+  project: a56
+  walltime: "1:00:00"
+  mem: 4GB
+
+platforms:
+  # Delegated platform - definition resolved on remote
+  nci_gadi:
+    remote:
+      host: gadi                          # SSH hostname from ~/.ssh/config
+      working_dir: /scratch/a56/{{user}}  # {{user}} = remote username
+      conda_init: |
+        eval "$(conda shell.bash hook)"
+        conda activate qxub
+```
+
+### Template Variables
+
+- `{user}` - Config system username (laptop)
+- `{{user}}` - Remote system username (via `$USER`)
+- `{project}` - Config system project (laptop `$PROJECT`)
+- `{{project}}` - Remote system project (remote `$PROJECT`)
+
+### Basic Remote Execution
+
+```bash
+# Simple remote execution (assuming the 'nci_gadi' platform is defined in local config)
+qxub exec  --platform nci_gadi --dry -- echo "hello"
+
+# With conda environment (explicitly specifying an alternative environment)
+qxub exec --config laptop_config.yaml --platform nci_gadi --env pytorch -- python train.py
+
+# With resource specifications
+qxub exec --platform nci_gadi --mem 16GB --cpus 8 -- python script.py
+```
+
+### Debugging Remote Execution
+
+```bash
+# Dry run with verbose output to see SSH command
+qxub exec --platform nci_gadi --dry -vvv -- echo "test"
+
+# Output shows the SSH command that will be executed:
+# ssh gadi 'cd /scratch/a56/$USER && eval "$(conda shell.bash hook)" && conda activate qxub && qxub exec --platform nci_gadi ...'
+```
+
+### CI/Automation
+
+```bash
+# GitHub Actions / CI environments
+qxub exec --config ci_config.yaml --platform nci_gadi --walltime "0:05:00" --queue copyq -- echo "CI test"
+
+# Batch processing
+for file in *.py; do
+  qxub exec --config remote_config.yaml --platform nci_gadi --env myenv -- python "$file"
+done
+```
+
 ## With PBS Options
 
 ```bash
