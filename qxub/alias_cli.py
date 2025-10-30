@@ -230,7 +230,7 @@ def _handle_alias_execution(ctx, alias_name: str, command_args: tuple, overrides
     # Execute the command by invoking the main CLI
     try:
         # Remove 'qxub' from the beginning since we're calling it directly
-        main_cli(cmd_args[1:], standalone_mode=False)
+        main_cli.main(cmd_args[1:], standalone_mode=False)
     except SystemExit as e:
         # Re-raise the exit code
         ctx.exit(e.code)

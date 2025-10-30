@@ -541,7 +541,7 @@ def test(alias_name: str):  # pylint: disable=too-many-branches
     # Check subcommand-specific requirements
     if subcommand_type == "sing":
         if "sif" not in subcommand_def and "sif" not in alias_def:
-            sing_config = alias_def[subcommand]
+            sing_config = alias_def[subcommand_type]
             if not sing_config.get("sif"):
                 warnings.append("Singularity container (sif) not specified")
 
