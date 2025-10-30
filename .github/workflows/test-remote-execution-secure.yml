@@ -48,11 +48,18 @@ jobs:
         gcloud secrets versions access latest --secret=atlas_service_account_private_key > ~/.ssh/gadi_ci
         chmod 600 ~/.ssh/gadi_ci
 
+        # Set default username if secret is not available
+        NCI_USER="${{ secrets.NCI_USERNAME }}"
+        if [ -z "$NCI_USER" ]; then
+          NCI_USER="default_user"
+          echo "Warning: NCI_USERNAME secret not found, using default_user"
+        fi
+
         # Create SSH config for v3.3.0 (disable strict host key checking for CI)
         cat >> ~/.ssh/config << EOF
         Host gadi
           HostName gadi.nci.org.au
-          User ${{ secrets.NCI_USERNAME }}
+          User $NCI_USER
           IdentityFile ~/.ssh/gadi_ci
           StrictHostKeyChecking no
           UserKnownHostsFile /dev/null
@@ -69,21 +76,28 @@ jobs:
 
     - name: Create v3.3.0 test configuration
       run: |
+        # Set default project if secret is not available
+        NCI_PROJECT="${{ secrets.NCI_PROJECT }}"
+        if [ -z "$NCI_PROJECT" ]; then
+          NCI_PROJECT="default_project"
+          echo "Warning: NCI_PROJECT secret not found, using default_project"
+        fi
+
         cat > ci_test_config.yaml << EOF
         # CI test configuration for qxub v3.3.0 remote execution (self-hosted)
         defaults:
           platform: nci_gadi
-          project: ${{ secrets.NCI_PROJECT }}
+          project: $NCI_PROJECT
           walltime: "0:05:00"  # Short walltime for CI tests
           mem: 1GB
           cpus: 1
-          storage: gdata/${{ secrets.NCI_PROJECT }}
+          storage: gdata/$NCI_PROJECT
 
         platforms:
           nci_gadi:
             remote:
               host: gadi
-              working_dir: /scratch/${{ secrets.NCI_PROJECT }}/{{user}}
+              working_dir: /scratch/$NCI_PROJECT/{{user}}
               conda_init: |
                 eval "\$(conda shell.bash hook)"
                 conda activate qxub
