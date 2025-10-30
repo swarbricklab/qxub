@@ -62,17 +62,6 @@ jobs:
         EOF
         chmod 600 ~/.ssh/config
 
-    - name: Debug SSH key format
-      run: |
-        echo "=== SSH Key Debug Info ==="
-        echo "Key file size:" $(wc -c < ~/.ssh/gadi_ci)
-        echo "Key file permissions:" $(ls -la ~/.ssh/gadi_ci)
-        echo "Key file first line:" $(head -1 ~/.ssh/gadi_ci)
-        echo "Key file last line:" $(tail -1 ~/.ssh/gadi_ci)
-        echo "Key validation:"
-        ssh-keygen -l -f ~/.ssh/gadi_ci || echo "Key validation failed"
-        echo "=========================="
-
     - name: Test SSH connectivity
       run: |
         echo "Testing SSH connection to Gadi..."
