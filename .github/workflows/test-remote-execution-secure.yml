@@ -1,0 +1,152 @@
+name: Test Remote Execution v3.3.0 (Secure)
+
+on:
+  push:
+    branches: [ main, feature/v3.3.0-remote-execution ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  test-remote-execution-secure:
+    permissions:
+      contents: "read"
+      id-token: "write"
+    runs-on: self-hosted
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install qxub
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        service_account: "qxub-ci-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com"
+        workload_identity_provider: "projects/${{ secrets.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/qxub-workload-identity-pool/providers/github-provider"
+
+    - name: Set up gcloud SDK
+      uses: google-github-actions/setup-gcloud@v2
+      with:
+        version: latest
+
+    - name: Load SSH keys from GCP Secret Manager
+      run: |
+        # Create SSH directory
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+
+        # Load SSH keys from GCP Secret Manager
+        gcloud secrets versions access latest --secret=gadi_ssh_private_key > ~/.ssh/gadi_ci
+        gcloud secrets versions access latest --secret=gadi_ssh_known_hosts >> ~/.ssh/known_hosts
+        chmod 600 ~/.ssh/gadi_ci
+        chmod 644 ~/.ssh/known_hosts
+
+        # Create SSH config for v3.3.0
+        cat >> ~/.ssh/config << EOF
+        Host gadi
+          HostName gadi.nci.org.au
+          User ${{ secrets.NCI_USERNAME }}
+          IdentityFile ~/.ssh/gadi_ci
+          StrictHostKeyChecking yes
+          ServerAliveInterval 60
+          ServerAliveCountMax 3
+          ConnectTimeout 30
+        EOF
+        chmod 600 ~/.ssh/config
+
+    - name: Create v3.3.0 test configuration
+      run: |
+        cat > ci_test_config.yaml << EOF
+        # CI test configuration for qxub v3.3.0 remote execution (self-hosted)
+        defaults:
+          platform: nci_gadi
+          project: ${{ secrets.NCI_PROJECT }}
+          walltime: "0:05:00"  # Short walltime for CI tests
+          mem: 1GB
+          cpus: 1
+          storage: gdata/${{ secrets.NCI_PROJECT }}
+
+        platforms:
+          nci_gadi:
+            remote:
+              host: gadi
+              working_dir: /scratch/${{ secrets.NCI_PROJECT }}/{{user}}
+              conda_init: |
+                eval "\$(conda shell.bash hook)"
+                conda activate qxub
+        EOF
+
+    - name: Test SSH connectivity
+      run: |
+        echo "Testing SSH connection to Gadi..."
+        ssh gadi "echo 'SSH connection successful' && hostname && whoami"
+
+    - name: Test remote qxub installation
+      run: |
+        echo "Testing remote qxub installation..."
+        ssh gadi "conda activate qxub && qxub --version"
+
+    - name: Test remote execution (dry run)
+      run: |
+        echo "Testing standard remote execution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --dry -vv -- echo "Hello from CI remote execution"
+
+    - name: Test delegated remote execution (dry run)
+      run: |
+        echo "Testing delegated remote execution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --dry -vv -- echo "Hello from CI delegated execution"
+
+    - name: Test conda environment execution (dry run)
+      run: |
+        echo "Testing conda environment execution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --dry -vv -- python --version
+
+    - name: Test resource specifications (dry run)
+      run: |
+        echo "Testing resource specifications (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --mem 16GB --cpus 8 --time "2:00:00" --dry -vv -- echo "Resource test"
+
+    - name: Test queue selection (dry run)
+      run: |
+        echo "Testing queue auto-selection (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --queue auto --mem 128GB --dry -vv -- echo "Queue selection test"
+
+    - name: Test template variables (dry run)
+      run: |
+        echo "Testing template variable resolution (dry run)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --dry -vvv -- echo "User: \$USER, Home: \$HOME"
+
+    - name: Test actual job submission
+      if: vars.ENABLE_ACTUAL_REMOTE_TEST == 'true'
+      run: |
+        echo "Testing actual job submission..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --time "0:01:00" --queue copyq -vv -- echo "Actual CI job submission"
+
+    - name: Test conda environment with real submission
+      if: vars.ENABLE_ACTUAL_REMOTE_TEST == 'true'
+      run: |
+        echo "Testing execution with conda environment (real submission)..."
+        qxub exec --config ci_test_config.yaml --platform nci_gadi --env qxub --time "0:01:00" --queue copyq -vv -- python --version
+
+    - name: Clean up SSH keys
+      if: always()
+      run: |
+        # Remove SSH keys for security
+        rm -f ~/.ssh/gadi_ci ~/.ssh/config
+        # Keep known_hosts as it's not sensitive
+
+    - name: Test local functionality
+      run: |
+        echo "Testing local qxub functionality..."
+        qxub --version
+        qxub --help
+        echo "Local tests completed successfully"
