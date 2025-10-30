@@ -10,16 +10,17 @@ on:
 jobs:
   test-remote-execution:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
     env:
       HAS_SSH_KEY: ${{ secrets.GADI_SSH_PRIVATE_KEY != '' }}
       ENABLE_REAL_TESTS: ${{ secrets.ENABLE_ACTUAL_REMOTE_TEST == 'true' }}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
       with:
         python-version: '3.10'
 

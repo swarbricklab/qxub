@@ -1,0 +1,39 @@
+name: "CodeQL Security Scan"
+
+on:
+  push:
+    branches: [ "main", "feature/v3.3.0-remote-execution" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '30 6 * * 1'  # Weekly scan on Mondays at 6:30 AM Sydney time
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'python' ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@eb055d739abdc2e8de2e5f4ba1a8b246daa779aa # v3.26.0
+      with:
+        languages: ${{ matrix.language }}
+        # Build mode is not needed for Python analysis
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@eb055d739abdc2e8de2e5f4ba1a8b246daa779aa # v3.26.0
+      with:
+        category: "/language:${{matrix.language}}"
