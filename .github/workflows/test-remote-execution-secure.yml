@@ -30,8 +30,8 @@ jobs:
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@8254fb75a33b976a221574d287e93919e6a36f70 # v2.1.6
       with:
-        service_account: "qxub-ci-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com"
-        workload_identity_provider: "projects/${{ secrets.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/qxub-workload-identity-pool/providers/github-provider"
+        service_account: "grunner-ci-sa@${{ secrets.PROJECT_ID }}.iam.gserviceaccount.com"
+        workload_identity_provider: "projects/${{ secrets.PROJECT_NUMBER }}/locations/global/workloadIdentityPools/hpci-workload-identity-pool/providers/github-provider"
 
     - name: Set up gcloud SDK
       uses: google-github-actions/setup-gcloud@f0990588f1e5b5af6827153b93673613abdc6ec7 # v2.1.1
