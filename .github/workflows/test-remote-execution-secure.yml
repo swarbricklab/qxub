@@ -44,9 +44,9 @@ jobs:
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
 
-        # Load SSH keys from GCP Secret Manager
-        gcloud secrets versions access latest --secret=gadi_ssh_private_key > ~/.ssh/gadi_ci
-        gcloud secrets versions access latest --secret=gadi_ssh_known_hosts >> ~/.ssh/known_hosts
+        # Load SSH keys from GCP Secret Manager (using existing atlas secrets)
+        gcloud secrets versions access latest --secret=atlas_service_account_private_key > ~/.ssh/gadi_ci
+        gcloud secrets versions access latest --secret=atlas_service_account_pub_key >> ~/.ssh/known_hosts
         chmod 600 ~/.ssh/gadi_ci
         chmod 644 ~/.ssh/known_hosts
 
