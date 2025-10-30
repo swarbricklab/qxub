@@ -808,8 +808,8 @@ def start_background_resource_collection(job_id, joblog_path, foreground=False):
         collect_resources_background()
         return None
 
-    # Start the background thread
-    thread = threading.Thread(target=collect_resources_background, daemon=True)
+    # Start the background thread (non-daemon so it survives process exit)
+    thread = threading.Thread(target=collect_resources_background, daemon=False)
     thread.start()
 
     # Return the thread object so we can reference it
