@@ -44,19 +44,18 @@ jobs:
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
 
-        # Load SSH keys from GCP Secret Manager (using existing atlas secrets)
+        # Load SSH private key from GCP Secret Manager (using existing atlas secret)
         gcloud secrets versions access latest --secret=atlas_service_account_private_key > ~/.ssh/gadi_ci
-        gcloud secrets versions access latest --secret=atlas_service_account_pub_key >> ~/.ssh/known_hosts
         chmod 600 ~/.ssh/gadi_ci
-        chmod 644 ~/.ssh/known_hosts
 
-        # Create SSH config for v3.3.0
+        # Create SSH config for v3.3.0 (disable strict host key checking for CI)
         cat >> ~/.ssh/config << EOF
         Host gadi
           HostName gadi.nci.org.au
           User ${{ secrets.NCI_USERNAME }}
           IdentityFile ~/.ssh/gadi_ci
-          StrictHostKeyChecking yes
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
           ServerAliveInterval 60
           ServerAliveCountMax 3
           ConnectTimeout 30
