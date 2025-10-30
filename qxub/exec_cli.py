@@ -126,7 +126,9 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Single module to load (can be used multiple times)",
     multiple=True,
 )
-@click.option("--mods", "--modules", help="Space-separated list of modules to load")
+@click.option(
+    "--mods", "--modules", help="Comma or space-separated list of modules to load"
+)
 @click.option("--sif", "--container", help="Singularity container (.sif file) to use")
 @click.option(
     "--default", is_flag=True, help="Use default execution (no special environment)"
@@ -435,7 +437,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         # Combine --mod and --mods options
         modules = list(options["mod"]) if options["mod"] else []
         if options["mods"]:
-            modules.extend(options["mods"].split())
+            # Support both comma and space separation
+            import re
+
+            # Split by comma or space, filter out empty strings
+            module_list = re.split(r"[,\s]+", options["mods"])
+            modules.extend([m for m in module_list if m])
         execution_context = ExecutionContext("module", modules, "module")
     elif options["sif"]:
         execution_context = ExecutionContext(
