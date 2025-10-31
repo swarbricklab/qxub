@@ -29,7 +29,7 @@ jobs:
       - name: Set up HPCI authentication
         uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
         with:
-          submodule_token: ${{ secrets.NCI_SUBMODULE_ACCESS_TOKEN }}
+          token: ${{ secrets.SUBMODULE_TOKEN }}
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
           registry_sa: ${{ secrets.GCP_REGISTRY_SA }}
