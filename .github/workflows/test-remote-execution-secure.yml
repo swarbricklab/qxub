@@ -75,6 +75,18 @@ jobs:
                 conda activate qxub
         EOF
 
+    - name: Add Gadi host key to known_hosts
+      run: |
+        echo "Adding Gadi SSH host keys to known_hosts..."
+        mkdir -p ~/.ssh
+        touch ~/.ssh/known_hosts
+        # Prefer ED25519; fall back to RSA if needed (ignore errors for unavailable key types)
+        ssh-keyscan -T 10 -t ed25519 gadi.nci.org.au >> ~/.ssh/known_hosts 2>/dev/null || true
+        ssh-keyscan -T 10 -t rsa     gadi.nci.org.au >> ~/.ssh/known_hosts 2>/dev/null || true
+        # Also add the short alias in case platform config changes in future
+        ssh-keyscan -T 10 -t ed25519 gadi            >> ~/.ssh/known_hosts 2>/dev/null || true
+        ssh-keyscan -T 10 -t rsa     gadi            >> ~/.ssh/known_hosts 2>/dev/null || true
+
     - name: Test remote execution (dry run)
       run: |
         echo "Testing standard remote execution (dry run)..."
