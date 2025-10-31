@@ -40,10 +40,14 @@ jobs:
 
     - name: Load SSH keys from GCP Secret Manager
       run: |
-        # Load SSH keys using the same pattern as xenium (direct files, not ~/.ssh/)
-        gcloud secrets versions access latest --secret=atlas_service_account_pub_key > atlas_key.pub
-        gcloud secrets versions access latest --secret=atlas_service_account_private_key > atlas_key
-        chmod 600 atlas_key*
+        # Create SSH directory
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+
+        # Load SSH private key directly to ~/.ssh (revert to working approach)
+        # Fix potential line ending and whitespace issues with tr and proper handling
+        gcloud secrets versions access latest --secret=atlas_service_account_private_key | tr -d '\r' | sed '/^$/d' > ~/.ssh/gadi_ci
+        chmod 600 ~/.ssh/gadi_ci
 
         # Set default username if secret is not available
         NCI_USER="${{ secrets.NCI_USERNAME }}"
@@ -51,14 +55,6 @@ jobs:
           NCI_USER="default_user"
           echo "Warning: NCI_USERNAME secret not found, using default_user"
         fi
-
-        # Create SSH directory and config for traditional SSH commands
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-
-        # Copy the key to ~/.ssh for direct ssh commands in tests
-        cp atlas_key ~/.ssh/gadi_ci
-        chmod 600 ~/.ssh/gadi_ci
 
         # Create SSH config for v3.3.0 (disable strict host key checking for CI)
         cat >> ~/.ssh/config << EOF
@@ -163,9 +159,8 @@ jobs:
     - name: Clean up SSH keys
       if: always()
       run: |
-        # Remove SSH keys for security (both formats)
+        # Remove SSH keys for security
         rm -f ~/.ssh/gadi_ci ~/.ssh/config
-        rm -f atlas_key atlas_key.pub
         # Keep known_hosts as it's not sensitive
 
     - name: Test local functionality
