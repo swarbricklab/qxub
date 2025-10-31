@@ -38,51 +38,18 @@ jobs:
       with:
         version: latest
 
-    - name: Load SSH keys from GCP Secret Manager
-      run: |
-        # Create SSH directory
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-
-        # Load SSH private key directly to ~/.ssh (revert to working approach)
-        # Fix potential line ending and whitespace issues with tr and proper handling
-        gcloud secrets versions access latest --secret=atlas_service_account_private_key | tr -d '\r' | sed '/^$/d' > ~/.ssh/gadi_ci
-        chmod 600 ~/.ssh/gadi_ci
-
-        # Set default username if secret is not available
-        NCI_USER="${{ secrets.NCI_USERNAME }}"
-        if [ -z "$NCI_USER" ]; then
-          NCI_USER="default_user"
-          echo "Warning: NCI_USERNAME secret not found, using default_user"
-        fi
-
-        # Create SSH config for v3.3.0 (disable strict host key checking for CI)
-        cat > ~/.ssh/config << EOF
-        Host gadi gadi.nci.org.au
-          HostName gadi.nci.org.au
-          User $NCI_USER
-          IdentityFile ~/.ssh/gadi_ci
-          StrictHostKeyChecking no
-          UserKnownHostsFile /dev/null
-          ServerAliveInterval 60
-          ServerAliveCountMax 3
-          ConnectTimeout 30
-          HostKeyAlgorithms +ssh-rsa,ssh-ed25519
-          PubkeyAcceptedKeyTypes +ssh-rsa,ssh-ed25519
-          LogLevel ERROR
-        EOF
-        chmod 600 ~/.ssh/config
-
-    # Skip SSH connectivity test - let qxub handle SSH connection directly
-    # - name: Test SSH connectivity
-    #   run: |
-    #     echo "Testing SSH connection to Gadi..."
-    #     ssh gadi "echo 'SSH connection successful' && hostname && whoami"
+    - name: Set up HPCI authentication
+      uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
+      with:
+        submodule_token: ${{ secrets.SUBMODULE_TOKEN }}
+        project_id: ${{ secrets.PROJECT_ID }}
+        project_number: ${{ secrets.PROJECT_NUMBER }}
+        registry_sa: ${{ secrets.REGISTRY_SA }}
 
     - name: Create v3.3.0 test configuration
       run: |
         # Set default project if secret is not available
-        NCI_PROJECT=""
+        NCI_PROJECT="${{ secrets.NCI_PROJECT }}"
         if [ -z "$NCI_PROJECT" ]; then
           NCI_PROJECT="default_project"
           echo "Warning: NCI_PROJECT secret not found, using default_project"
@@ -107,30 +74,6 @@ jobs:
                 eval "\$(conda shell.bash hook)"
                 conda activate qxub
         EOF
-
-    - name: Verify SSH configuration
-      run: |
-        echo "SSH config contents:"
-        cat ~/.ssh/config
-        echo ""
-        echo "SSH key permissions:"
-        ls -la ~/.ssh/gadi_ci
-        echo ""
-        echo "Testing SSH connection with verbose output:"
-        ssh -v gadi "echo 'SSH test successful'" 2>&1 | head -30 || echo "SSH connection failed as expected, but we can see the detailed error"
-        echo ""
-        echo "Testing SSH with exact qxub command format:"
-        ssh gadi "echo 'SSH test for qxub format'" || echo "qxub-style SSH failed - this indicates the issue"    # Skip SSH connectivity test - let qxub handle SSH connection directly
-    # - name: Test SSH connectivity
-    #   run: |
-    #     echo "Testing SSH connection to Gadi..."
-    #     ssh gadi "echo 'SSH connection successful' && hostname && whoami"
-
-    # Skip remote qxub installation test - also uses direct SSH
-    # - name: Test remote qxub installation
-    #   run: |
-    #     echo "Testing remote qxub installation..."
-    #     ssh gadi "conda activate qxub && qxub --version"
 
     - name: Test remote execution (dry run)
       run: |
@@ -177,9 +120,8 @@ jobs:
     - name: Clean up SSH keys
       if: always()
       run: |
-        # Remove SSH keys for security
-        rm -f ~/.ssh/gadi_ci ~/.ssh/config
-        # Keep known_hosts as it's not sensitive
+        # Remove SSH keys for security (handled by setup-hpci action)
+        rm -f atlas_key atlas_key.pub
 
     - name: Test local functionality
       run: |
