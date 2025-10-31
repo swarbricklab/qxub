@@ -57,8 +57,8 @@ jobs:
         fi
 
         # Create SSH config for v3.3.0 (disable strict host key checking for CI)
-        cat >> ~/.ssh/config << EOF
-        Host gadi
+        cat > ~/.ssh/config << EOF
+        Host gadi gadi.nci.org.au
           HostName gadi.nci.org.au
           User $NCI_USER
           IdentityFile ~/.ssh/gadi_ci
@@ -69,6 +69,7 @@ jobs:
           ConnectTimeout 30
           HostKeyAlgorithms +ssh-rsa,ssh-ed25519
           PubkeyAcceptedKeyTypes +ssh-rsa,ssh-ed25519
+          LogLevel ERROR
         EOF
         chmod 600 ~/.ssh/config
 
@@ -117,8 +118,9 @@ jobs:
         echo ""
         echo "Testing SSH connection with verbose output:"
         ssh -v gadi "echo 'SSH test successful'" 2>&1 | head -30 || echo "SSH connection failed as expected, but we can see the detailed error"
-
-    # Skip SSH connectivity test - let qxub handle SSH connection directly
+        echo ""
+        echo "Testing SSH with exact qxub command format:"
+        ssh gadi "echo 'SSH test for qxub format'" || echo "qxub-style SSH failed - this indicates the issue"    # Skip SSH connectivity test - let qxub handle SSH connection directly
     # - name: Test SSH connectivity
     #   run: |
     #     echo "Testing SSH connection to Gadi..."
