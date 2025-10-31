@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: 'Command to execute remotely'
+        description: 'Command to run remotely (will use qxub exec)'
+        required: true
+        default: 'hostname'
+      queue:
+        description: 'PBS queue to use'
         required: false
-        default: 'hostname && echo "Hello from NCI"'
+        default: 'copyq'
+      walltime:
+        description: 'Job walltime'
+        required: false
+        default: '0:01:00'
   push:
     branches: [ feature/v3.3.0-remote-execution ]
 
@@ -18,61 +26,67 @@ jobs:
     runs-on: self-hosted
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Install qxub locally on runner
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Set up HPCI authentication
-      uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
-      with:
-        submodule_token: ${{ secrets.SUBMODULE_TOKEN }}
-        project_id: ${{ secrets.PROJECT_ID }}
-        project_number: ${{ secrets.PROJECT_NUMBER }}
-        registry_sa: ${{ secrets.REGISTRY_SA }}
+      - name: Install qxub locally on runner
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
 
-    - name: Configure qxub for remote execution
-      run: |
-        mkdir -p ~/.config/qxub
-        cat > ~/.config/qxub/config.yaml << 'EOF'
-        defaults:
-          platform: gadi
-          project: a56
+      - name: Set up HPCI authentication
+        uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
+        with:
+          submodule_token: ${{ secrets.NCI_SUBMODULE_ACCESS_TOKEN }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
+          registry_sa: ${{ secrets.GCP_REGISTRY_SA }}
 
-        platforms:
-          gadi:
-            remote:
-              host: ${{ secrets.USER_NAME }}@gadi.nci.org.au
-              ssh_key: atlas_key
-              working_dir: /scratch/a56/${{ secrets.USER_NAME }}/ci-jobs
-              conda_init: |
-                eval "$(conda shell.bash hook)"
-                conda activate qxub
-        EOF
-        echo "Configuration created:"
-        cat ~/.config/qxub/config.yaml
+      - name: Add Gadi host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -t ed25519 gadi.nci.org.au >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
 
-    - name: Execute command remotely via qxub
-      run: |
-        # Get command from input or use default
-        COMMAND="${{ github.event.inputs.command }}"
-        if [ -z "$COMMAND" ]; then
-          COMMAND="hostname && echo 'Hello from NCI'"
-        fi
+      - name: Configure qxub for remote execution
+        run: |
+          mkdir -p ~/.config/qxub
+          cat > ~/.config/qxub/config.yaml << 'EOFCONFIG'
+          defaults:
+            platform: gadi
+            project: a56
 
-        echo "Executing remotely: $COMMAND"
-        qxub exec --platform gadi --queue copyq --time "0:01:00" --storage gdata/a56 -vv -- $COMMAND
+          platforms:
+            gadi:
+              remote:
+                host: ${{ secrets.USER_NAME }}@gadi.nci.org.au
+                ssh_key: atlas_key
+                working_dir: /scratch/a56/${{ secrets.USER_NAME }}/ci-jobs
+                conda_init: |
+                  eval "$(conda shell.bash hook)"
+                  conda activate qxub
+          EOFCONFIG
 
-    - name: Test with conda environment
-      run: |
-        echo "Testing execution with conda environment..."
-        qxub exec --platform gadi --env qxub --queue copyq --time "0:01:00" --storage gdata/a56 -vv -- python --version
+      - name: Execute qxub remote command
+        run: |
+          QUEUE="${{ github.event.inputs.queue || 'copyq' }}"
+          WALLTIME="${{ github.event.inputs.walltime || '0:01:00' }}"
+          COMMAND="${{ github.event.inputs.command || 'hostname' }}"
 
-    - name: Clean up
-      if: always()
-      run: |
-        rm -f atlas_key atlas_key.pub
-        echo "✅ Remote execution completed and SSH keys cleaned up"
+          echo "Executing command on NCI Gadi via qxub:"
+          echo "  Queue: $QUEUE"
+          echo "  Walltime: $WALLTIME"
+          echo "  Command: $COMMAND"
+
+          qxub exec --platform gadi --queue "$QUEUE" --time "$WALLTIME" -vv -- "$COMMAND"
+
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f atlas_key atlas_key.pub
+          echo "✅ Remote execution completed and SSH keys cleaned up"
