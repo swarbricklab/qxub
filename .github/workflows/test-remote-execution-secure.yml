@@ -105,10 +105,11 @@ jobs:
                 conda activate qxub
         EOF
 
-    - name: Test SSH connectivity
-      run: |
-        echo "Testing SSH connection to Gadi..."
-        ssh gadi "echo 'SSH connection successful' && hostname && whoami"
+    # Skip SSH connectivity test - let qxub handle SSH connection directly
+    # - name: Test SSH connectivity
+    #   run: |
+    #     echo "Testing SSH connection to Gadi..."
+    #     ssh gadi "echo 'SSH connection successful' && hostname && whoami"
 
     - name: Test remote qxub installation
       run: |
