@@ -68,7 +68,7 @@ jobs:
         platforms:
           nci_gadi:
             remote:
-              host: gadi
+              host: gadi.nci.org.au
               working_dir: /scratch/$NCI_PROJECT/{{user}}
               conda_init: |
                 eval "\$(conda shell.bash hook)"
