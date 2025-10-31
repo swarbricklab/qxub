@@ -67,6 +67,8 @@ jobs:
           ServerAliveInterval 60
           ServerAliveCountMax 3
           ConnectTimeout 30
+          HostKeyAlgorithms +ssh-rsa,ssh-ed25519
+          PubkeyAcceptedKeyTypes +ssh-rsa,ssh-ed25519
         EOF
         chmod 600 ~/.ssh/config
 
@@ -79,7 +81,7 @@ jobs:
     - name: Create v3.3.0 test configuration
       run: |
         # Set default project if secret is not available
-        NCI_PROJECT="${{ secrets.NCI_PROJECT }}"
+        NCI_PROJECT=""
         if [ -z "$NCI_PROJECT" ]; then
           NCI_PROJECT="default_project"
           echo "Warning: NCI_PROJECT secret not found, using default_project"
@@ -104,6 +106,17 @@ jobs:
                 eval "\$(conda shell.bash hook)"
                 conda activate qxub
         EOF
+
+    - name: Verify SSH configuration
+      run: |
+        echo "SSH config contents:"
+        cat ~/.ssh/config
+        echo ""
+        echo "SSH key permissions:"
+        ls -la ~/.ssh/gadi_ci
+        echo ""
+        echo "Testing SSH connection with verbose output:"
+        ssh -v gadi "echo 'SSH test successful'" 2>&1 | head -30 || echo "SSH connection failed as expected, but we can see the detailed error"
 
     # Skip SSH connectivity test - let qxub handle SSH connection directly
     # - name: Test SSH connectivity
