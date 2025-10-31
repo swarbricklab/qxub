@@ -30,9 +30,9 @@ jobs:
         uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
         with:
           submodule_token: ${{ secrets.SUBMODULE_TOKEN }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
-          registry_sa: ${{ secrets.GCP_REGISTRY_SA }}
+          project_id: ${{ secrets.PROJECT_ID }}
+          project_number: ${{ secrets.PROJECT_NUMBER }}
+          registry_sa: ${{ secrets.REGISTRY_SA }}
 
       - name: Add Gadi host key
         run: |
