@@ -25,14 +25,15 @@ jobs:
     - name: Test SSH connection to NCI
       run: |
         echo "Testing SSH connection to Gadi..."
-        ssh -i atlas_key -o StrictHostKeyChecking=accept-new \
+        echo "Using SSH key: ${{ github.workspace }}/atlas_key"
+        ssh -i "${{ github.workspace }}/atlas_key" -o StrictHostKeyChecking=accept-new \
           ${{ secrets.USER_NAME }}@gadi.nci.org.au \
           "hostname && echo 'Connection successful!'"
 
     - name: Test qxub availability on NCI
       run: |
         echo "Checking if qxub is available on NCI..."
-        ssh -i atlas_key -o StrictHostKeyChecking=accept-new \
+        ssh -i "${{ github.workspace }}/atlas_key" -o StrictHostKeyChecking=accept-new \
           ${{ secrets.USER_NAME }}@gadi.nci.org.au \
           'bash -l -c "conda activate qxub && which qxub && qxub --version"'
 

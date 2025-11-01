@@ -47,6 +47,27 @@ jobs:
           project_number: ${{ secrets.PROJECT_NUMBER }}
           registry_sa: ${{ secrets.REGISTRY_SA }}
 
+      - name: Debug SSH key format
+        run: |
+          echo "=== SSH Key Debugging ==="
+          echo "Key file size and type:"
+          ls -la atlas_key* || echo "No atlas_key files found"
+
+          echo "Key file format check:"
+          file atlas_key || echo "Could not check key file format"
+
+          echo "Key file contents (first few lines):"
+          head -3 atlas_key || echo "Could not read key file"
+
+          echo "Key file contents (last few lines):"
+          tail -3 atlas_key || echo "Could not read key file"
+
+          echo "SSH key validation:"
+          ssh-keygen -l -f atlas_key || echo "Key validation failed"
+
+          echo "Key permissions:"
+          stat -c "%a %n" atlas_key* || echo "Could not check permissions"
+
       - name: Configure SSH for Gadi access
         run: |
           mkdir -p ~/.ssh
@@ -68,6 +89,27 @@ jobs:
 
           echo "SSH config created:"
           cat ~/.ssh/config
+
+      - name: Test SSH key manually
+        run: |
+          echo "=== Manual SSH Key Test ==="
+          echo "Testing SSH connection with atlas_key..."
+
+          # Test the key directly
+          ssh -i ${{ github.workspace }}/atlas_key \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              ${{ secrets.USER_NAME }}@gadi.nci.org.au \
+              "echo 'SSH connection successful!' && hostname" || echo "Direct SSH test failed with exit code $?"
+
+          echo "Testing SSH with config file..."
+          ssh -F ~/.ssh/config \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              gadi.nci.org.au \
+              "echo 'SSH config test successful!' && hostname" || echo "SSH config test failed with exit code $?"
 
       - name: Configure qxub for remote execution
         run: |
