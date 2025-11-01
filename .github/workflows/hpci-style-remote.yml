@@ -50,6 +50,12 @@ jobs:
       - name: Debug SSH key format
         run: |
           echo "=== SSH Key Debugging ==="
+          echo "SSH client version:"
+          ssh -V || echo "Could not get SSH version"
+
+          echo "OpenSSL version:"
+          openssl version || echo "Could not get OpenSSL version"
+
           echo "Key file size and type:"
           ls -la atlas_key* || echo "No atlas_key files found"
 
@@ -67,6 +73,14 @@ jobs:
 
           echo "Key permissions:"
           stat -c "%a %n" atlas_key* || echo "Could not check permissions"
+
+          echo "Converting key to traditional format for compatibility..."
+          # Try to convert the key to the traditional format that older SSH clients can read
+          cp atlas_key atlas_key.backup
+          ssh-keygen -p -m PEM -f atlas_key -N "" -P "" || echo "Key conversion failed"
+
+          echo "Testing converted key:"
+          ssh-keygen -l -f atlas_key || echo "Converted key validation failed"
 
       - name: Configure SSH for Gadi access
         run: |
@@ -95,12 +109,14 @@ jobs:
           echo "=== Manual SSH Key Test ==="
           echo "Testing SSH connection with atlas_key..."
 
-          # Test the key directly
+          # Test the key directly with additional compatibility options
           ssh -i ${{ github.workspace }}/atlas_key \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
+              -o PubkeyAcceptedKeyTypes=+ssh-rsa,ssh-ed25519 \
+              -o HostKeyAlgorithms=+ssh-rsa,ssh-ed25519 \
               ${{ secrets.USER_NAME }}@gadi.nci.org.au \
               "echo 'SSH connection successful!' && hostname" || echo "Direct SSH test failed with exit code $?"
 
@@ -108,8 +124,19 @@ jobs:
           ssh -F ~/.ssh/config \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
+              -o PubkeyAcceptedKeyTypes=+ssh-rsa,ssh-ed25519 \
+              -o HostKeyAlgorithms=+ssh-rsa,ssh-ed25519 \
               gadi.nci.org.au \
               "echo 'SSH config test successful!' && hostname" || echo "SSH config test failed with exit code $?"
+
+          echo "Trying with verbose SSH output for debugging..."
+          ssh -vvv -i ${{ github.workspace }}/atlas_key \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=~/.ssh/known_hosts \
+              ${{ secrets.USER_NAME }}@gadi.nci.org.au \
+              "hostname" 2>&1 | head -30 || echo "Verbose SSH test completed"
 
       - name: Configure qxub for remote execution
         run: |
