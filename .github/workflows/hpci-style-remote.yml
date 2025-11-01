@@ -98,6 +98,39 @@ jobs:
           ssh-add atlas_key 2>&1 | head -5 || echo "ssh-add failed"
           ssh-add -l || echo "No keys in agent"
 
+      - name: Work around SSH key compatibility issue
+        run: |
+          echo "=== SSH Key Compatibility Investigation ==="
+
+          # The issue is OpenSSL 3.x libcrypto compatibility with OpenSSH key format
+          echo "Investigating OpenSSL/SSH compatibility options..."
+
+          # Check OpenSSL configuration
+          echo "OpenSSL version and config:"
+          openssl version -a
+          echo ""
+
+          # Try setting OpenSSL legacy provider (may help with older key formats)
+          echo "Testing with OpenSSL legacy provider..."
+          export OPENSSL_CONF=/etc/ssl/openssl.cnf
+
+          # Try to create a compatible version using different SSH options
+          echo "Attempting key format debugging..."
+
+          # Check if we can read the key with specific OpenSSL settings
+          openssl pkey -in atlas_key -noout -text 2>&1 || echo "OpenSSL pkey reading failed"
+
+          # Try with SSH_USE_STRONG_RNG=0 (sometimes helps with entropy issues)
+          echo "Testing with SSH_USE_STRONG_RNG=0..."
+          SSH_USE_STRONG_RNG=0 ssh-keygen -l -f atlas_key 2>&1 || echo "SSH_USE_STRONG_RNG=0 failed"
+
+          # Try different SSH client debugging
+          echo "Testing SSH with different debugging levels..."
+          ssh -o LogLevel=DEBUG3 -o BatchMode=yes -o ConnectTimeout=5 \
+              -i atlas_key \
+              ${{ secrets.USER_NAME }}@gadi.nci.org.au \
+              "echo test" 2>&1 | head -50 || echo "SSH debug test completed"
+
       - name: Configure SSH for Gadi access
         run: |
           mkdir -p ~/.ssh
@@ -125,48 +158,15 @@ jobs:
           echo "=== Manual SSH Key Test ==="
           echo "Testing SSH connection with atlas_key..."
 
-          # Test the key directly with additional compatibility options
-          ssh -i ${{ github.workspace }}/atlas_key \
-              -o BatchMode=yes \
-              -o ConnectTimeout=10 \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile=~/.ssh/known_hosts \
-              -o PubkeyAcceptedKeyTypes=+ssh-rsa,ssh-ed25519 \
-              -o HostKeyAlgorithms=+ssh-rsa,ssh-ed25519 \
-              ${{ secrets.USER_NAME }}@gadi.nci.org.au \
-              "echo 'SSH connection successful!' && hostname" || echo "Direct SSH test failed with exit code $?"
-
-          echo "Testing SSH with config file..."
-          ssh -F ~/.ssh/config \
-              -o BatchMode=yes \
-              -o ConnectTimeout=10 \
-              -o PubkeyAcceptedKeyTypes=+ssh-rsa,ssh-ed25519 \
-              -o HostKeyAlgorithms=+ssh-rsa,ssh-ed25519 \
-              gadi.nci.org.au \
-              "echo 'SSH config test successful!' && hostname" || echo "SSH config test failed with exit code $?"
-
-          echo "Trying with verbose SSH output for debugging..."
-          ssh -vvv -i ${{ github.workspace }}/atlas_key \
+          # Test with environment variables that might help with OpenSSL 3.x compatibility
+          echo "Testing with SSH_USE_STRONG_RNG=0..."
+          SSH_USE_STRONG_RNG=0 ssh -i ${{ github.workspace }}/atlas_key \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               ${{ secrets.USER_NAME }}@gadi.nci.org.au \
-              "hostname" 2>&1 | head -30 || echo "Verbose SSH test completed"
-
-          echo "Testing with ssh-agent (if it was started in previous step)..."
-          # Check if ssh-agent is running and has our key
-          if ssh-add -l 2>/dev/null | grep -q "hpci_key"; then
-            echo "Key found in ssh-agent, testing connection..."
-            ssh -o BatchMode=yes \
-                -o ConnectTimeout=10 \
-                -o StrictHostKeyChecking=yes \
-                -o UserKnownHostsFile=~/.ssh/known_hosts \
-                ${{ secrets.USER_NAME }}@gadi.nci.org.au \
-                "echo 'SSH agent test successful!' && hostname" || echo "SSH agent test failed with exit code $?"
-          else
-            echo "No key found in ssh-agent or agent not running"
-          fi
+              "echo 'SSH_USE_STRONG_RNG=0 test successful!' && hostname" || echo "SSH_USE_STRONG_RNG=0 test failed with exit code $?"
 
       - name: Configure qxub for remote execution
         run: |
