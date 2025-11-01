@@ -77,10 +77,26 @@ jobs:
           echo "Converting key to traditional format for compatibility..."
           # Try to convert the key to the traditional format that older SSH clients can read
           cp atlas_key atlas_key.backup
-          ssh-keygen -p -m PEM -f atlas_key -N "" -P "" || echo "Key conversion failed"
 
-          echo "Testing converted key:"
-          ssh-keygen -l -f atlas_key || echo "Converted key validation failed"
+          # Alternative approach: Try to extract and re-create the key in PEM format
+          # using the public key to verify we have the right private key
+          if ssh-keygen -y -f atlas_key > atlas_key_extracted.pub 2>/dev/null; then
+            echo "Successfully extracted public key"
+            # Compare with the provided public key
+            if cmp -s atlas_key.pub atlas_key_extracted.pub; then
+              echo "Public keys match - private key is valid"
+            else
+              echo "WARNING: Public keys don't match"
+            fi
+          else
+            echo "Could not extract public key from private key"
+          fi
+
+          # Try using ssh-agent to load the key (bypasses direct file loading)
+          echo "Testing with ssh-agent..."
+          eval $(ssh-agent -s)
+          ssh-add atlas_key 2>&1 | head -5 || echo "ssh-add failed"
+          ssh-add -l || echo "No keys in agent"
 
       - name: Configure SSH for Gadi access
         run: |
@@ -137,6 +153,20 @@ jobs:
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               ${{ secrets.USER_NAME }}@gadi.nci.org.au \
               "hostname" 2>&1 | head -30 || echo "Verbose SSH test completed"
+
+          echo "Testing with ssh-agent (if it was started in previous step)..."
+          # Check if ssh-agent is running and has our key
+          if ssh-add -l 2>/dev/null | grep -q "hpci_key"; then
+            echo "Key found in ssh-agent, testing connection..."
+            ssh -o BatchMode=yes \
+                -o ConnectTimeout=10 \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile=~/.ssh/known_hosts \
+                ${{ secrets.USER_NAME }}@gadi.nci.org.au \
+                "echo 'SSH agent test successful!' && hostname" || echo "SSH agent test failed with exit code $?"
+          else
+            echo "No key found in ssh-agent or agent not running"
+          fi
 
       - name: Configure qxub for remote execution
         run: |
