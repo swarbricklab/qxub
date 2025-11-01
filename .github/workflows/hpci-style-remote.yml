@@ -24,8 +24,31 @@ jobs:
       contents: "read"
       id-token: "write"
     runs-on: self-hosted
+    container:
+      image: ghcr.io/swarbricklab/qxub-runner:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
+      - name: Verify container environment
+        run: |
+          echo "=== Container Environment Verification ==="
+          echo "Operating system:"
+          cat /etc/os-release | head -3
+          echo ""
+          echo "SSH client version:"
+          ssh -V
+          echo ""
+          echo "OpenSSL version:"
+          openssl version
+          echo ""
+          echo "Python version:"
+          python --version
+          echo ""
+          echo "Pre-installed packages:"
+          pip list | grep -E "(click|pyyaml|requests)" || echo "Core packages available"
+          echo "=== Environment verified ==="
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -34,10 +57,15 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install qxub locally on runner
+      - name: Install qxub in container
         run: |
+          echo "Installing qxub in container environment..."
           python -m pip install --upgrade pip
           pip install -e .
+
+          echo "Verifying qxub installation:"
+          qxub --version
+          echo "qxub installation completed"
 
       - name: Set up HPCI authentication
         uses: swarbricklab/hpci-scripts/.github/actions/setup-hpci@main
@@ -47,89 +75,24 @@ jobs:
           project_number: ${{ secrets.PROJECT_NUMBER }}
           registry_sa: ${{ secrets.REGISTRY_SA }}
 
-      - name: Debug SSH key format
+      - name: Debug SSH key compatibility
         run: |
-          echo "=== SSH Key Debugging ==="
-          echo "SSH client version:"
-          ssh -V || echo "Could not get SSH version"
+          echo "=== SSH Key Compatibility Check ==="
+          echo "Container SSH/OpenSSL versions (should be compatible):"
+          ssh -V
+          openssl version
+          echo ""
 
-          echo "OpenSSL version:"
-          openssl version || echo "Could not get OpenSSL version"
-
-          echo "Key file size and type:"
+          echo "Key file information:"
           ls -la atlas_key* || echo "No atlas_key files found"
-
-          echo "Key file format check:"
-          file atlas_key || echo "Could not check key file format"
-
-          echo "Key file contents (first few lines):"
-          head -3 atlas_key || echo "Could not read key file"
-
-          echo "Key file contents (last few lines):"
-          tail -3 atlas_key || echo "Could not read key file"
 
           echo "SSH key validation:"
           ssh-keygen -l -f atlas_key || echo "Key validation failed"
 
-          echo "Key permissions:"
-          stat -c "%a %n" atlas_key* || echo "Could not check permissions"
-
-          echo "Converting key to traditional format for compatibility..."
-          # Try to convert the key to the traditional format that older SSH clients can read
-          cp atlas_key atlas_key.backup
-
-          # Alternative approach: Try to extract and re-create the key in PEM format
-          # using the public key to verify we have the right private key
-          if ssh-keygen -y -f atlas_key > atlas_key_extracted.pub 2>/dev/null; then
-            echo "Successfully extracted public key"
-            # Compare with the provided public key
-            if cmp -s atlas_key.pub atlas_key_extracted.pub; then
-              echo "Public keys match - private key is valid"
-            else
-              echo "WARNING: Public keys don't match"
-            fi
-          else
-            echo "Could not extract public key from private key"
-          fi
-
-          # Try using ssh-agent to load the key (bypasses direct file loading)
-          echo "Testing with ssh-agent..."
+          echo "Testing ssh-agent compatibility:"
           eval $(ssh-agent -s)
-          ssh-add atlas_key 2>&1 | head -5 || echo "ssh-add failed"
+          ssh-add atlas_key 2>&1 | head -3 || echo "ssh-add test completed"
           ssh-add -l || echo "No keys in agent"
-
-      - name: Work around SSH key compatibility issue
-        run: |
-          echo "=== SSH Key Compatibility Investigation ==="
-
-          # The issue is OpenSSL 3.x libcrypto compatibility with OpenSSH key format
-          echo "Investigating OpenSSL/SSH compatibility options..."
-
-          # Check OpenSSL configuration
-          echo "OpenSSL version and config:"
-          openssl version -a
-          echo ""
-
-          # Try setting OpenSSL legacy provider (may help with older key formats)
-          echo "Testing with OpenSSL legacy provider..."
-          export OPENSSL_CONF=/etc/ssl/openssl.cnf
-
-          # Try to create a compatible version using different SSH options
-          echo "Attempting key format debugging..."
-
-          # Check if we can read the key with specific OpenSSL settings
-          openssl pkey -in atlas_key -noout -text 2>&1 || echo "OpenSSL pkey reading failed"
-
-          # Try with SSH_USE_STRONG_RNG=0 (sometimes helps with entropy issues)
-          echo "Testing with SSH_USE_STRONG_RNG=0..."
-          SSH_USE_STRONG_RNG=0 ssh-keygen -l -f atlas_key 2>&1 || echo "SSH_USE_STRONG_RNG=0 failed"
-
-          # Try different SSH client debugging
-          echo "Testing SSH with different debugging levels..."
-          ssh -o LogLevel=DEBUG3 -o BatchMode=yes -o ConnectTimeout=5 \
-              -i atlas_key \
-              ${{ secrets.USER_NAME }}@gadi.nci.org.au \
-              "echo test" 2>&1 | head -50 || echo "SSH debug test completed"
 
       - name: Configure SSH for Gadi access
         run: |
@@ -153,20 +116,26 @@ jobs:
           echo "SSH config created:"
           cat ~/.ssh/config
 
-      - name: Test SSH key manually
+      - name: Test SSH connection
         run: |
-          echo "=== Manual SSH Key Test ==="
-          echo "Testing SSH connection with atlas_key..."
+          echo "=== SSH Connection Test ==="
+          echo "Testing SSH connection with atlas_key using compatible OpenSSL 1.1.1..."
 
-          # Test with environment variables that might help with OpenSSL 3.x compatibility
-          echo "Testing with SSH_USE_STRONG_RNG=0..."
-          SSH_USE_STRONG_RNG=0 ssh -i ${{ github.workspace }}/atlas_key \
+          # Test direct SSH connection
+          ssh -i ${{ github.workspace }}/atlas_key \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile=~/.ssh/known_hosts \
               ${{ secrets.USER_NAME }}@gadi.nci.org.au \
-              "echo 'SSH_USE_STRONG_RNG=0 test successful!' && hostname" || echo "SSH_USE_STRONG_RNG=0 test failed with exit code $?"
+              "echo 'SSH connection successful from container!' && hostname" || echo "SSH test failed with exit code $?"
+
+          echo "Testing SSH with config file..."
+          ssh -F ~/.ssh/config \
+              -o BatchMode=yes \
+              -o ConnectTimeout=10 \
+              gadi.nci.org.au \
+              "echo 'SSH config test successful!' && hostname" || echo "SSH config test failed with exit code $?"
 
       - name: Configure qxub for remote execution
         run: |
