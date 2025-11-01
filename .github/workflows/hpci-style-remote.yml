@@ -26,7 +26,7 @@ jobs:
       id-token: "write"
     runs-on: self-hosted
     container:
-      image: ghcr.io/swarbricklab/qxub-runner:latest
+      image: ghcr.io/swarbricklab/qxub-runner:feature-v3.3.0-remote-execution
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
