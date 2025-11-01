@@ -47,11 +47,27 @@ jobs:
           project_number: ${{ secrets.PROJECT_NUMBER }}
           registry_sa: ${{ secrets.REGISTRY_SA }}
 
-      - name: Add Gadi host key
+      - name: Configure SSH for Gadi access
         run: |
           mkdir -p ~/.ssh
+
+          # Add Gadi host key
           ssh-keyscan -t ed25519 gadi.nci.org.au >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+
+          # Configure SSH to use atlas_key for Gadi connections
+          cat >> ~/.ssh/config << EOF
+          Host gadi.nci.org.au gadi
+              HostName gadi.nci.org.au
+              User ${{ secrets.USER_NAME }}
+              IdentityFile ${{ github.workspace }}/atlas_key
+              IdentitiesOnly yes
+              StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+          echo "SSH config created:"
+          cat ~/.ssh/config
 
       - name: Configure qxub for remote execution
         run: |
@@ -64,13 +80,14 @@ jobs:
           platforms:
             gadi:
               remote:
-                host: ${{ secrets.USER_NAME }}@gadi.nci.org.au
-                ssh_key: atlas_key
+                host: gadi.nci.org.au
                 working_dir: /scratch/a56/${{ secrets.USER_NAME }}/ci-jobs
                 conda_init: |
                   eval "$(conda shell.bash hook)"
                   conda activate qxub
           EOFCONFIG
+          echo "Generated qxub config:"
+          cat ~/.config/qxub/config.yaml
 
       - name: Execute qxub remote command
         run: |
