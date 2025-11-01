@@ -55,7 +55,10 @@ jobs:
       - name: Test container SSH compatibility
         run: |
           echo "Testing container SSH compatibility..."
-          docker run --rm ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest \
+          # Extract the first tag from the metadata output
+          FIRST_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+          echo "Testing container with tag: $FIRST_TAG"
+          docker run --rm $FIRST_TAG \
             /bin/bash -c "
               ssh -V &&
               openssl version &&

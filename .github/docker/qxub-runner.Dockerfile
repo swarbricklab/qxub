@@ -1,5 +1,6 @@
 # Dockerfile for qxub-compatible GitHub Actions runner
 # Solves OpenSSL 3.x compatibility issues with hpci-scripts SSH keys
+# Build version: 2024-11-01
 
 # Use Ubuntu 20.04 which has OpenSSL 1.1.1 (compatible with hpci-scripts keys)
 # This avoids the OpenSSL 3.x libcrypto compatibility issues
