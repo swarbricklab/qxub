@@ -85,31 +85,43 @@ jobs:
           openssl version
           echo ""
 
-          echo "Key file information:"
+          echo "Current directory and key file information:"
+          pwd
           ls -la atlas_key* || echo "No atlas_key files found"
 
-          echo "SSH key validation:"
-          ssh-keygen -l -f atlas_key || echo "Key validation failed"
+          # Get absolute path
+          KEY_PATH="$(pwd)/atlas_key"
+          echo "Key absolute path: $KEY_PATH"
 
-          echo "Testing ssh-agent compatibility:"
+          echo "SSH key validation:"
+          ssh-keygen -l -f "$KEY_PATH" || echo "Key validation failed"
+
+          echo "Testing ssh-agent compatibility (non-blocking):"
           eval $(ssh-agent -s)
-          ssh-add atlas_key 2>&1 | head -3 || echo "ssh-add test completed"
-          ssh-add -l || echo "No keys in agent"
+          ssh-add "$KEY_PATH" 2>&1 | head -3 || echo "ssh-add test completed (may fail due to format)"
+          ssh-add -l 2>/dev/null || echo "No keys in agent (expected if add failed)"
 
       - name: Configure SSH for Gadi access
         run: |
           mkdir -p ~/.ssh
 
-          # Add Gadi host key
-          ssh-keyscan -t ed25519 gadi.nci.org.au >> ~/.ssh/known_hosts
+          # Add Gadi host keys (scan for all types to avoid mismatch)
+          echo "Scanning for Gadi host keys..."
+          ssh-keyscan -t rsa,ecdsa,ed25519 gadi.nci.org.au >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          echo "Host keys added:"
+          cat ~/.ssh/known_hosts
+
+          # Get the absolute path to the SSH key
+          KEY_PATH="$(pwd)/atlas_key"
+          echo "Using SSH key at: $KEY_PATH"
 
           # Configure SSH to use atlas_key for Gadi connections
           cat >> ~/.ssh/config << EOF
           Host gadi.nci.org.au gadi
               HostName gadi.nci.org.au
               User ${{ secrets.USER_NAME }}
-              IdentityFile ${{ github.workspace }}/atlas_key
+              IdentityFile $KEY_PATH
               IdentitiesOnly yes
               StrictHostKeyChecking yes
           EOF
@@ -123,8 +135,12 @@ jobs:
           echo "=== SSH Connection Test ==="
           echo "Testing SSH connection with atlas_key using compatible OpenSSL 1.1.1..."
 
+          # Get the absolute path to the SSH key
+          KEY_PATH="$(pwd)/atlas_key"
+          echo "Testing with key at: $KEY_PATH"
+
           # Test direct SSH connection
-          ssh -i ${{ github.workspace }}/atlas_key \
+          ssh -i "$KEY_PATH" \
               -o BatchMode=yes \
               -o ConnectTimeout=10 \
               -o StrictHostKeyChecking=yes \
