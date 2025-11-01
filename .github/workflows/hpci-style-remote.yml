@@ -1,5 +1,6 @@
 name: HPCI-Style Remote Execution
 
+# Test qxub remote execution using container-based approach for SSH compatibility
 on:
   workflow_dispatch:
     inputs:
