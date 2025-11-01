@@ -24,6 +24,7 @@ jobs:
     permissions:
       contents: "read"
       id-token: "write"
+      packages: "read"
     runs-on: self-hosted
     container:
       image: ghcr.io/swarbricklab/qxub-runner:feature-v3.3.0-remote-execution
