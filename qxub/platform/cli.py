@@ -23,9 +23,7 @@ def platform_cli():
 @click.option("-v", "--verbose", count=True, help="Show detailed platform information")
 def list_platforms_cmd(verbose):
     """List available platforms from config and search paths."""
-    from ..config.manager import get_config_manager
-
-    config_manager = get_config_manager()
+    from ..config import config_manager
 
     # Get platforms from config (includes remote-only platforms)
     config_platforms = set(config_manager.list_platforms())
@@ -80,10 +78,8 @@ def list_platforms_cmd(verbose):
 @click.argument("platform_name", required=False)
 def platform_info(platform_name):
     """Show detailed information about a platform."""
-    from ..config.manager import get_config_manager
+    from ..config import config_manager
     from ..execution.mode import ExecutionMode, get_execution_mode
-
-    config_manager = get_config_manager()
 
     if not platform_name:
         # Show current platform

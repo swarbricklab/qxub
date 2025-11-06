@@ -72,6 +72,12 @@ if sum(bool(x) for x in execution_contexts) > 1:
 - **Template variables**: `{user}`, `{project}`, `{timestamp}` for dynamic substitution
 - **Alias system**: Hierarchical structure with main/subcommand/target sections
 
+#### Config vs Platform Definitions (CRITICAL)
+- Config files are flexible, per-user/per-repo overlays that reference platform definitions; they do not define new platforms.
+- Platform definitions are fixed YAMLs that declare canonical platform names, queues, and constraints. These names must be referenced verbatim by configs.
+- Do NOT invent alternate platform names in configs to represent scenarios (e.g., `gadi-dev`, `gadi-stable`). Instead, keep the platform name from the definition (e.g., `gadi`) and vary config-only properties (like `remote.conda_init`, `working_dir`) across different config files.
+- For different testing modes (stable vs dev), use separate config files pointing at the same platform definition and platform name.
+
 ```python
 # Config manager in qxub/config_manager.py
 class ConfigManager:
@@ -87,6 +93,8 @@ class ConfigManager:
 - **Queue selection**: `--queue auto` for intelligent selection based on resources
 - **Resource validation**: Platform-aware constraint checking
 - **Environment discovery**: `QXUB_PLATFORM_PATHS` for custom platform locations
+
+Note: Platform definition files are versioned, shared, and treated as immutable during CI. All workflow variability should live in configs that reference these fixed platform names.
 
 ```python
 # Platform loader in qxub/platform.py
