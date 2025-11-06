@@ -22,21 +22,32 @@ def platform_cli():
 @platform_cli.command("list")
 @click.option("-v", "--verbose", count=True, help="Show detailed platform information")
 def list_platforms_cmd(verbose):
-    """List available platforms."""
-    platforms = list_platforms()
+    """List available platforms from config and search paths."""
+    from ..config.manager import get_config_manager
 
-    if not platforms:
+    config_manager = get_config_manager()
+
+    # Get platforms from config (includes remote-only platforms)
+    config_platforms = set(config_manager.list_platforms())
+
+    # Get platforms from search paths (platform definition files)
+    definition_platforms = set(list_platforms())
+
+    # Combine both sources
+    all_platforms = sorted(config_platforms | definition_platforms)
+
+    if not all_platforms:
         click.echo("No platforms found.")
-        click.echo("Check platform search paths with: qxub config show")
+        click.echo("Add platforms to your config file or check platform search paths.")
         return
 
     if verbose == 0:
         # Simple list
-        for platform_name in sorted(platforms):
+        for platform_name in all_platforms:
             click.echo(platform_name)
     else:
         # Detailed information
-        for platform_name in sorted(platforms):
+        for platform_name in all_platforms:
             platform = get_platform(platform_name)
             if platform:
                 click.echo(f"\n{platform_name}:")
@@ -49,12 +60,31 @@ def list_platforms_cmd(verbose):
                 if verbose >= 2:
                     for queue_name, queue in platform.queues.items():
                         click.echo(f"    {queue_name}: {queue.type} queue")
+            else:
+                # Platform in config but no definition loaded
+                platform_config = config_manager.get_platform_config(platform_name)
+                if platform_config:
+                    click.echo(f"\n{platform_name}:")
+                    click.echo(f"  Source: config file")
+                    if platform_config.get("remote"):
+                        remote = platform_config["remote"]
+                        click.echo(f"  Remote host: {remote.get('host', 'unknown')}")
+                        click.echo(f"  Mode: delegated (definition on remote)")
+                    if not platform_config.get("definition"):
+                        click.echo(
+                            f"  Note: Platform definition will be loaded on remote system"
+                        )
 
 
 @platform_cli.command("info")
 @click.argument("platform_name", required=False)
 def platform_info(platform_name):
     """Show detailed information about a platform."""
+    from ..config.manager import get_config_manager
+    from ..execution.mode import ExecutionMode, get_execution_mode
+
+    config_manager = get_config_manager()
+
     if not platform_name:
         # Show current platform
         platform = get_current_platform()
@@ -63,12 +93,47 @@ def platform_info(platform_name):
             click.echo("Use 'qxub platform list' to see available platforms.")
             return
         platform_name = platform.name
-    else:
-        platform = get_platform(platform_name)
-        if not platform:
-            click.echo(f"Platform '{platform_name}' not found.")
-            click.echo("Use 'qxub platform list' to see available platforms.")
-            return
+
+    # Check if this is a remote-delegated platform
+    platform_config = config_manager.get_platform_config(platform_name)
+    if platform_config:
+        execution_mode = get_execution_mode(platform_config)
+
+        if execution_mode == ExecutionMode.REMOTE_DELEGATED:
+            # Delegate to remote platform
+            remote_config = platform_config.get("remote")
+            if not remote_config:
+                click.echo(f"Platform '{platform_name}' has no remote configuration.")
+                return
+
+            from ..remote.platform_executor import PlatformRemoteExecutor
+
+            try:
+                click.echo(f"Fetching info from remote platform '{platform_name}'...\n")
+                executor = PlatformRemoteExecutor(platform_name, remote_config)
+
+                # Build remote command: qxub platform info <platform_name>
+                remote_command = ["qxub", "platform", "info", platform_name]
+
+                exit_code = executor.execute(
+                    remote_command, stream_output=True, verbose=0
+                )
+                if exit_code != 0:
+                    click.echo(
+                        f"\n⚠️  Remote command failed with exit code {exit_code}",
+                        err=True,
+                    )
+                return
+            except Exception as e:
+                click.echo(f"Failed to get remote platform info: {e}", err=True)
+                return
+
+    # Local platform - load and display
+    platform = get_platform(platform_name)
+    if not platform:
+        click.echo(f"Platform '{platform_name}' not found.")
+        click.echo("Use 'qxub platform list' to see available platforms.")
+        return
 
     click.echo(f"Platform: {platform.name}")
     click.echo(f"Type: {platform.type}")

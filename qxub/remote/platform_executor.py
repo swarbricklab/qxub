@@ -178,17 +178,15 @@ class PlatformRemoteExecutor:
         if self._should_allocate_tty():
             ssh_cmd.append("-t")
 
-        # Connection options for better reliability
+        # Connection options - minimal, let ~/.ssh/config control the rest
         ssh_cmd.extend(
             [
                 "-o",
                 "BatchMode=yes",  # Don't prompt for passwords
-                "-o",
-                "StrictHostKeyChecking=yes",  # Security: require known hosts
             ]
         )
 
-        # Add hostname (SSH will look up details in ~/.ssh/config)
+        # Add hostname (SSH will look up all settings in ~/.ssh/config)
         ssh_cmd.append(self.hostname)
 
         # Build remote command with environment setup
@@ -331,8 +329,6 @@ class PlatformRemoteExecutor:
             "BatchMode=yes",
             "-o",
             "ConnectTimeout=10",
-            "-o",
-            "StrictHostKeyChecking=yes",
             self.hostname,
             "echo connection_test",
         ]
