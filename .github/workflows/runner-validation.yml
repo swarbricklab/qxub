@@ -1,0 +1,82 @@
+name: Runner Environment Validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/v3.3.0-remote-execution
+
+jobs:
+  validate-runner-setup:
+    runs-on: self-hosted
+
+    steps:
+    - name: Runner environment info
+      run: |
+        echo "=== Runner Environment ==="
+        echo "Hostname: $(hostname)"
+        echo "User: $(whoami)"
+        echo "Working directory: $(pwd)"
+        echo "Python version: $(python3 --version)"
+        echo ""
+
+    - name: Check SSH configuration
+      run: |
+        echo "=== SSH Configuration ==="
+        if [ -f ~/.ssh/config ]; then
+          echo "SSH config exists"
+          grep -A 5 "Host gadi" ~/.ssh/config || echo "No gadi host entry"
+        else
+          echo "No SSH config found"
+        fi
+        echo ""
+
+    - name: Verify qxub installation
+      run: |
+        echo "=== qxub Installation ==="
+        which qxub
+        qxub --version
+        pip3 show qxub | grep -E "Version|Location"
+        echo ""
+
+    - name: Check qxub configuration
+      run: |
+        echo "=== qxub Configuration ==="
+        echo "Config files:"
+        qxub config files
+        echo ""
+        echo "Available platforms:"
+        qxub platform list
+        echo ""
+        echo "Default platform:"
+        qxub config get defaults.platform || echo "(none set)"
+        echo ""
+
+    - name: Validate platform configuration
+      run: |
+        echo "=== Platform Configuration Details ==="
+        qxub platform info || echo "No platform info available"
+        echo ""
+
+    - name: Test SSH connectivity (if configured)
+      run: |
+        echo "=== SSH Connectivity Test ==="
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 gadi true 2>/dev/null; then
+          echo "✅ SSH connection successful"
+          ssh gadi "hostname && echo 'Connected to:' && qstat -B" || echo "SSH works but commands failed"
+        else
+          echo "⚠️  SSH connection failed (expected if no keys configured)"
+        fi
+        echo ""
+
+    - name: Test qxub dry run
+      run: |
+        echo "=== qxub Dry Run Test ==="
+        qxub exec --dry -vv -- echo "Test command"
+        echo ""
+
+    - name: Test qxub live execution
+      run: |
+        echo "=== qxub Live Execution Test ==="
+        qxub exec -v -- echo "Hello from CI runner"
+        echo "✅ Live execution successful"
