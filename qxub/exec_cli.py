@@ -608,9 +608,17 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     ctx.obj["options"] = qsub_options
 
     # Platform selection and execution mode detection
-    platform_name = (
-        options.get("platform") or config_manager.get_default_platform_name()
-    )
+    default_platform = config_manager.get_default_platform_name()
+    platform_name = options.get("platform") or default_platform
+
+    # Debug: show platform selection if verbose
+    if params.get("verbose", 0) > 0:
+        if platform_name:
+            source = "CLI option" if options.get("platform") else "config default"
+            click.echo(f"Using platform: {platform_name} (from {source})", err=True)
+        else:
+            click.echo("No platform specified, using local execution", err=True)
+
     platform_config = None
     execution_mode = ExecutionMode.LOCAL  # Default to local
 

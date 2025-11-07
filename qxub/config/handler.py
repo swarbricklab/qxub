@@ -257,24 +257,11 @@ def adjust_resources_for_queue(params):
 
     # User didn't explicitly set CPUs - check if we need to adjust for queue limits
     try:
-        from pathlib import Path
+        from qxub.platform import get_current_platform
 
-        from qxub.platform import PlatformLoader
-
-        # Check for QXUB_PLATFORM_PATHS environment variable
-        platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
-        if platform_paths_env:
-            search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
-            loader = PlatformLoader(search_paths=search_paths)
-        else:
-            loader = PlatformLoader()
-
-        # Try to find the queue in any loaded platform
-        for platform_name in loader.list_platforms():
-            platform = loader.get_platform(platform_name)
-            if not platform:
-                continue
-
+        # Get the current platform
+        platform = get_current_platform()
+        if platform:
             queue = platform.get_queue(queue_name)
             if queue and queue.limits.max_cpus:
                 # Found the queue - check if we need to adjust CPUs
@@ -300,7 +287,6 @@ def adjust_resources_for_queue(params):
                         for r in resources
                     ]
                     params["resources"] = new_resources
-                break
 
     except Exception as e:
         # Platform system not available or other error - don't adjust

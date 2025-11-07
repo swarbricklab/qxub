@@ -9,6 +9,17 @@ v2.3 adds parallel job execution with --terse output and 'qxub monitor' for pipe
 
 # __init__.py
 
+# Suppress system Python requests/urllib3 version warnings
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="requests")
+try:
+    from requests.exceptions import RequestsDependencyWarning
+
+    warnings.filterwarnings("ignore", category=RequestsDependencyWarning)
+except ImportError:
+    pass
+
 __version__ = "3.3.0"
 
 # Import main CLI
