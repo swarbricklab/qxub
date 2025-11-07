@@ -8,7 +8,7 @@
 
 # Logging
 echo "📁 Execution directory: $cwd"
-echo "📦 Modules to load: $modules"
+echo "📦 Modules to load: $mods"
 
 # Create status directory for monitoring
 STATUS_DIR="${out%/*}/status"
@@ -60,10 +60,10 @@ error_handler() {
 trap 'error_handler' ERR
 
 # Load modules
-if [ -n "$modules" ]; then
-    echo "📦 Loading modules: $modules"
+if [ -n "$mods" ]; then
+    echo "📦 Loading modules: $mods"
     # Split modules string by spaces and load each one
-    for module in $modules; do
+    for module in $mods; do
         echo "🔄 Loading module: $module"
         module load "$module"
     done

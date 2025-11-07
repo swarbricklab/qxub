@@ -1,0 +1,22 @@
+# Test configuration for remote execution testing
+# Usage: qxub exec --config tests/configs/test_remote.yaml --platform ci_test_remote -- echo "test"
+
+# This overrides/merges with user config - platforms here take precedence
+defaults:
+  platform: ci_test_remote
+  project: a56
+
+platforms:
+  # Test platform for CI/laptop remote execution to Gadi
+  ci_test_remote:
+    name: ci_test_remote
+    definition: file:///g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml
+    remote:
+      host: gadi  # SSH hostname from ~/.ssh/config
+      working_dir: /scratch/a56/{user}
+      conda_init: 'eval "$(conda shell.bash hook)"'
+
+  # Local test platform (no remote) - for testing local execution
+  ci_test_local:
+    name: ci_test_local
+    definition: file:///g/data/a56/config/xdg/qxub/platforms/nci_gadi.yaml

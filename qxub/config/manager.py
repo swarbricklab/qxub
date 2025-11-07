@@ -25,13 +25,15 @@ from omegaconf import DictConfig, OmegaConf
 class ConfigManager:
     """Manages qxub configuration loading, merging, and template resolution."""
 
-    def __init__(self):
+    def __init__(self, override_config_path: Optional[str] = None):
         self.system_config: Optional[DictConfig] = None
         self.user_config: Optional[DictConfig] = None
         self.project_config: Optional[DictConfig] = None
         self.local_config: Optional[DictConfig] = None
         self.test_config: Optional[DictConfig] = None
+        self.override_config: Optional[DictConfig] = None
         self.merged_config: Optional[DictConfig] = None
+        self.override_config_path = override_config_path
         self._load_configs()
 
     def _get_xdg_config_dirs(self) -> List[Path]:
@@ -115,6 +117,26 @@ class ConfigManager:
             )
             return None
 
+    def _load_override_config(self) -> Optional[DictConfig]:
+        """Load override configuration from CLI --config option."""
+        if not self.override_config_path:
+            return None
+
+        config_path = Path(self.override_config_path)
+        if not config_path.exists():
+            click.echo(
+                f"Error: Override config file not found: {config_path}", err=True
+            )
+            return None
+
+        try:
+            return OmegaConf.load(config_path)
+        except Exception as e:
+            click.echo(
+                f"Error: Failed to load override config {config_path}: {e}", err=True
+            )
+            return None
+
     def _load_system_config(
         self,
     ) -> Optional[DictConfig]:  # pylint: disable=broad-exception-caught
@@ -150,9 +172,10 @@ class ConfigManager:
         self.project_config, self.local_config, self.test_config = (
             self._load_project_configs()
         )
+        self.override_config = self._load_override_config()
 
         # Merge configurations in precedence order:
-        # system < user < project < local < test
+        # system < user < project < local < test < override
         configs = []
         if self.system_config:
             configs.append(self.system_config)
@@ -164,6 +187,8 @@ class ConfigManager:
             configs.append(self.local_config)
         if self.test_config:
             configs.append(self.test_config)
+        if self.override_config:
+            configs.append(self.override_config)
 
         if configs:
             self.merged_config = OmegaConf.merge(*configs)
@@ -709,6 +734,71 @@ class ConfigManager:
                 "auto_select": True,
             }
 
+    def get_platform_config(self, platform_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get platform configuration from the platforms registry.
+
+        Args:
+            platform_name: Name of the platform
+
+        Returns:
+            Platform configuration dict or None if not found
+
+        Platform config structure:
+            definition: Path/URL to platform definition file (optional for delegation)
+            remote: Optional remote execution config
+                host: SSH hostname (from ~/.ssh/config)
+                working_dir: Remote working directory
+                conda_init: Optional conda initialization commands
+
+        Note: Platform name is the YAML key, no separate 'name' field needed.
+        """
+        if not self.merged_config or "platforms" not in self.merged_config:
+            return None
+
+        platforms = self.merged_config.platforms
+        if platform_name not in platforms:
+            return None
+
+        platform_config = OmegaConf.to_container(platforms[platform_name], resolve=True)
+        return platform_config
+
+    def list_platforms(self) -> List[str]:
+        """
+        List all configured platforms.
+
+        Returns:
+            List of platform names
+        """
+        if not self.merged_config or "platforms" not in self.merged_config:
+            return []
+        return list(self.merged_config.platforms.keys())
+
+    def get_default_platform_name(self) -> Optional[str]:
+        """
+        Get the default platform name from config.
+
+        Returns:
+            Platform name from defaults.platform, or None
+        """
+        defaults = self.get_defaults()
+        return defaults.get("platform")
+
+    def has_remote_config(self, platform_name: str) -> bool:
+        """
+        Check if a platform has remote execution configuration.
+
+        Args:
+            platform_name: Name of the platform
+
+        Returns:
+            True if platform has remote section, False otherwise
+        """
+        platform_config = self.get_platform_config(platform_name)
+        if not platform_config:
+            return False
+        return "remote" in platform_config and platform_config["remote"] is not None
+
 
 def setup_logging(verbosity: int = None):
     """
@@ -757,6 +847,20 @@ def setup_logging(verbosity: int = None):
     formatter = logging.Formatter(format_str)
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
+
+
+def set_config_override(override_config_path: Optional[str] = None):
+    """
+    Reinitialize the global config manager with an override config file.
+
+    This is used by the --config CLI option to load a custom configuration
+    for testing or alternative environments.
+
+    Args:
+        override_config_path: Path to override config file (highest precedence)
+    """
+    global config_manager
+    config_manager = ConfigManager(override_config_path=override_config_path)
 
 
 # Global config manager instance

@@ -716,113 +716,113 @@ def collect_job_resources_after_completion(job_id, out_file):
         logging.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
-def start_background_resource_collection(job_id, joblog_path):
+def start_background_resource_collection(job_id, joblog_path, foreground=False):
     """
-    Start resource collection in background thread so qxub can return control immediately.
-    Sets job status as 'pending' initially, then updates with actual resource data.
+    Start resource collection in background thread.
+    Logs progress to ~/.config/qxub/resource_collection.log for monitoring.
     """
+    import logging
+    import os
+    import threading
+    import time
+    from datetime import datetime
+
+    def log_message(message):
+        """Log message to dedicated resource collection log file."""
+        try:
+            log_dir = os.path.expanduser("~/.config/qxub")
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, "resource_collection.log")
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            with open(log_file, "a") as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            logging.debug(f"Error writing to resource collection log: {e}")
 
     def collect_resources_background():
         try:
-            from ..resources import resource_tracker
+            log_message(f"Starting resource collection for job {job_id}")
+            log_message(f"Joblog path: {joblog_path}")
 
-            # First, mark the job as having pending resource collection
-            logging.debug(f"Marking resource collection as pending for job {job_id}")
-            pending_data = {
-                "memory_efficiency": "pending",
-                "walltime_efficiency": "pending",
-                "cpu_efficiency": "pending",
-                "status": "pending_resources",
-            }
+            from ..resources import parse_joblog_resources, resource_tracker
+
+            # Mark job as pending resource collection
+            pending_data = {"status": "pending_resources"}
             resource_tracker.update_job_resources(job_id, pending_data)
+            log_message("Marked job as pending resource collection")
 
-            # Now do the actual resource collection with proper delays
-            logging.debug(f"Starting background resource collection for job {job_id}")
-
-            # Wait 60 seconds for PBS to write final resource information to joblog
+            # Wait for PBS to finalize the joblog
+            log_message("Waiting 60 seconds for PBS to finalize joblog...")
             time.sleep(60)
 
-            # Try to parse the joblog with retry logic
-            max_retries = 3
-            retry_delay = 60  # Wait 60 seconds between retries
+            # Check if file exists and parse it
+            if os.path.exists(joblog_path):
+                log_message("Joblog file exists, parsing...")
+                resource_data = parse_joblog_resources(joblog_path)
 
-            for attempt in range(max_retries):
-                logging.debug(
-                    "Background attempt to collect resource usage for job %s "
-                    "(attempt %d/%d)",
-                    job_id,
-                    attempt + 1,
-                    max_retries,
-                )
-
-                try:
-                    from ..resources import parse_joblog_resources
-
-                    # Parse resource data from joblog
-                    resource_data = parse_joblog_resources(joblog_path)
-
-                    if resource_data:
-                        # Update with actual resource data
-                        success = resource_tracker.update_job_resources(
-                            job_id, resource_data
-                        )
-                        if success:
-                            logging.debug(
-                                f"Background resource collection completed for job {job_id}"
-                            )
-                            return
-
-                        logging.debug(
-                            f"Failed to update resource data for job {job_id}"
-                        )
+                if resource_data:
+                    log_message(f"Successfully parsed resource data")
+                    success = resource_tracker.update_job_resources(
+                        job_id, resource_data
+                    )
+                    if success:
+                        log_message("Successfully updated database with resource data")
                     else:
-                        logging.debug(
-                            f"Could not parse resource data from joblog: {joblog_path}"
-                        )
-
+                        log_message("ERROR: Failed to update database")
+                else:
+                    log_message("ERROR: Failed to parse resource data from joblog")
+                    # Show file info for debugging
+                    try:
+                        with open(joblog_path, "r") as f:
+                            lines = f.readlines()
+                            log_message(f"Joblog has {len(lines)} lines")
+                            if len(lines) > 10:
+                                log_message(f"Last 10 lines: {lines[-10:]}")
+                    except Exception as e:
+                        log_message(f"Error reading joblog for debugging: {e}")
+            else:
+                log_message(f"ERROR: Joblog file does not exist: {joblog_path}")
+                # List available files for debugging
+                try:
+                    log_dir = os.path.dirname(joblog_path)
+                    if os.path.exists(log_dir):
+                        files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
+                        log_message(f"Available .log files in {log_dir}: {files}")
                 except Exception as e:
-                    logging.debug(
-                        "Error in background resource collection for job %s "
-                        "(attempt %d): %s",
-                        job_id,
-                        attempt + 1,
-                        e,
-                    )
-
-                # If not the last attempt, wait before retrying
-                if attempt < max_retries - 1:
-                    logging.debug(
-                        f"Retrying background resource collection in {retry_delay} seconds..."
-                    )
-                    time.sleep(retry_delay)
-
-            # If we get here, all attempts failed - mark as failed
-            failed_data = {
-                "memory_efficiency": "failed",
-                "walltime_efficiency": "failed",
-                "cpu_efficiency": "failed",
-                "status": "resource_collection_failed",
-            }
-            resource_tracker.update_job_resources(job_id, failed_data)
-            logging.debug(
-                "Background resource collection failed for job %s after %d attempts",
-                job_id,
-                max_retries,
-            )
+                    log_message(f"Error listing directory: {e}")
 
         except Exception as e:
-            logging.debug(
-                f"Background resource collection exception for job {job_id}: {e}"
-            )
+            log_message(f"FATAL ERROR in resource collection: {e}")
+            import traceback
 
-    # Start the background thread
-    thread = threading.Thread(target=collect_resources_background, daemon=True)
+            log_message(f"Traceback: {traceback.format_exc()}")
+
+    # If foreground requested, run collection inline for easier debugging
+    if foreground:
+        # Also emit to stdout so user sees verbose progress
+        print(
+            f"🔍 DEBUG: Running resource collection for job {job_id} in foreground (verbose debug)"
+        )
+        collect_resources_background()
+        return None
+
+    # Start the background thread (non-daemon so it survives process exit)
+    thread = threading.Thread(target=collect_resources_background, daemon=False)
     thread.start()
-    logging.debug(f"Started background resource collection thread for job {job_id}")
+
+    # Return the thread object so we can reference it
+    log_message(f"Started background resource collection thread for job {job_id}")
+    print(f"🔍 DEBUG: Resource collection thread started for job {job_id}")
+    print(f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log")
+
     return thread
 
 
-def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
+def monitor_job_single_thread(
+    job_id, out_file, err_file, quiet=False, joblog_file=None, verbose=0
+):
     """
     Single-thread job monitoring with proper spinner integration using status files.
 
@@ -905,9 +905,23 @@ def monitor_job_single_thread(job_id, out_file, err_file, quiet=False):
             final=True,
         )
 
-    # Derive joblog path from out_file path (change .out to .log)
-    joblog_path = str(out_file).replace(".out", ".log")
-    start_background_resource_collection(job_id, joblog_path)
+    # Use provided joblog path or derive from out_file path as fallback
+    if joblog_file:
+        joblog_path = str(joblog_file)
+        print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
+    else:
+        # Fallback: derive joblog path from out_file path (change .out to .log)
+        joblog_path = str(out_file).replace(".out", ".log")
+        print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
+
+    # If user requested very verbose debug (e.g. -vvv) run collection in foreground
+    run_foreground = bool(verbose and int(verbose) >= 3)
+    if run_foreground:
+        print(f"🔍 DEBUG: Foreground resource collection enabled (verbose={verbose})")
+
+    thread = start_background_resource_collection(
+        job_id, joblog_path, foreground=run_foreground
+    )
 
     return exit_status
 

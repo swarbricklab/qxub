@@ -258,8 +258,14 @@ def execute_unified(
     try:
         # Terse mode should run monitoring silently like quiet mode
         monitoring_quiet = ctx_obj["quiet"] or ctx_obj.get("terse", False)
+        verbose_level = ctx_obj.get("verbose", 0)
         exit_status = monitor_job_single_thread(
-            job_id, out, err, quiet=monitoring_quiet
+            job_id,
+            out,
+            err,
+            quiet=monitoring_quiet,
+            joblog_file=ctx_obj.get("joblog"),
+            verbose=verbose_level,
         )
         # Exit with the job's exit status
         sys.exit(exit_status)

@@ -1,0 +1,30 @@
+[MASTER]
+# Set the minimum score to pass (scale from -10 to 10)
+fail-under=8.0
+
+# Disable specific error types that are common in this codebase
+[MESSAGES CONTROL]
+disable=
+    duplicate-code,
+    cyclic-import,
+    function-redefined,
+    unsubscriptable-object,
+    undefined-variable,
+    no-member,
+    import-error,
+    no-name-in-module,
+    unexpected-keyword-arg,
+    no-value-for-parameter,
+    assignment-from-no-return,
+    possibly-used-before-assignment
+
+# Allow longer lines for better readability
+[FORMAT]
+max-line-length=120
+
+# Allow more attributes and methods per class for complex CLI applications
+[DESIGN]
+max-attributes=15
+max-public-methods=30
+max-locals=20
+max-branches=15

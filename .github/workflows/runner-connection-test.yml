@@ -1,0 +1,44 @@
+name: Runner Connection Test
+
+on:
+  workflow_dispatch: # Manual trigger only
+  push:
+    branches:
+      - feature/v3.3.0-remote-execution # Enable for testing
+
+jobs:
+  test-runner-qxub:
+    runs-on: self-hosted
+
+    steps:
+    - name: Verify qxub installation
+      run: |
+        echo "=== Verifying qxub installation ==="
+        which qxub
+        qxub --version
+
+    - name: Check qxub platform configuration
+      run: |
+        echo "=== Checking platform configuration ==="
+        qxub platform list
+        qxub config get defaults.platform || echo "No default platform set"
+
+    - name: Test local execution (no platform)
+      run: |
+        echo "=== Testing local execution ==="
+        qxub exec --dry --default -- echo "Local test"
+
+    - name: Test remote execution to NCI (dry run)
+      run: |
+        echo "=== Testing remote execution (dry run) ==="
+        qxub exec --dry -vvv -- echo "Remote test"
+
+    - name: Test remote execution to NCI (live)
+      run: |
+        echo "=== Testing live remote execution ==="
+        qxub exec -vv -- echo "Hello from GitHub Actions runner via qxub"
+
+    - name: Test with explicit platform
+      run: |
+        echo "=== Testing with explicit platform ==="
+        qxub exec --platform nci_gadi -v -- hostname

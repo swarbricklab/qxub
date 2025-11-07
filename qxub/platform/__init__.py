@@ -25,10 +25,9 @@ Main classes and functions:
 from .cli import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 
 # Core platform classes
+from .core import AutoSelectionRule, Platform
+from .core import PlatformLoader as CorePlatformLoader  # Old platform loader
 from .core import (
-    AutoSelectionRule,
-    Platform,
-    PlatformLoader,
     Queue,
     QueueLimits,
     QueueSelectionResult,
@@ -43,6 +42,9 @@ from .core import (
     select_best_queue,
 )
 
+# Platform definition loader with URL support
+from .loader import PlatformLoader, PlatformLoadError, platform_loader
+
 # Platform integration utilities
 # from .integration import load_platform_with_remote
 
@@ -50,7 +52,7 @@ __all__ = [
     # Core classes
     "AutoSelectionRule",
     "Platform",
-    "PlatformLoader",
+    "CorePlatformLoader",  # Old platform loader
     "Queue",
     "QueueLimits",
     "QueueSelectionResult",
@@ -64,6 +66,10 @@ __all__ = [
     "get_platform_loader",
     "list_platforms",
     "select_best_queue",
+    # Platform definition loader (new)
+    "PlatformLoader",
+    "PlatformLoadError",
+    "platform_loader",
     # CLI commands
     "estimate_cmd",
     "platform_cli",

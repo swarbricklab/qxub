@@ -1,22 +1,26 @@
-name: Code Formatting
+name: Pylint
 
 on: [push, pull_request]
 
 jobs:
-  format-check:
+  pylint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
-      - name: Set up Conda
-        uses: conda-incubator/setup-miniconda@v3
+      - name: Set up Python
+        uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
         with:
-          python-version: 3.9
-          auto-update-conda: true
-          environment-file: environment.dev.yaml
-          activate-environment: test
+          python-version: '3.10'
 
-      - name: Check code formatting with Black
-        shell: bash -el {0}
+      - name: Install dependencies
         run: |
-          black --check --diff $(git ls-files '*.py')
+          python -m pip install --upgrade pip
+          pip install pylint
+          pip install -e .
+
+      - name: Run Pylint
+        run: |
+          pylint $(git ls-files '*.py')

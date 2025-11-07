@@ -72,6 +72,12 @@ if sum(bool(x) for x in execution_contexts) > 1:
 - **Template variables**: `{user}`, `{project}`, `{timestamp}` for dynamic substitution
 - **Alias system**: Hierarchical structure with main/subcommand/target sections
 
+#### Config vs Platform Definitions (CRITICAL)
+- Config files are flexible, per-user/per-repo overlays that reference platform definitions; they do not define new platforms.
+- Platform definitions are fixed YAMLs that declare canonical platform names, queues, and constraints. These names must be referenced verbatim by configs.
+- Do NOT invent alternate platform names in configs to represent scenarios (e.g., `gadi-dev`, `gadi-stable`). Instead, keep the platform name from the definition (e.g., `gadi`) and vary config-only properties (like `remote.conda_init`, `working_dir`) across different config files.
+- For different testing modes (stable vs dev), use separate config files pointing at the same platform definition and platform name.
+
 ```python
 # Config manager in qxub/config_manager.py
 class ConfigManager:
@@ -87,6 +93,8 @@ class ConfigManager:
 - **Queue selection**: `--queue auto` for intelligent selection based on resources
 - **Resource validation**: Platform-aware constraint checking
 - **Environment discovery**: `QXUB_PLATFORM_PATHS` for custom platform locations
+
+Note: Platform definition files are versioned, shared, and treated as immutable during CI. All workflow variability should live in configs that reference these fixed platform names.
 
 ```python
 # Platform loader in qxub/platform.py
@@ -159,6 +167,50 @@ qxub config shortcut show "dvc pull"  # Will fail or use wrong version
 - **During development**: Note any documentation that needs updating
 - **After implementation**: Update affected documentation immediately
 - **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
+
+### Git Workflow - CRITICAL
+
+**ALWAYS stage files consciously. NEVER use `git add .`**
+
+See `docs/dev/conscious-git-tracking.md` for full guide. Quick reference:
+
+```bash
+# ✅ Good: Stage individually
+git add qxub/config/manager.py
+git add qxub/execution/mode.py
+
+# ✅ Good: Verify before committing
+git diff --staged
+
+# ❌ Bad: Blanket staging (adds zombies, temp files)
+git add .
+git add -A
+```
+
+**Why**: Blanket staging creates zombie files, commits temp scripts, and bundles unrelated changes.
+
+**Run pre-commit checks manually before committing:**
+
+```bash
+# Run pre-commit on staged files (fast, only checks what you're committing)
+pre-commit run
+
+# This catches formatting issues before commit
+# Fix any issues, then re-stage the fixed files
+# Then commit normally
+```
+
+This ensures your commit succeeds on the first try. The commit hook then acts as a final safety check.
+
+### Refactoring Workflow
+
+**When moving/reorganizing code, see `docs/dev/refactoring-checklist.md`**
+
+Critical rules:
+- Use `git mv` (not copy + modify)
+- Delete old files in same commit
+- Verify no zombies: `git grep "from.*old_module import"` returns nothing
+- Use `.github/chatmodes/refactoring.chatmode.md` for guided refactoring
 
 ### Code Style
 - **Black formatting**: Line length 88, Python 3.10+ target

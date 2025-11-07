@@ -8,9 +8,20 @@ comprehensive interface.
 
 import click
 
-from .config import config_manager
 from .config.handler import process_job_options
-from .execution import ExecutionContext, execute_unified
+from .execution import (
+    ExecutionContext,
+    ExecutionMode,
+    execute_unified,
+    get_execution_mode,
+)
+
+
+def _get_config_manager():
+    """Get the current config manager instance (supports override)."""
+    from .config import manager
+
+    return manager.config_manager
 
 
 def _get_shortcut_context_description(definition: dict) -> str:
@@ -28,6 +39,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
 
 
 @click.command(name="exec")
+@click.option(
+    "--config",
+    help="Override config file for testing or alternative configurations",
+    type=click.Path(exists=True, dir_okay=False, readable=True),
+)
 @click.option(
     "-l",
     "--resources",
@@ -102,6 +118,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
     "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
 )
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
+@click.option("--platform", help="Target platform for execution (default: from config)")
 @click.option("--env", help="Conda environment name for execution")
 @click.option(
     "--mod",
@@ -109,7 +126,9 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Single module to load (can be used multiple times)",
     multiple=True,
 )
-@click.option("--mods", "--modules", help="Space-separated list of modules to load")
+@click.option(
+    "--mods", "--modules", help="Comma or space-separated list of modules to load"
+)
 @click.option("--sif", "--container", help="Singularity container (.sif file) to use")
 @click.option(
     "--default", is_flag=True, help="Use default execution (no special environment)"
@@ -123,7 +142,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--alias", help="Use a predefined alias for execution settings")
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
-def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
+def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     """
     Execute commands in various environments using PBS.
 
@@ -158,12 +177,25 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         qxub exec --alias myalias -- additional args
         qxub exec --alias myalias  # if alias has default command
 
+    \b
+    Override config:
+        qxub exec --config tests/test_config.yaml --platform remote -- echo "test"
+
     Commands can be specified either after -- or using --cmd:
 
     \b
         qxub exec --env myenv -- python script.py arg1 arg2
         qxub exec --env myenv --cmd "python script.py arg1 arg2"
     """
+    # Handle config override if specified
+    if config:
+        from .config.manager import set_config_override
+
+        set_config_override(config)
+
+    # Get current config manager (will be the overridden one if --config was used)
+    config_manager = _get_config_manager()
+
     # Set up logging verbosity using the count-based system
     from .config.manager import setup_logging
 
@@ -405,7 +437,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
         # Combine --mod and --mods options
         modules = list(options["mod"]) if options["mod"] else []
         if options["mods"]:
-            modules.extend(options["mods"].split())
+            # Support both comma and space separation
+            import re
+
+            # Split by comma or space, filter out empty strings
+            module_list = re.split(r"[,\s]+", options["mods"])
+            modules.extend([m for m in module_list if m])
         execution_context = ExecutionContext("module", modules, "module")
     elif options["sif"]:
         execution_context = ExecutionContext(
@@ -570,7 +607,218 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, **options):
     ctx.obj.update(processed_params)
     ctx.obj["options"] = qsub_options
 
-    # Execute the job using unified execution
+    # Platform selection and execution mode detection
+    default_platform = config_manager.get_default_platform_name()
+    platform_name = options.get("platform") or default_platform
+
+    # Debug: show platform selection if verbose
+    if params.get("verbose", 0) > 0:
+        if platform_name:
+            source = "CLI option" if options.get("platform") else "config default"
+            click.echo(f"Using platform: {platform_name} (from {source})", err=True)
+        else:
+            click.echo("No platform specified, using local execution", err=True)
+
+    platform_config = None
+    execution_mode = ExecutionMode.LOCAL  # Default to local
+
+    if platform_name:
+        platform_config = config_manager.get_platform_config(platform_name)
+        if not platform_config:
+            # List available platforms for helpful error message
+            available_platforms = config_manager.list_platforms()
+            if available_platforms:
+                platforms_str = ", ".join(available_platforms)
+                raise click.ClickException(
+                    f"Platform '{platform_name}' not found in configuration. "
+                    f"Available platforms: {platforms_str}"
+                )
+            else:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' not found. "
+                    f"No platforms configured in {config_manager._get_user_config_dir() / 'config.yaml'}"
+                )
+
+        # Determine execution mode based on platform config
+        execution_mode = get_execution_mode(platform_config)
+
+        if execution_mode == ExecutionMode.REMOTE:
+            # Remote execution path
+            from .remote.command_builder import build_remote_command
+            from .remote.platform_executor import PlatformRemoteExecutor
+
+            remote_config_dict = platform_config.get("remote")
+            if not remote_config_dict:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' is configured for remote execution "
+                    "but missing 'remote' configuration section"
+                )
+
+            # Build remote command that recreates the qxub invocation
+            # Include --platform to preserve user's explicit choice and prevent config override
+            remote_options = dict(options)
+            remote_options.update(
+                {
+                    "platform": platform_name,  # Preserve explicit platform choice
+                    "config": config,  # Preserve config file choice if specified
+                    "verbose": verbose,
+                    "dry": options.get("dry", False),
+                    "quiet": options.get("quiet", False),
+                    "terse": options.get("terse", False),
+                }
+            )
+
+            # Serialize the execution context and options back to CLI arguments
+            remote_command = build_remote_command(
+                execution_context, remote_options, list(command)
+            )
+
+            if verbose >= 1:
+                click.echo(
+                    f"🌐 Remote execution on platform: {platform_name}", err=True
+                )
+
+            # Create and execute via SSH
+            try:
+                executor = PlatformRemoteExecutor(platform_name, remote_config_dict)
+                exit_code = executor.execute(
+                    remote_command,
+                    stream_output=not options.get("quiet", False),
+                    verbose=verbose,
+                )
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Remote command completed with exit code: {exit_code}",
+                        err=True,
+                    )
+
+                # For successful execution, just return normally instead of ctx.exit()
+                # This avoids Click exception handling complications
+                if exit_code == 0:
+                    if verbose >= 3:
+                        click.echo(
+                            "🔍 Remote execution successful, returning normally",
+                            err=True,
+                        )
+                    return
+                else:
+                    # For non-zero exit codes, still use ctx.exit to propagate the error code
+                    if verbose >= 3:
+                        click.echo(
+                            f"🔍 Remote execution failed with code {exit_code}, using ctx.exit",
+                            err=True,
+                        )
+                    ctx.exit(exit_code)
+
+            except click.exceptions.Exit:
+                # Let Click Exit exceptions pass through - they're not errors
+                if verbose >= 3:
+                    click.echo("🔍 Click Exit exception caught and re-raised", err=True)
+                raise
+            except Exception as e:
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Exception caught: type={type(e)}, value={e}", err=True
+                    )
+                raise click.ClickException(f"Remote execution failed: {e}")
+
+        # Remote execution completed successfully, skip local execution
+        if execution_mode == ExecutionMode.REMOTE:
+            return
+
+        if execution_mode == ExecutionMode.REMOTE_DELEGATED:
+            # Delegated remote execution - no local platform definition needed
+            from .remote.command_builder import build_remote_command
+            from .remote.platform_executor import PlatformRemoteExecutor
+
+            remote_config_dict = platform_config.get("remote")
+            if not remote_config_dict:
+                raise click.ClickException(
+                    f"Platform '{platform_name}' is configured for delegated remote execution "
+                    "but missing 'remote' configuration section"
+                )
+
+            # Build remote command for delegation - preserve platform name but delegate definition
+            remote_options = dict(options)
+            remote_options.update(
+                {
+                    "platform": platform_name,  # Preserve platform name for remote to find its definition
+                    "config": config,  # Preserve config file choice if specified
+                    "verbose": verbose,
+                    "dry": options.get("dry", False),
+                    "quiet": options.get("quiet", False),
+                    "terse": options.get("terse", False),
+                }
+            )
+
+            # Serialize the execution context and options back to CLI arguments
+            remote_command = build_remote_command(
+                execution_context, remote_options, list(command)
+            )
+
+            if verbose >= 1:
+                click.echo(
+                    f"🌐 Delegated remote execution on platform: {platform_name}",
+                    err=True,
+                )
+            if verbose >= 2:
+                click.echo(
+                    f"🔄 Remote qxub will resolve platform definition for '{platform_name}'",
+                    err=True,
+                )
+
+            # Create and execute via SSH
+            try:
+                executor = PlatformRemoteExecutor(platform_name, remote_config_dict)
+                exit_code = executor.execute(
+                    remote_command,
+                    stream_output=not options.get("quiet", False),
+                    verbose=verbose,
+                )
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Delegated remote command completed with exit code: {exit_code}",
+                        err=True,
+                    )
+
+                # For successful execution, just return normally instead of ctx.exit()
+                if exit_code == 0:
+                    if verbose >= 3:
+                        click.echo(
+                            "🔍 Delegated remote execution successful, returning normally",
+                            err=True,
+                        )
+                    return
+                else:
+                    # For non-zero exit codes, still use ctx.exit to propagate the error code
+                    if verbose >= 3:
+                        click.echo(
+                            f"🔍 Delegated remote execution failed with code {exit_code}, using ctx.exit",
+                            err=True,
+                        )
+                    ctx.exit(exit_code)
+
+            except click.exceptions.Exit:
+                # Let Click Exit exceptions pass through - they're not errors
+                if verbose >= 3:
+                    click.echo("🔍 Click Exit exception caught and re-raised", err=True)
+                raise
+            except Exception as e:
+                if verbose >= 3:
+                    click.echo(
+                        f"🔍 Exception caught: type={type(e)}, value={e}", err=True
+                    )
+                raise click.ClickException(f"Delegated remote execution failed: {e}")
+
+        # Delegated remote execution completed, skip local execution
+        if execution_mode == ExecutionMode.REMOTE_DELEGATED:
+            return
+
+        # Local execution continues below
+        if verbose >= 1:
+            click.echo(f"📍 Executing on platform: {platform_name} (local)", err=True)
+
+    # Execute the job using unified execution (local path)
     execute_unified(
         ctx,
         command,
