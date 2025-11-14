@@ -720,12 +720,16 @@ def start_background_resource_collection(
     job_id, joblog_path, foreground=False, verbose=0
 ):
     """
-    Start resource collection in background thread.
+    Start resource collection in background subprocess using fork.
+
+    This creates a truly independent subprocess that survives after the parent
+    exits, avoiding threading complexities and allowing the parent to return
+    to the shell immediately.
+
     Logs progress to ~/.config/qxub/resource_collection.log for monitoring.
     """
     import logging
     import os
-    import threading
     import time
     from datetime import datetime
 
@@ -744,6 +748,7 @@ def start_background_resource_collection(
             logging.debug(f"Error writing to resource collection log: {e}")
 
     def collect_resources_background():
+        """Actual resource collection logic."""
         try:
             log_message(f"Starting resource collection for job {job_id}")
             log_message(f"Joblog path: {joblog_path}")
@@ -810,18 +815,46 @@ def start_background_resource_collection(
         collect_resources_background()
         return None
 
-    # Start the background thread (non-daemon so it survives process exit)
-    # Main process will use os._exit() to exit without waiting for this thread
-    thread = threading.Thread(target=collect_resources_background, daemon=False)
-    thread.start()
+    # Fork a child process for background collection
+    try:
+        pid = os.fork()
+    except OSError as e:
+        logging.warning(f"Failed to fork for background resource collection: {e}")
+        # Fall back to no collection rather than failing the whole job
+        return None
 
-    # Return the thread object so we can reference it
-    log_message(f"Started background resource collection thread for job {job_id}")
-    if verbose >= 2:
-        print(f"🔍 DEBUG: Resource collection thread started for job {job_id}")
-        print(
-            f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log"
-        )
+    if pid > 0:
+        # Parent process - return immediately
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Started background resource collection (PID {pid})")
+            print(
+                f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log"
+            )
+        return None
+
+    # Child process continues here
+    # Close standard file descriptors to fully detach
+    try:
+        sys.stdin.close()
+        sys.stdout.close()
+        sys.stderr.close()
+
+        # Redirect stdin/stdout/stderr to /dev/null
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)  # stdin
+        os.dup2(devnull, 1)  # stdout
+        os.dup2(devnull, 2)  # stderr
+        if devnull > 2:
+            os.close(devnull)
+    except Exception as e:
+        # If descriptor closing fails, log but continue
+        log_message(f"Warning: Failed to close descriptors: {e}")
+
+    # Do the actual resource collection work
+    collect_resources_background()
+
+    # Child process exits when done (don't return to caller)
+    os._exit(0)
 
     return thread
 
