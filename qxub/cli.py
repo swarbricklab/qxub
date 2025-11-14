@@ -4,6 +4,11 @@ This avoids boilerplate code for activating environments and switching directori
 In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
+# Suppress system Python package warnings before any imports
+import warnings
+
+warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version")
+
 import click
 
 from .alias_cli import alias_cli
