@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - feature/v3.3.0-remote-execution
+      - main
+      - 'release/**'  # All release branches
+  pull_request:
+    branches:
+      - main
 
 jobs:
   validate-runner-setup:
