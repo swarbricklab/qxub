@@ -716,7 +716,9 @@ def collect_job_resources_after_completion(job_id, out_file):
         logging.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
-def start_background_resource_collection(job_id, joblog_path, foreground=False):
+def start_background_resource_collection(
+    job_id, joblog_path, foreground=False, verbose=0
+):
     """
     Start resource collection in background thread.
     Logs progress to ~/.config/qxub/resource_collection.log for monitoring.
@@ -809,13 +811,17 @@ def start_background_resource_collection(job_id, joblog_path, foreground=False):
         return None
 
     # Start the background thread (non-daemon so it survives process exit)
+    # Main process will use os._exit() to exit without waiting for this thread
     thread = threading.Thread(target=collect_resources_background, daemon=False)
     thread.start()
 
     # Return the thread object so we can reference it
     log_message(f"Started background resource collection thread for job {job_id}")
-    print(f"🔍 DEBUG: Resource collection thread started for job {job_id}")
-    print(f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log")
+    if verbose >= 2:
+        print(f"🔍 DEBUG: Resource collection thread started for job {job_id}")
+        print(
+            f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log"
+        )
 
     return thread
 
@@ -899,7 +905,7 @@ def monitor_job_single_thread(
         print_status(completion_msg, final=True)
 
     # 9. Start background resource collection and return control immediately
-    if not quiet:
+    if not quiet and verbose < 2:
         print_status(
             "🎉 Job completed! Resource collection starting in background...",
             final=True,
@@ -908,19 +914,21 @@ def monitor_job_single_thread(
     # Use provided joblog path or derive from out_file path as fallback
     if joblog_file:
         joblog_path = str(joblog_file)
-        print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
     else:
         # Fallback: derive joblog path from out_file path (change .out to .log)
         joblog_path = str(out_file).replace(".out", ".log")
-        print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
 
     # If user requested very verbose debug (e.g. -vvv) run collection in foreground
     run_foreground = bool(verbose and int(verbose) >= 3)
-    if run_foreground:
+    if run_foreground and verbose >= 2:
         print(f"🔍 DEBUG: Foreground resource collection enabled (verbose={verbose})")
 
     thread = start_background_resource_collection(
-        job_id, joblog_path, foreground=run_foreground
+        job_id, joblog_path, foreground=run_foreground, verbose=verbose
     )
 
     return exit_status

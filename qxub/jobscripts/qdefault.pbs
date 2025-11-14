@@ -97,6 +97,12 @@ if [ -z "$cwd" ]; then
     exit 1
 fi
 
+# Create execution directory if requested
+if [ "$create_execdir" = "true" ]; then
+    echo "📁 Creating execution directory: $cwd"
+    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+fi
+
 # Change to execution directory
 cd "$cwd" || { echo "❌ ERROR: Failed to change to directory $cwd"; exit 1; }
 

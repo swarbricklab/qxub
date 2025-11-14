@@ -70,6 +70,12 @@ if [ -n "$mods" ]; then
     echo "✅ All modules loaded"
 fi
 
+# Create execution directory if requested
+if [ "$create_execdir" = "true" ]; then
+    echo "📁 Creating execution directory: $cwd"
+    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+fi
+
 # Switch work directory
 echo "📂 Changing to working directory: $cwd"
 cd $cwd
