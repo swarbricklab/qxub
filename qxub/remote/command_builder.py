@@ -164,6 +164,10 @@ def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
     if options.get("execdir"):
         parts.extend(["--execdir", shlex.quote(str(options["execdir"]))])
 
+    # Create execution directory flag
+    if options.get("create_execdir", False):
+        parts.append("--create-execdir")
+
     # Email options
     if options.get("email"):
         parts.extend(["--email", shlex.quote(str(options["email"]))])
@@ -205,6 +209,7 @@ def parse_options_from_ctx(ctx_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], Lis
         "out",
         "err",
         "execdir",
+        "create_execdir",
         "email",
         "email_opts",
         "array",
