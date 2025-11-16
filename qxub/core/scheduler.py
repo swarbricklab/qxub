@@ -51,10 +51,9 @@ def print_status(message, final=False):
                     # Temporary message - overwrite without newline
                     print(f"\r{message}", end="", flush=True, file=tty)
     except (OSError, IOError):
-        # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
-        # This ensures progress messages don't interfere with stdout redirection
-        with open("/dev/null", "w") as devnull:
-            print(f"{message}", file=devnull, flush=True)
+        # Fallback to stderr if /dev/tty is not available (non-interactive context like SSH)
+        # Important messages like job IDs need to be visible even without a TTY
+        print(f"{message}", file=sys.stderr, flush=True)
 
 
 class SimpleSpinner:
