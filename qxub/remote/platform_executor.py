@@ -226,6 +226,9 @@ class PlatformRemoteExecutor:
         # Set platform environment variable for remote qxub
         commands.append(f"export QXUB_PLATFORM={self.platform_name}")
 
+        # Force unbuffered Python output for real-time streaming over SSH
+        commands.append("export PYTHONUNBUFFERED=1")
+
         # Execute the actual qxub command
         commands.append(command)
 
