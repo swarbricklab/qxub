@@ -20,28 +20,26 @@ try:
 except ImportError:
     pass
 
-__version__ = "3.3.1"
+__version__ = "3.3.2"
 
 # Import main CLI
 from . import cli as cli_module
 
 qxub = cli_module.qxub
 
-# Import remote execution components (v2.2)
+# Import remote execution components (v3.3+)
 try:
     from .remote import (  # noqa: F401
-        RemoteConfig,
-        RemoteExecutorFactory,
-        get_remote_config,
-        load_remote_configurations,
+        PlatformRemoteExecutor,
+        RemoteExecutionError,
+        build_remote_command,
     )
 
     __all__ = [
         "qxub",
-        "RemoteConfig",
-        "load_remote_configurations",
-        "get_remote_config",
-        "RemoteExecutorFactory",
+        "PlatformRemoteExecutor",
+        "RemoteExecutionError",
+        "build_remote_command",
     ]
 except ImportError:
     # Remote execution dependencies not available

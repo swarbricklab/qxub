@@ -127,10 +127,8 @@ class PlatformRemoteExecutor:
         """
         ssh_command = self._build_ssh_command(remote_command)
 
-        # Log the command for debugging
-        logger.info(
-            f"Executing SSH command to {self.hostname}: {remote_command[:80]}..."
-        )
+        # Log the command for debugging - show full command for troubleshooting
+        logger.info(f"Executing SSH command to {self.hostname}: {remote_command}")
         logger.debug(f"Full SSH command: {ssh_command}")
 
         # Show SSH connection info in verbose mode
@@ -225,6 +223,9 @@ class PlatformRemoteExecutor:
 
         # Set platform environment variable for remote qxub
         commands.append(f"export QXUB_PLATFORM={self.platform_name}")
+
+        # Force unbuffered Python output for real-time streaming over SSH
+        commands.append("export PYTHONUNBUFFERED=1")
 
         # Execute the actual qxub command
         commands.append(command)

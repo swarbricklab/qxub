@@ -60,7 +60,8 @@ def get_template(template_type: str, custom_template: str = None) -> str:
         pass
 
     # Fallback to relative path from this module
-    current_dir = Path(__file__).parent
+    # templates.py is in qxub/core/, jobscripts are in qxub/jobscripts/
+    current_dir = Path(__file__).parent.parent  # Go up to qxub/ directory
     template_path = current_dir / "jobscripts" / template_filename
     if template_path.exists():
         return str(template_path)
@@ -68,7 +69,7 @@ def get_template(template_type: str, custom_template: str = None) -> str:
     # Last resort - raise an informative error
     raise FileNotFoundError(
         f"Could not locate {template_filename} template file. "
-        f"Looked in: {current_dir / 'jobscripts' / template_filename}"
+        f"Looked in: {template_path}"
     )
 
 

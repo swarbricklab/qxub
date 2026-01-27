@@ -376,8 +376,9 @@ def submit_and_monitor_job(
             joblog_file=ctx_obj.get("joblog"),
             verbose=verbose_level,
         )
-        # Exit with the job's exit status
-        sys.exit(exit_status)
+        # Exit immediately with the job's exit status
+        # Use os._exit() to exit without waiting for background resource collection thread
+        os._exit(exit_status)
     except KeyboardInterrupt:
         # Handle Ctrl-C gracefully
         print("\n🛑 Interrupted! Cleaning up job...")

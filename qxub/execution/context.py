@@ -68,7 +68,8 @@ class ExecutionContext:
         err = Path(ctx_obj["err"])
         # Default to current working directory if execdir is None
         exec_dir = ctx_obj["execdir"] or os.getcwd()
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()}'
+        create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
+        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir}'
 
         # Context-specific variables
         if self.context_type == "conda":

@@ -112,6 +112,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option("--execdir", help="Execution directory (default: current directory)")
 @click.option(
+    "--create-execdir",
+    is_flag=True,
+    help="Create execution directory if it doesn't exist",
+)
+@click.option(
     "--email", help="Email address for PBS notifications (default: configured)"
 )
 @click.option(
@@ -588,6 +593,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "err": options["err"],
         "joblog": None,  # Will be set by config system
         "execdir": options["execdir"],
+        "create_execdir": options["create_execdir"],
         "email": options["email"],
         "email_opts": options["email_opts"],
         "array": options["array"],

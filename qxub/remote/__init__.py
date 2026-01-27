@@ -1,22 +1,27 @@
 """
-Remote execution package for qxub.
+Remote execution package for qxub v3.3+.
 
-This package provides remote execution capabilities for qxub v2.2+ including:
-- URL-based remote configuration
-- SSH-based remote execution (with future protocol extensibility)
-- Remote configuration loading and validation
-- Remote execution backends and error handling
+This package provides platform-aware remote execution capabilities:
+- PlatformRemoteExecutor: SSH-based executor using platform config
+- Command serialization for remote execution
+- Remote execution error handling
 
-Main classes and functions:
-- RemoteConfig: Remote execution configuration
-- RemoteExecutorFactory: Factory for creating remote executors
-- load_remote_configurations: Load user remote configurations
-- get_remote_config: Get specific remote configuration
-
-Supported protocols:
-- SSH: ssh://user@hostname:port
-- Future: AWS, Kubernetes, etc.
+Main classes:
+- PlatformRemoteExecutor: Execute qxub commands on remote platforms via SSH
+- RemoteExecutionError: Base exception for remote execution errors
 """
+
+# Command building utilities
+from .command_builder import build_remote_command
+
+# Platform-aware remote executor
+from .platform_executor import PlatformRemoteExecutor, RemoteExecutionError
+
+__all__ = [
+    "PlatformRemoteExecutor",
+    "RemoteExecutionError",
+    "build_remote_command",
+]
 
 # Core remote configuration
 from .config import RemoteConfig, RemoteConfigError, UnsupportedProtocolError

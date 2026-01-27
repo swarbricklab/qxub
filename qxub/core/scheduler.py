@@ -51,10 +51,9 @@ def print_status(message, final=False):
                     # Temporary message - overwrite without newline
                     print(f"\r{message}", end="", flush=True, file=tty)
     except (OSError, IOError):
-        # Fallback to /dev/null if /dev/tty is not available (non-interactive context)
-        # This ensures progress messages don't interfere with stdout redirection
-        with open("/dev/null", "w") as devnull:
-            print(f"{message}", file=devnull, flush=True)
+        # Fallback to stderr if /dev/tty is not available (non-interactive context like SSH)
+        # Important messages like job IDs need to be visible even without a TTY
+        print(f"{message}", file=sys.stderr, flush=True)
 
 
 class SimpleSpinner:
@@ -716,14 +715,20 @@ def collect_job_resources_after_completion(job_id, out_file):
         logging.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
-def start_background_resource_collection(job_id, joblog_path, foreground=False):
+def start_background_resource_collection(
+    job_id, joblog_path, foreground=False, verbose=0
+):
     """
-    Start resource collection in background thread.
+    Start resource collection in background subprocess using fork.
+
+    This creates a truly independent subprocess that survives after the parent
+    exits, avoiding threading complexities and allowing the parent to return
+    to the shell immediately.
+
     Logs progress to ~/.config/qxub/resource_collection.log for monitoring.
     """
     import logging
     import os
-    import threading
     import time
     from datetime import datetime
 
@@ -742,6 +747,7 @@ def start_background_resource_collection(job_id, joblog_path, foreground=False):
             logging.debug(f"Error writing to resource collection log: {e}")
 
     def collect_resources_background():
+        """Actual resource collection logic."""
         try:
             log_message(f"Starting resource collection for job {job_id}")
             log_message(f"Joblog path: {joblog_path}")
@@ -808,14 +814,46 @@ def start_background_resource_collection(job_id, joblog_path, foreground=False):
         collect_resources_background()
         return None
 
-    # Start the background thread (non-daemon so it survives process exit)
-    thread = threading.Thread(target=collect_resources_background, daemon=False)
-    thread.start()
+    # Fork a child process for background collection
+    try:
+        pid = os.fork()
+    except OSError as e:
+        logging.warning(f"Failed to fork for background resource collection: {e}")
+        # Fall back to no collection rather than failing the whole job
+        return None
 
-    # Return the thread object so we can reference it
-    log_message(f"Started background resource collection thread for job {job_id}")
-    print(f"🔍 DEBUG: Resource collection thread started for job {job_id}")
-    print(f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log")
+    if pid > 0:
+        # Parent process - return immediately
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Started background resource collection (PID {pid})")
+            print(
+                f"🔍 DEBUG: Monitor progress: tail -f ~/.config/qxub/resource_collection.log"
+            )
+        return None
+
+    # Child process continues here
+    # Close standard file descriptors to fully detach
+    try:
+        sys.stdin.close()
+        sys.stdout.close()
+        sys.stderr.close()
+
+        # Redirect stdin/stdout/stderr to /dev/null
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)  # stdin
+        os.dup2(devnull, 1)  # stdout
+        os.dup2(devnull, 2)  # stderr
+        if devnull > 2:
+            os.close(devnull)
+    except Exception as e:
+        # If descriptor closing fails, log but continue
+        log_message(f"Warning: Failed to close descriptors: {e}")
+
+    # Do the actual resource collection work
+    collect_resources_background()
+
+    # Child process exits when done (don't return to caller)
+    os._exit(0)
 
     return thread
 
@@ -899,7 +937,7 @@ def monitor_job_single_thread(
         print_status(completion_msg, final=True)
 
     # 9. Start background resource collection and return control immediately
-    if not quiet:
+    if not quiet and verbose < 2:
         print_status(
             "🎉 Job completed! Resource collection starting in background...",
             final=True,
@@ -908,19 +946,21 @@ def monitor_job_single_thread(
     # Use provided joblog path or derive from out_file path as fallback
     if joblog_file:
         joblog_path = str(joblog_file)
-        print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
     else:
         # Fallback: derive joblog path from out_file path (change .out to .log)
         joblog_path = str(out_file).replace(".out", ".log")
-        print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
 
     # If user requested very verbose debug (e.g. -vvv) run collection in foreground
     run_foreground = bool(verbose and int(verbose) >= 3)
-    if run_foreground:
+    if run_foreground and verbose >= 2:
         print(f"🔍 DEBUG: Foreground resource collection enabled (verbose={verbose})")
 
     thread = start_background_resource_collection(
-        job_id, joblog_path, foreground=run_foreground
+        job_id, joblog_path, foreground=run_foreground, verbose=verbose
     )
 
     return exit_status
