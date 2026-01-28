@@ -125,17 +125,20 @@ class MultiJobMonitor:
             return "Q", None, None  # Assume queued if we can't check
 
     def _get_status_emoji(self, status: str, exit_code: Optional[int] = None) -> str:
-        """Get emoji representation of job status."""
+        """Get status representation for job status.
+
+        Uses text-based symbols for consistent column width in tables.
+        """
         if status == "Q":
-            return "⏳"  # Queued/Waiting
+            return "[Q]"  # Queued/Waiting
         elif status == "R":
-            return "🔄"  # Running
+            return "[R]"  # Running
         elif status == "C":  # Completed successfully
-            return "✅"
+            return "[OK]"
         elif status == "F":  # Failed
-            return "❌"
+            return "[X]"
         else:
-            return "❓"  # Unknown
+            return "[?]"  # Unknown
 
     def _update_all_statuses(self) -> None:
         """Update status for all monitored jobs."""
