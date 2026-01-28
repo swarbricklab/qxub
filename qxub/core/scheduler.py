@@ -281,16 +281,23 @@ def get_default_status_dir():
     return Path("/scratch", project, user, "qxub", "status")
 
 
-def job_status_from_files(job_id, status_dir=None):
+def job_status_from_files(job_id, status_dir=None, log_dir=None):
     """
     Check the current status of a job using status files instead of qstat.
 
     This is faster and more reliable than polling qstat, especially when the
     PBS scheduler is under heavy load.
 
+    Status detection priority:
+    1. final_exit_code_{job_id} file - definitive completion status
+    2. PBS job log file with Exit Status - job was killed by PBS
+    3. job_started_{job_id} file - job is running
+    4. No files - job is queued or unknown
+
     Args:
         job_id: PBS job ID (e.g., "12345.gadi-pbs")
         status_dir: Path to status directory. If None, uses default.
+        log_dir: Path to log directory (for PBS job logs). If None, uses parent of status_dir.
 
     Returns:
         Tuple of (status, exit_code) where:
@@ -305,11 +312,17 @@ def job_status_from_files(job_id, status_dir=None):
     else:
         status_dir = Path(status_dir)
 
+    # Log directory is typically the parent of status directory
+    if log_dir is None:
+        log_dir = status_dir.parent
+    else:
+        log_dir = Path(log_dir)
+
     # Check for status files
     job_started_file = status_dir / f"job_started_{job_id}"
     final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
 
-    # Check if job has completed
+    # Check if job has completed via our exit code file
     if final_exit_code_file.exists():
         try:
             with open(final_exit_code_file, "r", encoding="utf-8") as f:
@@ -324,12 +337,83 @@ def job_status_from_files(job_id, status_dir=None):
             )
             return "C", None  # Assume completed if file exists but unreadable
 
-    # Check if job has started (running)
+    # Check if job has started
     if job_started_file.exists():
-        return "R", None  # Running
+        # Job started but no final_exit_code - could be:
+        # 1. Still running
+        # 2. Killed by PBS before our cleanup code ran
+        #
+        # Check for PBS job log with exit status (appears after job ends)
+        exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
+        if exit_code is not None:
+            # PBS killed the job before cleanup code ran
+            logging.debug(
+                f"Found PBS exit status {exit_code} for job {job_id} in log file"
+            )
+            if exit_code == 0:
+                return "C", exit_code
+            else:
+                return "F", exit_code
+
+        # No PBS log exit status found - job is still running
+        return "R", None
 
     # No status files found - job is either queued or unknown
     return "Q", None
+
+
+def _check_pbs_job_log_for_exit(job_id, log_dir):
+    """
+    Check PBS job log files for exit status when job was killed by PBS.
+
+    When PBS kills a job (e.g., walltime exceeded), our cleanup code doesn't run
+    and no final_exit_code file is created. However, PBS appends a resource usage
+    block to the job log file that includes the exit status.
+
+    Args:
+        job_id: PBS job ID (e.g., "12345.gadi-pbs")
+        log_dir: Directory containing job log files
+
+    Returns:
+        int: Exit code if found in PBS log, None otherwise
+    """
+    import glob
+    import re
+    from pathlib import Path
+
+    log_dir = Path(log_dir)
+    if not log_dir.exists():
+        return None
+
+    # Search for log files containing this job ID
+    # PBS appends resource usage to .log files
+    try:
+        for log_file in log_dir.glob("*.log"):
+            try:
+                # Only check recently modified files (within last hour for efficiency)
+                # and files that could contain this job
+                with open(log_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                    # Check if this log file is for our job
+                    if f"Job Id:             {job_id}" not in content:
+                        continue
+
+                    # Look for PBS resource usage block with exit status
+                    # Format: "   Exit Status:        -29 (Job failed due to exceeding walltime)"
+                    # or:     "   Exit Status:        0"
+                    exit_match = re.search(r"Exit Status:\s*(-?\d+)", content)
+                    if exit_match:
+                        return int(exit_match.group(1))
+
+            except (IOError, OSError) as e:
+                logging.debug(f"Could not read log file {log_file}: {e}")
+                continue
+
+    except Exception as e:
+        logging.debug(f"Error searching log files in {log_dir}: {e}")
+
+    return None
 
 
 def get_job_resource_data(job_id):
