@@ -928,7 +928,7 @@ def monitor_job_single_thread(
 
     # 7. Stream job output
     exit_status = stream_job_output_with_status_files(
-        job_id, out_file, err_file, final_exit_code_file
+        job_id, out_file, err_file, final_exit_code_file, quiet=quiet
     )
 
     # 8. Completion message
@@ -980,10 +980,17 @@ def read_exit_status_from_file(exit_code_file):
 
 
 def stream_job_output_with_status_files(
-    job_id, out_file, err_file, final_exit_code_file
+    job_id, out_file, err_file, final_exit_code_file, quiet=False
 ):
     """
     Stream job output files until job completion using status files for detection.
+
+    Args:
+        job_id: The PBS job ID
+        out_file: Path to stdout file
+        err_file: Path to stderr file
+        final_exit_code_file: Path to status file containing exit code
+        quiet: If True, suppress output streaming (for terse/quiet modes)
 
     Returns:
         int: Job exit status
@@ -996,8 +1003,8 @@ def stream_job_output_with_status_files(
 
     # Monitor job completion via status file
     while True:
-        # Stream new output from STDOUT
-        if os.path.exists(out_file):
+        # Stream new output from STDOUT (skip if quiet mode)
+        if not quiet and os.path.exists(out_file):
             try:
                 with open(out_file, "r", encoding="utf-8") as f:
                     f.seek(out_pos)
@@ -1006,9 +1013,17 @@ def stream_job_output_with_status_files(
                     out_pos = f.tell()
             except (OSError, IOError):
                 pass
+        elif quiet and os.path.exists(out_file):
+            # Still need to track position even in quiet mode for final read
+            try:
+                with open(out_file, "r", encoding="utf-8") as f:
+                    f.seek(0, 2)  # Seek to end
+                    out_pos = f.tell()
+            except (OSError, IOError):
+                pass
 
-        # Stream new output from STDERR
-        if os.path.exists(err_file):
+        # Stream new output from STDERR (skip if quiet mode)
+        if not quiet and os.path.exists(err_file):
             try:
                 with open(err_file, "r", encoding="utf-8") as f:
                     f.seek(err_pos)
@@ -1017,11 +1032,19 @@ def stream_job_output_with_status_files(
                     err_pos = f.tell()
             except (OSError, IOError):
                 pass
+        elif quiet and os.path.exists(err_file):
+            # Still need to track position even in quiet mode for final read
+            try:
+                with open(err_file, "r", encoding="utf-8") as f:
+                    f.seek(0, 2)  # Seek to end
+                    err_pos = f.tell()
+            except (OSError, IOError):
+                pass
 
         # Check if job finished using status file
         if final_exit_code_file.exists():
-            # Read any final output
-            if os.path.exists(out_file):
+            # Read any final output (skip if quiet mode)
+            if not quiet and os.path.exists(out_file):
                 try:
                     with open(out_file, "r", encoding="utf-8") as f:
                         f.seek(out_pos)
@@ -1030,7 +1053,7 @@ def stream_job_output_with_status_files(
                 except (OSError, IOError):
                     pass
 
-            if os.path.exists(err_file):
+            if not quiet and os.path.exists(err_file):
                 try:
                     with open(err_file, "r", encoding="utf-8") as f:
                         f.seek(err_pos)
