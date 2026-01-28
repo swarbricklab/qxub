@@ -299,6 +299,72 @@ def job_status(job_id):
         return "C"  # Assume completed if no output
 
 
+def get_default_status_dir():
+    """Get the default status directory path for qxub jobs.
+
+    Returns:
+        Path to the status directory (e.g., /scratch/{project}/{user}/qxub/status)
+    """
+    import os
+    from pathlib import Path
+
+    project = os.getenv("PROJECT", "a56")
+    user = os.getenv("USER", "unknown")
+
+    return Path("/scratch", project, user, "qxub", "status")
+
+
+def job_status_from_files(job_id, status_dir=None):
+    """
+    Check the current status of a job using status files instead of qstat.
+
+    This is faster and more reliable than polling qstat, especially when the
+    PBS scheduler is under heavy load.
+
+    Args:
+        job_id: PBS job ID (e.g., "12345.gadi-pbs")
+        status_dir: Path to status directory. If None, uses default.
+
+    Returns:
+        Tuple of (status, exit_code) where:
+        - status: "Q" (queued/unknown), "R" (running), "C" (completed), or "F" (failed)
+        - exit_code: int if completed, None otherwise
+    """
+    import os
+    from pathlib import Path
+
+    if status_dir is None:
+        status_dir = get_default_status_dir()
+    else:
+        status_dir = Path(status_dir)
+
+    # Check for status files
+    job_started_file = status_dir / f"job_started_{job_id}"
+    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+
+    # Check if job has completed
+    if final_exit_code_file.exists():
+        try:
+            with open(final_exit_code_file, "r", encoding="utf-8") as f:
+                exit_code = int(f.readline().strip())
+                if exit_code == 0:
+                    return "C", exit_code  # Completed successfully
+                else:
+                    return "F", exit_code  # Failed with non-zero exit
+        except (ValueError, IOError) as e:
+            logging.warning(
+                f"Could not read exit code from {final_exit_code_file}: {e}"
+            )
+            return "C", None  # Assume completed if file exists but unreadable
+
+    # Check if job has started (running)
+    if job_started_file.exists():
+        return "R", None  # Running
+
+    # No status files found - job is either queued or unknown
+    return "Q", None
+
+
 def wait_for_job_exit_status(job_id, initial_wait=5, poll_interval=5, max_attempts=12):
     """
     Wait for PBS to clean up the job and get its exit status.

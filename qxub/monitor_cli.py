@@ -21,13 +21,13 @@ from rich.table import Table
 from rich.text import Text
 
 from .config import config_manager
-from .core.scheduler import get_job_resource_data, job_status
+from .core.scheduler import get_default_status_dir, job_status_from_files
 
 console = Console()
 
 
 class MultiJobMonitor:
-    """Monitor multiple PBS jobs simultaneously."""
+    """Monitor multiple PBS jobs simultaneously using file-based status checking."""
 
     def __init__(
         self,
@@ -38,6 +38,7 @@ class MultiJobMonitor:
         show_names_only: bool = False,
         show_job_ids_only: bool = False,
         summary_mode: bool = False,
+        status_dir: Optional[str] = None,
     ):
         """
         Initialize the multi-job monitor.
@@ -50,6 +51,7 @@ class MultiJobMonitor:
             show_names_only: If True, only show job names
             show_job_ids_only: If True, only show job IDs
             summary_mode: If True, show only summary counts
+            status_dir: Path to status directory. If None, uses default.
         """
         self.job_ids = set(job_ids)
         self.quiet = quiet
@@ -60,17 +62,19 @@ class MultiJobMonitor:
         self.summary_mode = summary_mode
         self.shutdown_requested = threading.Event()
 
+        # Status directory for file-based monitoring
+        self.status_dir = status_dir if status_dir else get_default_status_dir()
+
         # Track job states and metadata
         self.job_states: Dict[str, str] = {}
         self.job_names: Dict[str, str] = {}
         self.job_exit_codes: Dict[str, Optional[int]] = {}
         self.completed_jobs: Set[str] = set()
-        self.invalid_jobs: Set[str] = set()
         self.failed_jobs: Set[str] = set()  # Jobs with non-zero exit codes
 
-        # Initialize all jobs as unknown
+        # Initialize all jobs as queued (waiting for status files)
         for job_id in self.job_ids:
-            self.job_states[job_id] = "?"
+            self.job_states[job_id] = "Q"
             self.job_names[job_id] = "Unknown"
             self.job_exit_codes[job_id] = None
 
@@ -92,71 +96,51 @@ class MultiJobMonitor:
         self, job_id: str
     ) -> Tuple[str, Optional[str], Optional[int]]:
         """
-        Check status of a single job and get job name and exit code.
+        Check status of a single job using file-based monitoring.
+
+        This approach is faster and more reliable than polling qstat,
+        especially when the PBS scheduler is under heavy load.
 
         Args:
             job_id: PBS job ID
 
         Returns:
             Tuple of (status, job_name, exit_code)
-            Status can be Q, R, C, H, etc. or 'INVALID' if job doesn't exist
+            Status can be Q (queued), R (running), C (completed), F (failed)
         """
         try:
-            status = job_status(job_id)
+            # Use file-based status checking (fast, no qstat dependency)
+            status, exit_code = job_status_from_files(job_id, self.status_dir)
 
-            # Try to get job details for name and exit code
+            # Extract job name from job_id if possible (e.g., "qx-20260128_184415")
+            # The job name is typically the prefix before the timestamp
             job_name = None
-            exit_code = None
-
-            try:
-                job_data = get_job_resource_data(job_id)
-                if job_data:
-                    # Job name is in the metadata section
-                    job_name = job_data.get("metadata", {}).get("Job_Name", "Unknown")
-                    # Exit code is available for completed jobs
-                    if status in ["C", "F"]:
-                        # Try both possible keys for exit status
-                        exit_status_value = job_data.get("exit_status") or job_data.get(
-                            "Exit_Status"
-                        )
-                        if exit_status_value is not None:
-                            try:
-                                exit_code = int(exit_status_value)
-                            except (ValueError, TypeError):
-                                exit_code = None
-            except Exception as e:
-                logging.debug(f"Could not get job details for {job_id}: {e}")
+            # We don't have the job name from files, leave as None
+            # The display will use "Unknown" which is fine
 
             return status, job_name, exit_code
 
         except Exception as e:
             logging.debug(f"Failed to check status for job {job_id}: {e}")
-            return "INVALID", None, None
+            return "Q", None, None  # Assume queued if we can't check
 
     def _get_status_emoji(self, status: str, exit_code: Optional[int] = None) -> str:
         """Get emoji representation of job status."""
         if status == "Q":
-            return "⏳"  # Queued
+            return "⏳"  # Queued/Waiting
         elif status == "R":
             return "🔄"  # Running
-        elif status in ["C", "F"]:  # Completed/Finished
-            if exit_code is not None:
-                return "✅" if exit_code == 0 else "❌"
-            else:
-                return "✅"  # Assume success if no exit code available
-        elif status == "H":
-            return "⏸️"  # Held
-        elif status == "E":
-            return "🔚"  # Exiting
-        elif status == "INVALID":
-            return "🚫"  # Invalid
+        elif status == "C":  # Completed successfully
+            return "✅"
+        elif status == "F":  # Failed
+            return "❌"
         else:
             return "❓"  # Unknown
 
     def _update_all_statuses(self) -> None:
         """Update status for all monitored jobs."""
         for job_id in self.job_ids:
-            if job_id in self.completed_jobs or job_id in self.invalid_jobs:
+            if job_id in self.completed_jobs:
                 continue
 
             status, job_name, exit_code = self._check_job_status(job_id)
@@ -167,14 +151,11 @@ class MultiJobMonitor:
             if exit_code is not None:
                 self.job_exit_codes[job_id] = exit_code
 
-            if status == "INVALID":
-                self.invalid_jobs.add(job_id)
-                self.job_states[job_id] = "INVALID"
-            elif status in ["C", "F"]:  # Completed or Finished
+            if status in ["C", "F"]:  # Completed or Failed
                 self.completed_jobs.add(job_id)
                 self.job_states[job_id] = status
                 # Track failed jobs (non-zero exit codes)
-                if exit_code is not None and exit_code != 0:
+                if status == "F" or (exit_code is not None and exit_code != 0):
                     self.failed_jobs.add(job_id)
             else:
                 self.job_states[job_id] = status
@@ -232,48 +213,29 @@ class MultiJobMonitor:
         # Get statistics
         stats = self._get_summary_stats()
 
-        # Define state display order and mapping
+        # Define state display order and mapping for file-based monitoring
         state_display = [
             ("Q", "Queued", "⏳"),
             ("R", "Running", "🔄"),
             ("C", "Completed", "✅"),
-            ("F", "Finished", "✅"),
-            ("H", "Held", "⏸️"),
-            ("E", "Exiting", "🔚"),
-            ("INVALID", "Invalid", "🚫"),
-            ("?", "Unknown", "❓"),
+            ("F", "Failed", "❌"),
         ]
 
         # Count completed vs failed jobs for more detailed stats
         completed_success = 0
         completed_failed = 0
         for job_id in self.job_ids:
-            status = self.job_states.get(job_id, "?")
-            if status in ["C", "F"]:
-                exit_code = self.job_exit_codes.get(job_id)
-                if exit_code is not None and exit_code != 0:
-                    completed_failed += 1
-                else:
-                    completed_success += 1
+            status = self.job_states.get(job_id, "Q")
+            if status == "C":
+                completed_success += 1
+            elif status == "F":
+                completed_failed += 1
 
         # Add rows for states that have jobs
         for state_code, state_name, emoji in state_display:
             count = stats.get(state_code, 0)
             if count > 0:
-                # Special handling for completed jobs to show success/failure breakdown
-                if state_code in ["C", "F"] and (
-                    completed_success > 0 or completed_failed > 0
-                ):
-                    if completed_success > 0:
-                        table.add_row(
-                            f"{state_name} (Success)", str(completed_success), "✅"
-                        )
-                    if completed_failed > 0:
-                        table.add_row(
-                            f"{state_name} (Failed)", str(completed_failed), "❌"
-                        )
-                else:
-                    table.add_row(state_name, str(count), emoji)
+                table.add_row(state_name, str(count), emoji)
 
         return table
 
@@ -282,7 +244,7 @@ class MultiJobMonitor:
         Monitor all jobs until completion.
 
         Returns:
-            Exit code: 0 if all jobs completed with exit code 0, 1 if any failed/invalid
+            Exit code: 0 if all jobs completed with exit code 0, 1 if any failed
         """
         if not self.job_ids:
             click.echo("No job IDs to monitor.", err=True)
@@ -301,11 +263,12 @@ class MultiJobMonitor:
                     return 130  # SIGINT exit code
 
                 # Check if all jobs are done
-                total_done = len(self.completed_jobs) + len(self.invalid_jobs)
-                if total_done >= len(self.job_ids):
+                if len(self.completed_jobs) >= len(self.job_ids):
                     break
 
-                click.echo(f"{total_done}/{len(self.job_ids)} jobs complete")
+                click.echo(
+                    f"{len(self.completed_jobs)}/{len(self.job_ids)} jobs complete"
+                )
 
                 # Wait with interrupt checking and countdown
                 self._wait_with_countdown("Checking again in")
@@ -320,7 +283,7 @@ class MultiJobMonitor:
             # Final summary
             successful_jobs = len(self.completed_jobs) - len(self.failed_jobs)
             click.echo(
-                f"All jobs complete: {successful_jobs} successful, {len(self.failed_jobs)} failed, {len(self.invalid_jobs)} invalid"
+                f"All jobs complete: {successful_jobs} successful, {len(self.failed_jobs)} failed"
             )
 
         else:
@@ -342,8 +305,7 @@ class MultiJobMonitor:
                             return 130
 
                         # Check if all jobs are done
-                        total_done = len(self.completed_jobs) + len(self.invalid_jobs)
-                        if total_done >= len(self.job_ids):
+                        if len(self.completed_jobs) >= len(self.job_ids):
                             # Do a final update to get exit codes
                             self._update_all_statuses()
                             # Show final status with updated exit codes
@@ -366,16 +328,14 @@ class MultiJobMonitor:
                 console.print(f"✅ Successful: {successful_jobs}")
                 if self.failed_jobs:
                     console.print(f"❌ Failed: {len(self.failed_jobs)}")
-                if self.invalid_jobs:
-                    console.print(f"🚫 Invalid: {len(self.invalid_jobs)}")
 
             except Exception as e:
                 console.print(f"[red]Error during monitoring: {e}[/red]")
                 return 1
 
         # Return appropriate exit code - 0 only if ALL jobs succeeded
-        if self.invalid_jobs or self.failed_jobs:
-            return 1  # Some jobs failed or were invalid
+        if self.failed_jobs:
+            return 1  # Some jobs failed
         return 0  # All jobs completed successfully with exit code 0
 
     def _wait_with_countdown(self, message: str) -> None:
@@ -427,8 +387,11 @@ def monitor_cli(ctx, job_ids, quiet, interval, suffix, name_only, job_id_only, s
     Monitor multiple PBS jobs and block until all are complete.
     Job IDs can be provided as arguments or read from stdin.
 
+    Uses file-based status checking (fast, no qstat dependency) by monitoring
+    status files created by qxub job scripts in the status directory.
+
     The exit code is 0 only if ALL monitored jobs complete with exit code 0.
-    If any job fails (non-zero exit code) or is invalid, the exit code is 1.
+    If any job fails (non-zero exit code), the exit code is 1.
 
     Examples:
 
