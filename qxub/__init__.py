@@ -20,7 +20,7 @@ try:
 except ImportError:
     pass
 
-__version__ = "3.3.3"
+__version__ = "3.4.0"
 
 # Import main CLI
 from . import cli as cli_module
