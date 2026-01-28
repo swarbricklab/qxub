@@ -201,14 +201,14 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log job submission: %s", e)
 
-    # Handle terse mode - emit job ID but continue monitoring like quiet mode
+    # Handle terse mode - emit job ID and return immediately (for pipeline use)
     if ctx_obj.get("terse", False):
         click.echo(job_id)
         logging.info(
-            "Terse mode: emitted job ID %s and continuing with silent monitoring",
+            "Terse mode: emitted job ID %s and returning immediately",
             job_id,
         )
-        # Continue to monitoring (don't return here)
+        return  # Return immediately for terse mode
     elif not ctx_obj["quiet"]:
         # Display job ID to user (only in normal mode, not quiet or terse)
         from ..core.scheduler import print_status
