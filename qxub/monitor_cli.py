@@ -33,7 +33,7 @@ class MultiJobMonitor:
         self,
         job_ids: List[str],
         quiet: bool = False,
-        refresh_interval: int = 30,
+        refresh_interval: int = 5,
         suffix_to_remove: Optional[str] = None,
         show_names_only: bool = False,
         show_job_ids_only: bool = False,
@@ -367,7 +367,7 @@ class MultiJobMonitor:
     "--quiet", "-q", is_flag=True, help="Quiet mode: show minimal progress output"
 )
 @click.option(
-    "--interval", "-i", default=30, help="Refresh interval in seconds (default: 30)"
+    "--interval", "-i", default=5, help="Refresh interval in seconds (default: 5)"
 )
 @click.option(
     "--suffix", help="Suffix to remove from job IDs in display (e.g., '.gadi-pbs')"
@@ -421,7 +421,7 @@ def monitor_cli(ctx, job_ids, quiet, interval, suffix, name_only, job_id_only, s
             suffix = monitor_config.get("default_suffix", None)
 
         # Get default interval if not specified or use config default
-        if interval == 30:  # Check if it's the default value
+        if interval == 5:  # Check if it's the default value
             config_interval = monitor_config.get("default_interval", None)
             if config_interval is not None:
                 interval = config_interval
