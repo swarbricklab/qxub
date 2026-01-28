@@ -201,6 +201,20 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log job submission: %s", e)
 
+    # Log execution to history system (must happen before terse mode early return)
+    try:
+        # Prepare file paths for history
+        file_paths = {
+            "out": ctx_obj["out"],
+            "err": ctx_obj["err"],
+            "joblog": ctx_obj.get("joblog"),  # May be None initially
+        }
+        history_manager.log_execution(
+            ctx, success=True, job_id=job_id, file_paths=file_paths
+        )
+    except Exception as e:
+        logging.debug("Failed to log execution history: %s", e)
+
     # Handle terse mode - emit job ID and return immediately (for pipeline use)
     if ctx_obj.get("terse", False):
         click.echo(job_id)
@@ -215,20 +229,6 @@ def execute_unified(
 
         success_msg = f"✅ Job submitted successfully! Job ID: {job_id}"
         print_status(success_msg, final=True)
-
-    # Log execution to history system
-    try:
-        # Prepare file paths for history
-        file_paths = {
-            "out": ctx_obj["out"],
-            "err": ctx_obj["err"],
-            "joblog": ctx_obj.get("joblog"),  # May be None initially
-        }
-        history_manager.log_execution(
-            ctx, success=True, job_id=job_id, file_paths=file_paths
-        )
-    except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
 
     # All modes now continue to monitoring (removed the quiet mode early return)
 
