@@ -87,18 +87,18 @@ class OutputCoordinator:
     def __init__(self):
         self.output_started = threading.Event()      # Output begins streaming
         self.spinner_cleared = threading.Event()     # Spinner has been cleared
-        self.job_completed = threading.Event()       # Job finished (from qstat)
+        self.job_completed = threading.Event()       # Job finished (from status files)
         self.shutdown_requested = threading.Event()  # Ctrl-C pressed
         self.eof_detected = threading.Event()        # Log files reached EOF
         self.submission_complete = threading.Event() # Job submission phase complete
         self.job_running = threading.Event()         # Job status became "R"
-        self.job_finished = threading.Event()        # Job status became "F" or "H"
+        self.job_finished = threading.Event()        # Job completed or failed
         self.job_exit_status = None                   # Final job exit code
 ```
 
-**New Event-Driven Events**:
-- `job_running` - Signaled when job status changes to "R" (Running)
-- `job_finished` - Signaled when job status changes to "F" (Finished) or "H" (Held)
+**Event-Driven Status Detection**:
+- `job_running` - Signaled when `job_started_{job_id}` file appears
+- `job_finished` - Signaled when `final_exit_code_{job_id}` file appears
 - These events trigger immediate spinner shutdown instead of arbitrary timeouts
 
 **Events are boolean flags that threads can wait for or signal**:
@@ -108,83 +108,53 @@ class OutputCoordinator:
 
 ### Coordinated Job Submission
 
-The `start_job_monitoring()` function in `scheduler.py` provides coordinated thread startup:
+The `monitor_job_single_thread()` function in `scheduler.py` provides coordinated job monitoring using status files:
 
 ```python
-def start_job_monitoring(job_id, out_file, err_file, quiet=False, success_msg=None):
+def monitor_job_single_thread(job_id, out_file, err_file, quiet=False, joblog_file=None, verbose=0):
     """
-    Start job monitoring threads and return coordinator for external signaling.
+    Monitor a job using file-based status detection.
 
-    Returns:
-        tuple: (coordinator, monitor_function) where monitor_function() waits for completion
+    Status is determined by checking status files in the job output directory:
+    - job_started_{job_id} - Created when job begins execution
+    - final_exit_code_{job_id} - Created when job completes with exit code
+
+    This approach is faster and more reliable than polling qstat,
+    especially when the PBS scheduler is under heavy load.
     """
-    # Create coordinator for thread synchronization
-    coordinator = OutputCoordinator()
-
-    # Create threads for job monitoring and log tailing
-    qstat_thread = threading.Thread(
-        target=monitor_qstat, args=(job_id, quiet, coordinator, success_msg)
-    )
-    out_thread = threading.Thread(
-        target=tail, args=(out_file, "STDOUT", coordinator), daemon=True
-    )
-    err_thread = threading.Thread(
-        target=tail, args=(err_file, "STDERR", coordinator), daemon=True
-    )
-
-    # Set up signal handler for Ctrl-C
-    def signal_handler(signum, frame):
-        logging.info("Interrupt received, shutting down threads...")
-        coordinator.signal_shutdown()
-
-    original_handler = signal.signal(signal.SIGINT, signal_handler)
-
-    # Start all threads
-    qstat_thread.start()
-    out_thread.start()
-    err_thread.start()
-
-    def wait_for_completion():
-        """Wait for job monitoring to complete and return exit status"""
-        try:
-            # Wait for job monitoring to complete or shutdown signal
-            qstat_thread.join()
-            return coordinator.job_exit_status or 0
-        finally:
-            # Restore original signal handler
-            signal.signal(signal.SIGINT, original_handler)
-
-    return coordinator, wait_for_completion
 ```
+
+**Status Detection via Files**:
+
+| File | Status | Meaning |
+|------|--------|---------|
+| None | Q (Queued) | Job submitted but not yet started |
+| `job_started_{job_id}` | R (Running) | Job is executing |
+| `final_exit_code_{job_id}` | C/F | Job completed (C=success, F=failed) |
 
 **Coordination Flow**:
 1. **Job Construction**: Progress message "🔧 Job command constructed"
 2. **Submission**: qsub called, job ID returned
 3. **Progress Update**: "✅ Job submitted successfully! Job ID: X"
-4. **Thread Creation**: `start_job_monitoring()` creates coordinator and threads
-5. **Submission Signal**: `coordinator.signal_submission_complete()`
-6. **Monitor Activation**: Monitor thread starts polling qstat after waiting for submission_complete
-7. **Spinner Start**: Spinner shows for 10 seconds maximum in monitor thread
-8. **Output Detection**: Tail threads detect output and signal `output_started`
-9. **Spinner Coordination**: Spinner waits for `output_started`, then clears
+4. **File-Based Monitoring**: Polls status files instead of qstat
+5. **Output Streaming**: Tails output files for real-time display
+6. **Completion Detection**: Reads exit code from `final_exit_code_{job_id}`
 
 ### Thread Responsibilities
 
-#### 1. Job Monitor Thread (`monitor_qstat`)
+#### 1. Main Monitoring Loop
 ```
 Lifecycle: After submission through job completion
-Purpose:  Monitor job completion via PBS qstat
+Purpose:  Monitor job completion via status files
 Signals:  job_completed, job_exit_status
-Waits:    submission_complete, shutdown_requested
 ```
 
-**Behavior**: Waits for `submission_complete` event before starting qstat polling. This prevents the monitor from starting too early and ensures the job submission process is fully complete before monitoring begins.
+**Behavior**: Uses file-based status detection instead of qstat polling:
 
-- Polls `qstat` every 30 seconds to check job status
-- When job completes, waits 5 seconds for PBS cleanup
-- Polls for exit status every 5 seconds (up to 60 seconds)
-- Stores final exit status in coordinator
-- Signals `job_completed` to shut down other threads
+- Checks for `job_started_{job_id}` to detect job start
+- Checks for `final_exit_code_{job_id}` to detect completion
+- Reads exit code directly from the status file
+- Much faster and more reliable than qstat, especially under load
 
 #### 2. STDOUT Tail Thread (`tail`)
 ```
@@ -249,26 +219,24 @@ Here's the complete sequence from job submission to completion:
    └── Signal handler registered in execution.py
 
 3. Thread Setup
-   ├── start_job_monitoring() called with job_id, out_file, err_file
+   ├── monitor_job_single_thread() called with job_id, out_file, err_file
    ├── OutputCoordinator created
-   ├── Monitor thread created (target=monitor_qstat)
    ├── STDOUT tail thread created (target=tail, daemon=True)
    ├── STDERR tail thread created (target=tail, daemon=True)
    ├── Local signal handler registered for thread coordination
-   └── All threads started immediately (monitor, stdout, stderr)
+   └── All threads started immediately
 
-4. Monitor Activation
-   ├── monitor_qstat waits for submission_complete event
-   ├── submission_complete triggered by coordinator.signal_submission_complete()
-   ├── Monitor creates JobSpinner context (creates 4th thread - spinner daemon)
-   ├── Monitor begins event-driven qstat polling loop
+4. File-Based Monitoring
+   ├── Monitor checks for job_started_{job_id} file
+   ├── When file appears, job is running
+   ├── Monitor creates JobSpinner context for progress indication
    ├── Spinner animates until job status change or output detected
-   ├── Monitor signals job_running when status becomes "R"
-   ├── Monitor signals job_finished when status becomes "F" or "H"
+   ├── Monitor signals job_running when job_started file appears
+   ├── Monitor signals job_finished when final_exit_code file appears
    └── STDOUT/STDERR tail threads follow log files throughout
 
 5. Job Starts Running
-   ├── Monitor detects status change from qstat polling
+   ├── Monitor detects job_started_{job_id} file
    ├── Monitor signals job_running event to coordinator
    ├── Spinner thread detects job_running via should_stop_spinner() and exits
    ├── Monitor displays "\r🚀 Job started running" (carriage return clears spinner)
@@ -278,15 +246,14 @@ Here's the complete sequence from job submission to completion:
    └── Output streams to terminal in real-time
 
 6. Job Completes
-   ├── monitor_qstat detects completion via qstat (status F or H)
-   ├── monitor_qstat waits for PBS cleanup (5s)
-   ├── monitor_qstat polls for exit status (5s intervals, max 60s)
-   ├── monitor_qstat signals job_completed and stores exit status
+   ├── Monitor detects final_exit_code_{job_id} file
+   ├── Reads exit code from status file
+   ├── Signals job_completed and stores exit status
    └── All threads check should_shutdown() and exit
 
 7. Cleanup
    ├── Tail threads reach EOF and signal eof_detected
-   ├── qstat thread completes and wait_for_completion() returns
+   ├── Monitor loop completes
    ├── coordinator.job_exit_status returned to execution.py
    ├── _CURRENT_JOB_ID cleared
    └── qxub exits with job's exit code via sys.exit()
@@ -397,11 +364,10 @@ def signal_handler(signum, frame):
 
 One of the most important features is that qxub returns the actual job's exit code:
 
-1. **Job Completion**: Monitor detects job finished via qstat
-2. **PBS Cleanup**: Waits 5 seconds for PBS to finalize job state
-3. **Exit Status Polling**: Queries qstat for Exit_status field every 5 seconds
-4. **Status Storage**: Stores exit code in `coordinator.job_exit_status`
-5. **Propagation**: Main thread returns this exit code via `sys.exit()`
+1. **Job Completion**: Monitor detects job finished via `final_exit_code_{job_id}` file
+2. **Exit Code Reading**: Reads exit code from the status file
+3. **Status Storage**: Stores exit code in `coordinator.job_exit_status`
+4. **Propagation**: Main thread returns this exit code via `sys.exit()`
 
 This allows scripts to check `$?` and respond appropriately to job failures.
 
@@ -446,9 +412,9 @@ finally:
     logging.debug("Thread exiting")
 ```
 
-### PBS Command Failures
+### Status File Failures
 
-Monitor thread handles qstat failures gracefully:
+Monitor thread handles status file access gracefully:
 - Logs errors but continues monitoring
 - Returns sensible defaults (status="C" for completed)
 - Attempts fallback parsing for robustness
@@ -459,6 +425,13 @@ Tail threads handle missing/inaccessible log files:
 - Create parent directories if needed
 - Touch files to ensure they exist
 - Use proper file encoding (UTF-8)
+
+### Status File Access Issues
+
+The file-based status monitor handles missing status files gracefully:
+- Returns "Q" (queued) status when no status files exist yet
+- Reads exit code from `final_exit_code_{job_id}` when job completes
+- Falls back to "C" (completed) status on file read errors
 
 ## Recent Improvements (v2.2)
 
@@ -573,17 +546,17 @@ sys.exit(exit_status)
 In the monitor thread, the coordination works like this:
 
 ```python
-def monitor_qstat(job_id, quiet=False, coordinator=None, success_msg=None):
-    # Wait for job submission to complete before starting spinner
-    if coordinator:
-        coordinator.wait_for_submission_complete()
+def monitor_job_single_thread(job_id, out_file, err_file, quiet=False, success_msg=None):
+    # Create coordinator for thread synchronization
+    coordinator = OutputCoordinator()
 
-    # Start spinner for up to 10 seconds
+    # Start spinner while waiting for job to start
     with JobSpinner("", show_message=False, quiet=quiet, coordinator=coordinator):
         time.sleep(10)
 
-    # Begin main monitoring loop
+    # Begin main monitoring loop using file-based status
     while True:
+        status, exit_code = job_status_from_files(job_id)
         # Check status and handle completion...
 ```
 
@@ -677,11 +650,11 @@ for thread in threading.enumerate():
 
 ### Potential Enhancements
 
-1. **Configurable poll intervals**: Make 30s monitor interval configurable
+1. **Configurable poll intervals**: Make status file check interval configurable
 2. **Progress indicators**: Show job queue position or estimated time
 3. **Multiple job monitoring**: Support monitoring multiple jobs simultaneously
 4. **Resume capability**: Reconnect to already-running jobs
-5. **Better error recovery**: Retry failed qstat calls with backoff
+5. **Better error recovery**: Retry failed status file reads with backoff
 
 ### Architecture Considerations
 

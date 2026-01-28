@@ -266,87 +266,70 @@ def qdel(job_id, quiet=False):
         return False
 
 
-def job_status(job_id):
-    """
-    Check the current status of a job.
+def get_default_status_dir():
+    """Get the default status directory path for qxub jobs.
 
     Returns:
-        H: held (not enough quota)
+        Path to the status directory (e.g., /scratch/{project}/{user}/qxub/status)
     """
-    logging.debug("Job id: %s", job_id)
+    import os
+    from pathlib import Path
 
-    # Use DSV format with ASCII Unit Separator for robust parsing
-    delimiter = "\x1f"  # ASCII Unit Separator - designed for field separation
-    qstat_result = subprocess.run(
-        ["qstat", "-fx", "-F", "dsv", "-D", delimiter, job_id],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    project = os.getenv("PROJECT", "a56")
+    user = os.getenv("USER", "unknown")
 
-    # Check if qstat failed
-    if qstat_result.returncode != 0:
-        logging.debug("qstat failed for job %s", job_id)
-        click.echo(qstat_result.stderr)
-        click.echo(qstat_result.args)
-        sys.exit(qstat_result.returncode)
-
-    # Parse DSV output to find job_state
-    output = qstat_result.stdout.strip()
-    if not output:
-        logging.error("Empty qstat output for job %s", job_id)
-        return "C"  # Assume completed if no output
+    return Path("/scratch", project, user, "qxub", "status")
 
 
-def wait_for_job_exit_status(job_id, initial_wait=5, poll_interval=5, max_attempts=12):
+def job_status_from_files(job_id, status_dir=None):
     """
-    Wait for PBS to clean up the job and get its exit status.
+    Check the current status of a job using status files instead of qstat.
+
+    This is faster and more reliable than polling qstat, especially when the
+    PBS scheduler is under heavy load.
 
     Args:
-        job_id: The PBS job ID
-        initial_wait: Initial wait time for PBS cleanup (seconds)
-        poll_interval: Interval between polling attempts (seconds)
-        max_attempts: Maximum number of polling attempts
+        job_id: PBS job ID (e.g., "12345.gadi-pbs")
+        status_dir: Path to status directory. If None, uses default.
 
     Returns:
-        int: The job's exit status, or 1 if unavailable
+        Tuple of (status, exit_code) where:
+        - status: "Q" (queued/unknown), "R" (running), "C" (completed), or "F" (failed)
+        - exit_code: int if completed, None otherwise
     """
-    logging.debug("Waiting %d seconds for PBS cleanup", initial_wait)
-    time.sleep(initial_wait)
+    import os
+    from pathlib import Path
 
-    for attempt in range(max_attempts):
-        exit_status = job_exit_status(job_id)
-        if exit_status is not None:
-            logging.info("Job %s exit status: %d", job_id, exit_status)
-            return exit_status
+    if status_dir is None:
+        status_dir = get_default_status_dir()
+    else:
+        status_dir = Path(status_dir)
 
-        if attempt < max_attempts - 1:  # Don't sleep on the last attempt
-            logging.debug(
-                "Exit status not available yet, waiting %d seconds (attempt %d/%d)",
-                poll_interval,
-                attempt + 1,
-                max_attempts,
+    # Check for status files
+    job_started_file = status_dir / f"job_started_{job_id}"
+    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+
+    # Check if job has completed
+    if final_exit_code_file.exists():
+        try:
+            with open(final_exit_code_file, "r", encoding="utf-8") as f:
+                exit_code = int(f.readline().strip())
+                if exit_code == 0:
+                    return "C", exit_code  # Completed successfully
+                else:
+                    return "F", exit_code  # Failed with non-zero exit
+        except (ValueError, IOError) as e:
+            logging.warning(
+                f"Could not read exit code from {final_exit_code_file}: {e}"
             )
-            time.sleep(poll_interval)
+            return "C", None  # Assume completed if file exists but unreadable
 
-    logging.warning(
-        "Could not get exit status for job %s after %d attempts", job_id, max_attempts
-    )
-    return 1  # Return failure exit code if we can't determine the real status
+    # Check if job has started (running)
+    if job_started_file.exists():
+        return "R", None  # Running
 
-
-def job_exit_status(job_id):
-    """
-    Get the exit status of a completed job.
-
-    Returns:
-        int: The job's exit status, or None if not available
-    """
-    job_data = get_job_resource_data(job_id)
-    if job_data and "exit_status" in job_data:
-        return job_data["exit_status"]
-    return None
+    # No status files found - job is either queued or unknown
+    return "Q", None
 
 
 def get_job_resource_data(job_id):
@@ -1067,70 +1050,3 @@ def stream_job_output_with_status_files(
             return exit_status
 
         time.sleep(0.2)  # Check every 200ms for good output responsiveness
-
-
-def stream_job_output(job_id, out_file, err_file):
-    """
-    Stream job output files until job completion.
-
-    Returns:
-        int: Job exit status
-    """
-    import os
-
-    # Keep track of file positions to avoid re-reading
-    out_pos = 0
-    err_pos = 0
-
-    # Monitor job status and stream output
-    while True:
-        status = job_status(job_id)
-
-        # Stream new output from STDOUT
-        if os.path.exists(out_file):
-            try:
-                with open(out_file, "r", encoding="utf-8") as f:
-                    f.seek(out_pos)
-                    for line in f:
-                        print(line.rstrip(), file=sys.stdout, flush=True)
-                    out_pos = f.tell()
-            except (OSError, IOError):
-                pass
-
-        # Stream new output from STDERR
-        if os.path.exists(err_file):
-            try:
-                with open(err_file, "r", encoding="utf-8") as f:
-                    f.seek(err_pos)
-                    for line in f:
-                        print(line.rstrip(), file=sys.stderr, flush=True)
-                    err_pos = f.tell()
-            except (OSError, IOError):
-                pass
-
-        # Check if job finished
-        if status in ["F", "H", "C"]:
-            # Read any final output
-            if os.path.exists(out_file):
-                try:
-                    with open(out_file, "r", encoding="utf-8") as f:
-                        f.seek(out_pos)
-                        for line in f:
-                            print(line.rstrip(), file=sys.stdout, flush=True)
-                except (OSError, IOError):
-                    pass
-
-            if os.path.exists(err_file):
-                try:
-                    with open(err_file, "r", encoding="utf-8") as f:
-                        f.seek(err_pos)
-                        for line in f:
-                            print(line.rstrip(), file=sys.stderr, flush=True)
-                except (OSError, IOError):
-                    pass
-
-            # Get final exit status
-            exit_status = wait_for_job_exit_status(job_id)
-            return exit_status
-
-        time.sleep(1)  # Check every 1 second
