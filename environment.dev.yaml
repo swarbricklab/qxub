@@ -1,0 +1,12 @@
+name: test
+
+channels:
+    - conda-forge
+
+dependencies:
+    - python=3.9
+    - click
+    - black
+    - tailer=0.4.1
+    - rich
+    - omegaconf

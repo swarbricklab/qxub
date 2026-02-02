@@ -1,0 +1,11 @@
+name: qt
+
+channels:
+    - conda-forge
+
+dependencies:
+    - python=3.10
+    - click
+    - tailer=0.4.1
+    - rich
+    - omegaconf

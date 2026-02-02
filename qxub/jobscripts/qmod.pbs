@@ -1,0 +1,180 @@
+#! /bin/bash
+#PBS -N qmod
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -W umask=0027
+#PBS -j oe
+
+# Logging
+echo "📁 Execution directory: $cwd"
+echo "📦 Modules to load: $mods"
+
+# Create status directory for monitoring
+STATUS_DIR="${out%/*}/status"
+mkdir -p "$STATUS_DIR"
+
+# Mark job as started
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "$PBS_JOBID" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+
+# Decode base64 encoded commands
+if [ -n "$cmd_b64" ]; then
+    cmd=$(echo "$cmd_b64" | base64 -d)
+fi
+if [ -n "$pre_cmd_b64" ]; then
+    pre_cmd=$(echo "$pre_cmd_b64" | base64 -d)
+fi
+if [ -n "$post_cmd_b64" ]; then
+    post_cmd=$(echo "$post_cmd_b64" | base64 -d)
+fi
+
+echo "💻 Command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Post-command: $post_cmd"
+fi
+echo "📄 STDOUT: $out"
+echo "📄 STDERR: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
+
+# Strict mode with error handling
+set -e
+
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "❌ Failed command: $BASH_COMMAND"
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    exit $exit_code
+}
+
+# Set up error trap
+trap 'error_handler' ERR
+
+# Load modules
+if [ -n "$mods" ]; then
+    echo "📦 Loading modules: $mods"
+    # Split modules string by spaces and load each one
+    for module in $mods; do
+        echo "🔄 Loading module: $module"
+        module load "$module"
+    done
+    echo "✅ All modules loaded"
+fi
+
+# Create execution directory if requested
+if [ "$create_execdir" = "true" ]; then
+    echo "📁 Creating execution directory: $cwd"
+    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+fi
+
+# Switch work directory
+echo "📂 Changing to working directory: $cwd"
+cd $cwd
+
+# Ensure output directories exist and files are accessible (only if not in quiet mode)
+if [ "$quiet" != "true" ]; then
+    echo "📁 Creating output directories for: $out and $err"
+    mkdir -p "$(dirname "$out")"
+    mkdir -p "$(dirname "$err")"
+
+    # Test that we can write to the output locations
+    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
+    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    echo "✅ Output files verified: $out and $err"
+else
+    echo "🔇 Quiet mode: skipping output file creation"
+fi
+
+# Run pre-command if specified
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Running pre-command: $pre_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+
+    bash -c "$pre_cmd"
+    PRE_EXIT_CODE=$?
+
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+
+    if [ $PRE_EXIT_CODE -ne 0 ]; then
+        echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $PRE_EXIT_CODE
+    fi
+    echo "✅ Pre-command completed"
+fi
+
+# Run main command
+echo "🚀 Running main command: $cmd"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
+
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, let output go to default joblog (no redirection)
+    echo "================== COMMAND OUTPUT START =================="
+    bash -c "$cmd"
+    MAIN_EXIT_CODE=$?
+    echo "=================== COMMAND OUTPUT END ==================="
+else
+    # Normal mode: redirect to separate out/err files
+    bash -c "$cmd" > "$out" 2> "$err"
+    MAIN_EXIT_CODE=$?
+fi
+
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+
+if [ $MAIN_EXIT_CODE -ne 0 ]; then
+    echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    exit $MAIN_EXIT_CODE
+fi
+echo "✅ Main command completed"
+
+# Run post-command if specified and main command succeeded
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Running post-command: $post_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+
+    bash -c "$post_cmd"
+    POST_EXIT_CODE=$?
+
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+
+    if [ $POST_EXIT_CODE -ne 0 ]; then
+        echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $POST_EXIT_CODE
+    fi
+    echo "✅ Post-command completed"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+else
+    # No post-command, main command exit code is final
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+fi
+
+# Unload modules
+if [ -n "$modules" ]; then
+    echo "🔄 Unloading modules"
+    # Split modules string by spaces and unload each one (in reverse order)
+    reversed_modules=$(echo $modules | awk '{for(i=NF;i>=1;i--) printf "%s ", $i}')
+    for module in $reversed_modules; do
+        echo "📤 Unloading module: $module"
+        module unload "$module"
+    done
+    echo "✅ All modules unloaded"
+fi

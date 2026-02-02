@@ -1,0 +1,21 @@
+# Test platform configuration for localhost testing
+# This is a minimal platform file for testing purposes
+
+platform:
+  name: "localhost-test"
+  scheduler: "pbs"
+
+queues:
+  test:
+    default: true
+    limits:
+      walltime: "1:00:00"
+      mem: "1GB"
+      ncpus: 1
+
+defaults:
+  project: "test-project"
+  queue: "test"
+  walltime: "00:30:00"
+  mem: "1GB"
+  ncpus: 1

@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      should-release: ${{ steps.version-check.outputs.should-release }}
+      version: ${{ steps.version-check.outputs.version }}
+      tag-exists: ${{ steps.version-check.outputs.tag-exists }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0  # Get all history for tag checking
+
+      - name: Get version from setup.py
+        id: get-version
+        run: |
+          VERSION=$(python setup.py --version)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          TAG="v${{ steps.get-version.outputs.version }}"
+          if git tag --list | grep -q "^$TAG$"; then
+            echo "tag-exists=true" >> $GITHUB_OUTPUT
+            echo "Tag $TAG already exists"
+          else
+            echo "tag-exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG does not exist"
+          fi
+
+      - name: Check if PR contains version bump
+        id: version-check
+        run: |
+          # Check if the latest commit message indicates a version bump
+          COMMIT_MSG=$(git log --format=%B -n 1 HEAD)
+          VERSION="${{ steps.get-version.outputs.version }}"
+          TAG_EXISTS="${{ steps.check-tag.outputs.tag-exists }}"
+
+          # Release if:
+          # 1. Tag doesn't exist AND
+          # 2. (Commit message contains version number OR setup.py was modified)
+          if [ "$TAG_EXISTS" = "false" ]; then
+            if echo "$COMMIT_MSG" | grep -q "$VERSION" || git diff HEAD~1 HEAD --name-only | grep -q "setup.py"; then
+              echo "should-release=true" >> $GITHUB_OUTPUT
+              echo "Version bump detected, will create release"
+            else
+              echo "should-release=false" >> $GITHUB_OUTPUT
+              echo "No version bump detected"
+            fi
+          else
+            echo "should-release=false" >> $GITHUB_OUTPUT
+            echo "Tag already exists, skipping release"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  release:
+    needs: check-version
+    if: needs.check-version.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.10'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      - name: Build wheel
+        run: |
+          python -m build --wheel
+          ls -la dist/
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ needs.check-version.outputs.version }}" -m "Release v${{ needs.check-version.outputs.version }}"
+          git push origin "v${{ needs.check-version.outputs.version }}"
+
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+
+          # Try to extract release notes from docs/RELEASE_NOTES_*.md
+          RELEASE_NOTES_FILE="docs/RELEASE_NOTES_${VERSION}.md"
+          if [ -f "$RELEASE_NOTES_FILE" ]; then
+            echo "Using release notes from $RELEASE_NOTES_FILE"
+            cat "$RELEASE_NOTES_FILE" > release_notes.md
+          else
+            echo "Generating automatic release notes"
+            cat > release_notes.md << EOF
+          # qxub $VERSION
+
+          ## Changes
+
+          $(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 HEAD~1)..HEAD | head -20)
+
+          ## Installation
+
+          \`\`\`bash
+          pip install qxub==$VERSION
+          # or download the wheel from this release
+          \`\`\`
+
+          See the documentation for more details.
+          EOF
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ needs.check-version.outputs.version }}"
+          name: "qxub ${{ needs.check-version.outputs.version }}"
+          body_path: release_notes.md
+          files: dist/*.whl
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload wheel to PyPI (optional)
+        if: false  # Disabled by default - enable when ready for PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}

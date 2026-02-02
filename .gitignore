@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.egg-info/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.dylib
+
+# Virtual environments
+env/
+venv/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test output and logs
+*.log
+*.tmp
+output.txt
+test_results*.txt
+*_backup_*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Package management
+.tox/
+.coverage
+htmlcov/

@@ -1,0 +1,292 @@
+# qxub Copilot Instructions
+
+## ⚠️ CRITICAL: Environment Setup
+
+**ABSOLUTELY REQUIRED: The `qxub` conda environment MUST be activated before running ANY qxub commands!**
+
+```bash
+# MANDATORY before EVERY qxub command or test
+cd /g/data/a56/software/qsub_tools
+conda activate qxub
+
+# Verify qxub is available (should show conda environment path)
+which qxub
+qxub --version
+```
+
+**DO NOT run qxub commands in a fresh terminal without first running `conda activate qxub`!**
+
+This is the #1 most common error. If you get errors running qxub commands:
+1. **FIRST**: Check if `qxub` conda environment is active in your terminal
+2. **SECOND**: Activate it if not active
+3. **THIRD**: Run the command again
+
+The system qxub installation may be outdated or broken - always use the conda environment version!
+
+## Project Overview
+
+qxub is a sophisticated PBS job submission wrapper for HPC environments that eliminates boilerplate when running jobs in conda environments, with modules, or in containers. The codebase follows a unified CLI architecture with execution contexts, intelligent queue selection, and comprehensive configuration management.
+
+## Documentation Management
+
+### Essential Documentation Practices
+- **Always refer to existing documentation first**: Check `README.md`, `docs/examples.md`, and `docs/configuration.md` before making changes
+- **Keep documentation current**: Update relevant docs when adding features or changing behavior
+- **Avoid documentation bloat**: Keep all documentation concise and user-focused
+- **Maintain the 80/20 rule**: Cover 80% of use cases in 20% of the documentation space
+
+### Documentation Structure (Keep Lean)
+- `README.md` - Quick start guide (keep under 60 lines)
+- `docs/examples.md` - Common usage patterns with code examples
+- `docs/configuration.md` - Config system essentials only
+- `docs/aliases.md` - Alias usage patterns
+- `docs/platform_configuration.md` - HPC platform setup
+- `docs/remote-execution.md` - SSH execution guide
+- `docs/option-placement.md` - CLI reference
+
+### Documentation Update Guidelines
+- **New features**: Add 1-2 examples to `docs/examples.md`, update README if core functionality
+- **Configuration changes**: Update `docs/configuration.md` with essential info only
+- **CLI changes**: Update `docs/option-placement.md` and README options table
+- **Never add**: Implementation details, verbose explanations, or duplicate information
+
+## Key Architecture Patterns
+
+### Unified CLI Structure
+- **Core principle**: All options before `--` separator, command after
+- **Execution contexts**: `--env` (conda), `--mod`/`--mods` (modules), `--sif` (singularity)
+- **Mutual exclusivity**: Only one execution context per command
+- **Default execution**: Direct PBS submission when no context specified
+
+```python
+# CLI parsing in qxub/cli.py uses custom QxubGroup class
+# Execution context detection happens in invoke() method
+execution_contexts = [conda_env, module_list, container]
+if sum(bool(x) for x in execution_contexts) > 1:
+    raise click.ClickException("Cannot specify multiple execution contexts")
+```
+
+### Configuration System
+- **Hierarchical precedence**: CLI args > User config > System config > Defaults
+- **XDG compliance**: Uses `~/.config/qxub/` and `/etc/xdg/qxub/`
+- **Template variables**: `{user}`, `{project}`, `{timestamp}` for dynamic substitution
+- **Alias system**: Hierarchical structure with main/subcommand/target sections
+
+#### Config vs Platform Definitions (CRITICAL)
+- Config files are flexible, per-user/per-repo overlays that reference platform definitions; they do not define new platforms.
+- Platform definitions are fixed YAMLs that declare canonical platform names, queues, and constraints. These names must be referenced verbatim by configs.
+- Do NOT invent alternate platform names in configs to represent scenarios (e.g., `gadi-dev`, `gadi-stable`). Instead, keep the platform name from the definition (e.g., `gadi`) and vary config-only properties (like `remote.conda_init`, `working_dir`) across different config files.
+- For different testing modes (stable vs dev), use separate config files pointing at the same platform definition and platform name.
+
+```python
+# Config manager in qxub/config_manager.py
+class ConfigManager:
+    def _get_user_config_dir(self) -> Path:
+        xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config_home:
+            return Path(xdg_config_home) / "qxub"
+        return Path.home() / ".config" / "qxub"
+```
+
+### Platform System
+- **Platform definitions**: YAML files describing HPC system capabilities
+- **Queue selection**: `--queue auto` for intelligent selection based on resources
+- **Resource validation**: Platform-aware constraint checking
+- **Environment discovery**: `QXUB_PLATFORM_PATHS` for custom platform locations
+
+Note: Platform definition files are versioned, shared, and treated as immutable during CI. All workflow variability should live in configs that reference these fixed platform names.
+
+```python
+# Platform loader in qxub/platform.py
+@dataclass
+class Queue:
+    name: str
+    type: str
+    limits: QueueLimits
+    su_billing_rate: Optional[float] = None
+    walltime_rules: List[WalltimeRule] = field(default_factory=list)
+```
+
+## Critical Implementation Details
+
+### Threading Architecture
+- **OutputCoordinator**: Central synchronization hub for job monitoring
+- **Signal handling**: Ctrl+C cleanup with `_signal_handler()` and global `_CURRENT_JOB_ID`
+- **Thread responsibilities**: Monitor thread, STDOUT/STDERR tail, spinner display
+- **Graceful shutdown**: Automatic job cleanup via `qdel` on interruption
+
+### Job Script Generation
+- **Base64 encoding**: Commands encoded to avoid shell escaping issues
+- **Template system**: Configurable job script templates in `qxub/jobscripts/`
+- **Environment activation**: Context-specific activation (conda/module/singularity)
+
+```python
+# Command encoding pattern in execute_* functions
+cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
+```
+
+### Resource Management
+- **Resource tracking**: SQLite-based efficiency analysis in `qxub/resource_tracker.py`
+- **History system**: Dual logging (computational recipes + execution records)
+- **Memory/walltime parsing**: Robust parsing with format validation
+
+## Development Workflows
+
+### Environment Setup - CRITICAL
+
+**⚠️ THE FIRST STEP IS ALWAYS: `conda activate qxub`**
+
+Before running ANY qxub command (testing, development, or usage):
+
+1. **ACTIVATE THE ENVIRONMENT**: `conda activate qxub`
+2. **VERIFY IT WORKED**: `which qxub` should show path containing `conda` or `qxub` environment
+3. **THEN proceed** with your qxub commands
+
+**Common mistake**: Opening a new terminal and running `qxub config shortcut show ...` immediately will fail because the conda environment is not active in that terminal session.
+
+**Correct approach**: Every new terminal session requires `conda activate qxub` first.
+
+```bash
+# ✅ CORRECT: Activate environment first
+cd /g/data/a56/software/qsub_tools
+conda activate qxub
+qxub --version        # Now this will work
+qxub config shortcut show "dvc pull"  # This will work too
+
+# ❌ WRONG: Running qxub without activating environment
+qxub config shortcut show "dvc pull"  # Will fail or use wrong version
+```
+
+- **Conda environment**: The `qxub` conda environment is the ONLY supported way to run qxub during development
+- **Environment verification**: Always check `which qxub` shows the conda environment path
+- **Terminal sessions**: Each new terminal needs `conda activate qxub` - activation does not persist
+- **Documentation first**: Always read relevant docs before implementing features
+
+### Documentation Workflow
+- **Before coding**: Read `README.md` and relevant `docs/*.md` files to understand existing patterns
+- **During development**: Note any documentation that needs updating
+- **After implementation**: Update affected documentation immediately
+- **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
+
+### Git Workflow - CRITICAL
+
+**ALWAYS stage files consciously. NEVER use `git add .`**
+
+See `docs/dev/conscious-git-tracking.md` for full guide. Quick reference:
+
+```bash
+# ✅ Good: Stage individually
+git add qxub/config/manager.py
+git add qxub/execution/mode.py
+
+# ✅ Good: Verify before committing
+git diff --staged
+
+# ❌ Bad: Blanket staging (adds zombies, temp files)
+git add .
+git add -A
+```
+
+**Why**: Blanket staging creates zombie files, commits temp scripts, and bundles unrelated changes.
+
+**Run pre-commit checks manually before committing:**
+
+```bash
+# Run pre-commit on staged files (fast, only checks what you're committing)
+pre-commit run
+
+# This catches formatting issues before commit
+# Fix any issues, then re-stage the fixed files
+# Then commit normally
+```
+
+This ensures your commit succeeds on the first try. The commit hook then acts as a final safety check.
+
+### Refactoring Workflow
+
+**When moving/reorganizing code, see `docs/dev/refactoring-checklist.md`**
+
+Critical rules:
+- Use `git mv` (not copy + modify)
+- Delete old files in same commit
+- Verify no zombies: `git grep "from.*old_module import"` returns nothing
+- Use `.github/chatmodes/refactoring.chatmode.md` for guided refactoring
+
+### Code Style
+- **Black formatting**: Line length 88, Python 3.10+ target
+- **Pre-commit hooks**: Black, isort, trailing whitespace, YAML validation
+- **Pylint**: Extensive disable comments for specific patterns
+
+### Testing Strategy
+- **Dry-run tests**: `tests/test_conda_dry.sh` for rapid development iteration
+- **Integration tests**: `tests/test_conda_integration.sh` with real job submission
+- **System config tests**: `tests/test_system_config.sh` for config hierarchy validation
+- **Platform tests**: `tests/run_platform_tests.py` for queue selection logic
+
+### Critical Testing Commands
+```bash
+# Fast development validation
+./tests/test_conda_dry.sh
+
+# Test config precedence
+./tests/test_realistic_system_config.sh
+
+# Platform system validation
+python tests/run_platform_tests.py
+```
+
+### Version Management
+When bumping versions for a new release, **ALWAYS update version numbers in BOTH locations**:
+
+1. **`qxub/__init__.py`** - Contains `__version__ = "x.y.z"`
+2. **`setup.py`** - Contains `version="x.y.z"` in the setup() call
+
+```bash
+# Example version bump workflow:
+# 1. Edit qxub/__init__.py
+__version__ = "3.2.3"
+
+# 2. Edit setup.py
+version="3.2.3"
+
+# 3. Commit both together
+git add qxub/__init__.py setup.py
+git commit -m "Bump version to 3.2.3"
+```
+
+**Critical**: The GitHub release workflow reads from `setup.py`, so both files must match!
+
+## Common Patterns
+
+### Error Handling
+- **Exit codes**: Validation errors return code 2, execution errors return 1
+- **Fuzzy matching**: Typo suggestions for unknown options using `difflib`
+- **Context-aware errors**: Different error messages based on execution context
+
+### CLI Command Structure
+```python
+# Standard execution function pattern
+def execute_conda(ctx, command, conda_env, template, pre, post):
+    params = ctx.obj  # Access to global parameters
+    # Validation, template processing, job submission
+```
+
+### Config Management Commands
+- `qxub config get/set/list` - Configuration manipulation
+- `qxub config alias set/list/show/delete` - Alias management
+- `qxub config files` - Show config file locations and status
+
+## File Organization
+- **qxub/cli.py**: Main CLI entry point and execution contexts
+- **qxub/config_manager.py**: Configuration loading and template resolution
+- **qxub/platform*.py**: Platform abstraction and queue selection
+- **qxub/*_cli.py**: Modular CLI commands (config, alias, history, platform)
+- **qxub/scheduler.py**: PBS interaction and job monitoring
+- **docs/dev/**: Technical architecture documentation
+
+## Remote Execution (Upcoming)
+- **SSH-based execution**: `qxub --remote REMOTE_NAME` pattern emerging
+- **Platform integration**: Remote platforms inherit local platform definitions
+- **Config separation**: SSH config vs platform definitions vs user preferences
+
+When working on this codebase, prioritize understanding the execution context flow in `cli.py`, configuration precedence in `config_manager.py`, and platform-aware resource validation patterns.

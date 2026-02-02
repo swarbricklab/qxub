@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Enable security updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Australia/Sydney"
+    open-pull-requests-limit: 5
+    assignees:
+      - "swarbricklab"
+    commit-message:
+      prefix: "security"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+
+  # Enable security updates for Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Australia/Sydney"
+    open-pull-requests-limit: 10
+    assignees:
+      - "swarbricklab"
+    commit-message:
+      prefix: "security"
+      include: "scope"
+    labels:
+      - "security"
+      - "dependencies"
+    # Only auto-update security patches for Python dependencies
+    groups:
+      security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      minor-updates:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+        patterns:
+          - "*"
+    # Ignore major version updates to avoid breaking changes
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

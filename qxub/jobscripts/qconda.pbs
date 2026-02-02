@@ -1,0 +1,247 @@
+#! /bin/bash
+#PBS -N qconda
+#PBS -P a56
+#PBS -l storage=gdata/a56
+#PBS -S /bin/bash
+#PBS -W umask=0027
+#PBS -j oe
+
+# Logging
+echo "📁 Execution directory: $cwd"
+echo "🐍 Conda environment: $env"
+
+# Decode base64 encoded commands
+if [ -n "$cmd_b64" ]; then
+    cmd=$(echo "$cmd_b64" | base64 -d)
+fi
+if [ -n "$pre_cmd_b64" ]; then
+    pre_cmd=$(echo "$pre_cmd_b64" | base64 -d)
+fi
+if [ -n "$post_cmd_b64" ]; then
+    post_cmd=$(echo "$post_cmd_b64" | base64 -d)
+fi
+
+echo "💻 Command: $cmd"
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Pre-command: $pre_cmd"
+fi
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Post-command: $post_cmd"
+fi
+echo "📄 STDOUT file: $out"
+echo "📄 STDERR file: $err"
+echo "🔇 Quiet mode: $quiet"
+if [ "$quiet" = "true" ]; then
+    echo "ℹ️  Note: In quiet mode, output will go to PBS joblog instead of separate files"
+fi
+echo "👤 Current user: $(whoami)"
+echo "📍 Current directory: $(pwd)"
+
+# Strict mode with error handling
+set -e
+
+# Update database status function (defined early so error handler can use it)
+update_job_status() {
+    local status="$1"
+    if command -v python3 > /dev/null 2>&1; then
+        python3 -c "
+import sys, os
+sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+try:
+    from qxub.resources.tracker import resource_tracker
+    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
+except Exception as e:
+    pass  # Silently ignore database update failures
+" 2>/dev/null || true
+    fi
+}
+
+# Error handler function
+error_handler() {
+    local exit_code=$?
+    echo "❌ ERROR: Command failed with exit code $exit_code"
+    echo "❌ Failed command: $BASH_COMMAND"
+        # Write error exit code to status
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+
+    # Update database status to 'failed'
+    update_job_status "failed"
+
+    exit $exit_code
+}
+
+# Set up error trap
+trap 'error_handler' ERR
+
+# Create status directory for file-based monitoring
+STATUS_DIR="${out%/*}/status"
+mkdir -p "$STATUS_DIR"
+
+# Signal job started with timestamp and job ID
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "🚀 Job started at $(date -Iseconds)"
+
+# Mark job as running
+update_job_status "running"
+
+# Activate conda environment
+echo "🔄 Activating conda environment: $env"
+
+# Check if conda is available and properly initialized
+if ! command -v conda > /dev/null 2>&1; then
+    echo "❌ ERROR: conda command not found"
+    echo "💡 Possible solutions:"
+    echo "   1. Run 'conda init bash' to initialize conda in your shell"
+    echo "   2. Add conda to your PATH in ~/.bashrc"
+    echo "   3. Ensure conda storage volumes are mounted (e.g., -l storage=gdata/conda)"
+    echo "   4. Check that your conda installation path is accessible from compute nodes"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Initialize conda shell integration
+echo "🔧 Initializing conda shell integration..."
+if ! eval "$(conda shell.bash hook)" 2>&1; then
+    echo "❌ ERROR: Failed to initialize conda shell integration"
+    echo "💡 Possible solutions:"
+    echo "   1. Run 'conda init bash' in your login shell to set up conda properly"
+    echo "   2. Check that conda is properly installed and accessible"
+    echo "   3. Verify that your ~/.bashrc contains conda initialization code"
+    echo "   4. Ensure conda storage volumes are mounted in your PBS job"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Capture conda activate output and check if environment exists
+if ! conda activate $env 2>&1; then
+    echo "❌ ERROR: Failed to activate conda environment: $env"
+    echo "💡 Possible solutions:"
+    echo "   1. Check that the environment exists: conda env list"
+    echo "   2. Create the environment: conda create -n $env"
+    echo "   3. Verify the environment name is spelled correctly"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+# Verify that the environment was actually activated
+# Note: CONDA_DEFAULT_ENV may be just the name or a full path depending on conda configuration
+ACTIVATED_ENV_NAME=$(basename "$CONDA_DEFAULT_ENV")
+if [ "$ACTIVATED_ENV_NAME" != "$env" ]; then
+    echo "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
+    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    update_job_status "failed"
+    exit 1
+fi
+
+echo "✅ Successfully activated conda environment: $env"
+
+# Create execution directory if requested
+if [ "$create_execdir" = "true" ]; then
+    echo "📁 Creating execution directory: $cwd"
+    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+fi
+
+# Switch work directory
+echo "📂 Changing to working directory: $cwd"
+cd $cwd
+
+# Ensure output directories exist and files are accessible (only if not in quiet mode)
+if [ "$quiet" != "true" ]; then
+    echo "📁 Creating output directories for: $out and $err"
+    mkdir -p "$(dirname "$out")"
+    mkdir -p "$(dirname "$err")"
+
+    # Test that we can write to the output locations
+    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
+    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    echo "✅ Output files verified: $out and $err"
+else
+    echo "🔇 Quiet mode: skipping output file creation"
+fi
+
+# Run pre-command if specified
+if [ -n "$pre_cmd" ]; then
+    echo "⚡ Running pre-command: $pre_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+
+    bash -c "$pre_cmd"
+    PRE_EXIT_CODE=$?
+
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+
+    if [ $PRE_EXIT_CODE -ne 0 ]; then
+        echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $PRE_EXIT_CODE
+    fi
+    echo "✅ Pre-command completed"
+fi
+
+# Run main command
+echo "🚀 Running main command: $cmd"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
+
+if [ "$quiet" = "true" ]; then
+    # In quiet mode, let output go to default joblog (no redirection)
+    echo "================== COMMAND OUTPUT START =================="
+    bash -c "$cmd"
+    MAIN_EXIT_CODE=$?
+    echo "=================== COMMAND OUTPUT END ==================="
+else
+    # Normal mode: redirect to separate out/err files
+    bash -c "$cmd" > "$out" 2> "$err"
+    MAIN_EXIT_CODE=$?
+fi
+
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+
+if [ $MAIN_EXIT_CODE -ne 0 ]; then
+    echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    exit $MAIN_EXIT_CODE
+fi
+echo "✅ Main command completed"
+
+# Run post-command if specified and main command succeeded
+if [ -n "$post_cmd" ]; then
+    echo "🏁 Running post-command: $post_cmd"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+
+    bash -c "$post_cmd"
+    POST_EXIT_CODE=$?
+
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+
+    if [ $POST_EXIT_CODE -ne 0 ]; then
+        echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        exit $POST_EXIT_CODE
+    fi
+    echo "✅ Post-command completed"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+else
+    # No post-command, main command exit code is final
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+fi
+
+# Update database status to 'completed'
+update_job_status "completed"
+
+echo "🎉 Job completed successfully!"
