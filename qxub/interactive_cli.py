@@ -77,6 +77,25 @@ def _get_default_volumes() -> str | None:
         return None
 
 
+def _get_container_prompt(container_name: str) -> str:
+    """Get container prompt from config or use default.
+
+    The prompt can include {container} as a placeholder for the container name.
+    Default: "\\[\\033[1;35m\\]📦 {container}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "
+    """
+    default_prompt = "\\[\\033[1;35m\\]📦 {container}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "
+    try:
+        config_mgr = _get_config_manager()
+        custom_prompt = config_mgr.get_config_value(
+            "defaults.interactive.container_prompt"
+        )
+        if custom_prompt:
+            return custom_prompt.replace("{container}", container_name)
+        return default_prompt.replace("{container}", container_name)
+    except Exception:
+        return default_prompt.replace("{container}", container_name)
+
+
 def _encode_command(cmd: str) -> str:
     """Base64 encode a command for safe shell passing."""
     return base64.b64encode(cmd.encode("utf-8")).decode("ascii")
@@ -310,6 +329,9 @@ def _build_interactive_script(
         container_name = container.split("/")[-1].replace(".sif", "")
         bind_opts = f"--bind {bind} " if bind else ""
 
+        # Get prompt from config or use default
+        container_prompt = _get_container_prompt(container_name)
+
         # Set a custom prompt that shows we're in a container
         # SINGULARITYENV_* variables are passed through to the container
         lines.extend(
@@ -319,7 +341,7 @@ def _build_interactive_script(
                 'echo ""',
                 "",
                 "# Set custom prompt for container shell",
-                f'export SINGULARITYENV_PS1="\\[\\033[1;35m\\]📦 {container_name}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "',
+                f'export SINGULARITYENV_PS1="{container_prompt}"',
                 "",
                 f'exec singularity shell {bind_opts}"{container}"',
             ]
