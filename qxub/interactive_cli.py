@@ -29,8 +29,17 @@ def _get_default_runtime() -> str:
     """Get default runtime from config or fallback."""
     try:
         config_mgr = _get_config_manager()
-        interactive_defaults = config_mgr.get("defaults.interactive", {})
-        return interactive_defaults.get("runtime", "4:00:00")
+        # Check interactive defaults first
+        interactive_runtime = config_mgr.get_config_value(
+            "defaults.interactive.runtime"
+        )
+        if interactive_runtime:
+            return interactive_runtime
+        # Fall back to general defaults
+        general_runtime = config_mgr.get_config_value("defaults.runtime")
+        if general_runtime:
+            return general_runtime
+        return "4:00:00"
     except Exception:
         return "4:00:00"
 
@@ -39,10 +48,33 @@ def _get_default_queue() -> str:
     """Get default queue from config or fallback."""
     try:
         config_mgr = _get_config_manager()
-        interactive_defaults = config_mgr.get("defaults.interactive", {})
-        return interactive_defaults.get("queue", "normal")
+        # Check interactive defaults first
+        interactive_queue = config_mgr.get_config_value("defaults.interactive.queue")
+        if interactive_queue:
+            return interactive_queue
+        # Fall back to general defaults
+        general_queue = config_mgr.get_config_value("defaults.queue")
+        if general_queue:
+            return general_queue
+        return "normal"
     except Exception:
         return "normal"
+
+
+def _get_default_volumes() -> str | None:
+    """Get default storage volumes from config."""
+    try:
+        config_mgr = _get_config_manager()
+        # Check interactive defaults first
+        interactive_volumes = config_mgr.get_config_value(
+            "defaults.interactive.volumes"
+        )
+        if interactive_volumes:
+            return interactive_volumes
+        # Fall back to general defaults
+        return config_mgr.get_config_value("defaults.volumes")
+    except Exception:
+        return None
 
 
 def _encode_command(cmd: str) -> str:
@@ -415,6 +447,9 @@ def interactive_cli(
         tmux_session=tmux_session,
     )
 
+    # Resolve storage volumes - use default if not specified
+    storage = volumes or _get_default_volumes()
+
     # Build qsub command
     qsub_cmd = _build_qsub_command(
         resources=all_resources,
@@ -422,7 +457,7 @@ def interactive_cli(
         project=project,
         name=name,
         working_dir=working_dir,
-        storage=volumes,
+        storage=storage,
     )
 
     if verbose or dry:
@@ -438,6 +473,8 @@ def interactive_cli(
             click.echo(f"Memory: {mem}")
         if cpus:
             click.echo(f"CPUs: {cpus}")
+        if storage:
+            click.echo(f"Storage: {storage}")
         if tmux_session:
             click.echo(f"Tmux session: {tmux_session}")
         if pre:
