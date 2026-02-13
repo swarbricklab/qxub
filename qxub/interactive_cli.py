@@ -229,15 +229,29 @@ def _build_interactive_script(
             ]
         )
     else:
-        # Direct shell mode
+        # Direct shell mode - create a custom rcfile that activates conda
+        # This is necessary because exec replaces the process, losing conda activation
         lines.extend(
             [
-                "# Start interactive shell",
+                "# Start interactive shell with conda environment",
                 f'echo "🚀 Starting interactive shell ({shell})"',
                 'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                 'echo ""',
                 "",
-                f"exec {shell}",
+                "# Create a temporary rcfile that sources bashrc and activates conda",
+                "QXUB_RCFILE=$(mktemp /tmp/qxub_rc.XXXXXX)",
+                "cat > \"$QXUB_RCFILE\" << 'RCEOF'",
+                "# Source standard bashrc first",
+                "[ -f ~/.bashrc ] && source ~/.bashrc",
+                "# Ensure conda is available and activate the environment",
+                'eval "$(conda shell.bash hook)" 2>/dev/null',
+                f"conda activate {env}",
+                "# Clean up the temp rcfile",
+                'rm -f "$QXUB_RCFILE" 2>/dev/null',
+                "RCEOF",
+                "",
+                "# Start bash with our custom rcfile",
+                'exec /bin/bash --rcfile "$QXUB_RCFILE"',
             ]
         )
 
