@@ -306,12 +306,21 @@ def _build_interactive_script(
         )
     elif container:
         # Container mode: exec into singularity shell directly
+        # Extract container basename for prompt
+        container_name = container.split("/")[-1].replace(".sif", "")
         bind_opts = f"--bind {bind} " if bind else ""
+
+        # Set a custom prompt that shows we're in a container
+        # SINGULARITYENV_* variables are passed through to the container
         lines.extend(
             [
                 f'echo "🚀 Entering container: {container}"',
                 'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                 'echo ""',
+                "",
+                "# Set custom prompt for container shell",
+                f'export SINGULARITYENV_PS1="\\[\\033[1;35m\\]📦 {container_name}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "',
+                "",
                 f'exec singularity shell {bind_opts}"{container}"',
             ]
         )
