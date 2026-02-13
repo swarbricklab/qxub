@@ -83,30 +83,42 @@ def _encode_command(cmd: str) -> str:
 
 
 def _build_interactive_script(
-    env: str,
     shell: str,
     working_dir: str,
     pre_cmd: str | None,
     post_cmd: str | None,
     tmux_session: str | None,
+    conda_env: str | None = None,
+    modules: list[str] | None = None,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
 
     This script:
-    1. Activates the conda environment
+    1. Activates the conda environment or loads modules
     2. Runs pre-commands
     3. Optionally starts tmux
     4. Drops into interactive shell
     5. Runs post-commands on exit (best effort)
     """
+    # Determine context type for display
+    if conda_env:
+        context_type = "conda"
+        context_display = f"🐍 Conda environment: {conda_env}"
+    elif modules:
+        context_type = "module"
+        context_display = f"📦 Modules: {', '.join(modules)}"
+    else:
+        context_type = "default"
+        context_display = "🔧 Default environment (no conda/modules)"
+
     lines = [
         "#!/bin/bash",
         "",
         "# qxub interactive session",
         f'echo "🖥️  Interactive session starting on $(hostname)"',
         f'echo "📁 Working directory: {working_dir}"',
-        f'echo "🐍 Conda environment: {env}"',
+        f'echo "{context_display}"',
         "",
     ]
 
@@ -118,57 +130,99 @@ def _build_interactive_script(
         ]
     )
 
-    # Source bash initialization to get conda in PATH
+    # Source bash initialization
     # PBS jobs don't source .bashrc by default for non-login shells
     lines.extend(
         [
             "# Initialize shell environment (PBS doesn't source .bashrc by default)",
             "if [ -f ~/.bashrc ]; then",
-            '    echo "🔧 Sourcing ~/.bashrc for conda initialization..."',
+            '    echo "🔧 Sourcing ~/.bashrc..."',
             "    source ~/.bashrc",
             "fi",
             "",
         ]
     )
 
-    # Conda activation with fallback paths
-    lines.extend(
-        [
-            "# Activate conda environment",
-            "if ! command -v conda > /dev/null 2>&1; then",
-            '    echo "⚠️  conda not found in PATH, trying common locations..."',
-            "    # Try common conda installation paths",
-            "    for CONDA_PATH in \\",
-            '        "$HOME/miniconda3" \\',
-            '        "$HOME/anaconda3" \\',
-            '        "$HOME/miniforge3" \\',
-            '        "$HOME/mambaforge" \\',
-            '        "/g/data/a56/conda/miniconda3" \\',
-            '        "/apps/conda"; do',
-            '        if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then',
-            '            echo "📦 Found conda at: $CONDA_PATH"',
-            '            source "$CONDA_PATH/etc/profile.d/conda.sh"',
-            "            break",
-            "        fi",
-            "    done",
-            "fi",
-            "",
-            "# Final check for conda",
-            "if ! command -v conda > /dev/null 2>&1; then",
-            '    echo "❌ ERROR: conda command not found"',
-            '    echo "💡 Tip: Ensure conda is initialized in ~/.bashrc or specify CONDA_PATH"',
-            "    exit 1",
-            "fi",
-            "",
-            'eval "$(conda shell.bash hook)"',
-            f"if ! conda activate {env}; then",
-            f'    echo "❌ ERROR: Failed to activate conda environment: {env}"',
-            "    exit 1",
-            "fi",
-            f'echo "✅ Activated conda environment: {env}"',
-            "",
-        ]
-    )
+    # Environment-specific activation
+    if conda_env:
+        # Conda activation with fallback paths
+        lines.extend(
+            [
+                "# Activate conda environment",
+                "if ! command -v conda > /dev/null 2>&1; then",
+                '    echo "⚠️  conda not found in PATH, trying common locations..."',
+                "    # Try common conda installation paths",
+                "    for CONDA_PATH in \\",
+                '        "$HOME/miniconda3" \\',
+                '        "$HOME/anaconda3" \\',
+                '        "$HOME/miniforge3" \\',
+                '        "$HOME/mambaforge" \\',
+                '        "/g/data/a56/conda/miniconda3" \\',
+                '        "/apps/conda"; do',
+                '        if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then',
+                '            echo "📦 Found conda at: $CONDA_PATH"',
+                '            source "$CONDA_PATH/etc/profile.d/conda.sh"',
+                "            break",
+                "        fi",
+                "    done",
+                "fi",
+                "",
+                "# Final check for conda",
+                "if ! command -v conda > /dev/null 2>&1; then",
+                '    echo "❌ ERROR: conda command not found"',
+                '    echo "💡 Tip: Ensure conda is initialized in ~/.bashrc"',
+                "    exit 1",
+                "fi",
+                "",
+                'eval "$(conda shell.bash hook)"',
+                f"if ! conda activate {conda_env}; then",
+                f'    echo "❌ ERROR: Failed to activate conda environment: {conda_env}"',
+                "    exit 1",
+                "fi",
+                f'echo "✅ Activated conda environment: {conda_env}"',
+                "",
+            ]
+        )
+    elif modules:
+        # Module loading
+        module_list = " ".join(modules)
+        lines.extend(
+            [
+                "# Load environment modules",
+                "if ! command -v module > /dev/null 2>&1; then",
+                '    echo "⚠️  module command not found, trying to initialize..."',
+                "    # Try common module initialization paths",
+                "    if [ -f /etc/profile.d/modules.sh ]; then",
+                "        source /etc/profile.d/modules.sh",
+                "    elif [ -f /opt/modules/init/bash ]; then",
+                "        source /opt/modules/init/bash",
+                "    fi",
+                "fi",
+                "",
+                "if ! command -v module > /dev/null 2>&1; then",
+                '    echo "❌ ERROR: module command not found"',
+                "    exit 1",
+                "fi",
+                "",
+            ]
+        )
+        # Load each module
+        for mod in modules:
+            lines.extend(
+                [
+                    f'echo "📦 Loading module: {mod}"',
+                    f"if ! module load {mod}; then",
+                    f'    echo "❌ ERROR: Failed to load module: {mod}"',
+                    "    exit 1",
+                    "fi",
+                ]
+            )
+        lines.extend(
+            [
+                f'echo "✅ Loaded modules: {module_list}"',
+                "",
+            ]
+        )
 
     # Pre-command
     if pre_cmd:
@@ -229,23 +283,38 @@ def _build_interactive_script(
             ]
         )
     else:
-        # Direct shell mode - create a custom rcfile that activates conda
-        # This is necessary because exec replaces the process, losing conda activation
+        # Direct shell mode - create a custom rcfile that re-activates environment
+        # This is necessary because exec replaces the process, losing activation
         lines.extend(
             [
-                "# Start interactive shell with conda environment",
+                "# Start interactive shell with environment",
                 f'echo "🚀 Starting interactive shell ({shell})"',
                 'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                 'echo ""',
                 "",
-                "# Create a temporary rcfile that sources bashrc and activates conda",
+                "# Create a temporary rcfile that sources bashrc and activates environment",
                 "QXUB_RCFILE=$(mktemp /tmp/qxub_rc.XXXXXX)",
                 "cat > \"$QXUB_RCFILE\" << 'RCEOF'",
                 "# Source standard bashrc first",
                 "[ -f ~/.bashrc ] && source ~/.bashrc",
-                "# Ensure conda is available and activate the environment",
-                'eval "$(conda shell.bash hook)" 2>/dev/null',
-                f"conda activate {env}",
+            ]
+        )
+
+        # Add environment-specific activation to rcfile
+        if conda_env:
+            lines.extend(
+                [
+                    "# Ensure conda is available and activate the environment",
+                    'eval "$(conda shell.bash hook)" 2>/dev/null',
+                    f"conda activate {conda_env}",
+                ]
+            )
+        elif modules:
+            for mod in modules:
+                lines.append(f"module load {mod} 2>/dev/null")
+
+        lines.extend(
+            [
                 "# Clean up the temp rcfile",
                 'rm -f "$QXUB_RCFILE" 2>/dev/null',
                 "RCEOF",
@@ -298,8 +367,22 @@ def _build_qsub_command(
 @click.command(name="interactive")
 @click.option(
     "--env",
-    required=True,  # For now, require conda env (will expand later)
+    default=None,
     help="Conda environment name for the interactive session",
+)
+@click.option(
+    "--mod",
+    "--module",
+    "mod",
+    multiple=True,
+    help="Module to load (can be used multiple times)",
+)
+@click.option(
+    "--mods",
+    "--modules",
+    "mods",
+    default=None,
+    help="Comma or space-separated list of modules to load",
 )
 @click.option(
     "-l",
@@ -409,17 +492,25 @@ def interactive_cli(
     tmux_session,
     dry,
     verbose,
+    mod,
+    mods,
 ):
     """
     Start an interactive PBS session with environment setup.
 
     This command creates an interactive PBS job (`qsub -I`) with your
-    conda environment pre-activated, making it easy to work interactively
+    environment pre-activated, making it easy to work interactively
     on compute nodes.
 
     \b
-    Basic usage:
+    With conda environment:
         qxub interactive --env myenv
+        qxi --env myenv
+
+    \b
+    With environment modules:
+        qxub interactive --mod python3 --mod numpy
+        qxub interactive --mods "python3 numpy scipy"
 
     \b
     With resources:
@@ -433,7 +524,7 @@ def interactive_cli(
     \b
     With pre/post commands:
         qxub interactive --env myenv --pre "cd /project && git pull"
-        qxub interactive --env myenv --post "echo 'Session ended at $(date)'"
+        qxub interactive --mods python3 --post "echo 'Session ended'"
 
     \b
     Tips:
@@ -442,6 +533,27 @@ def interactive_cli(
         - Use --tmux for long sessions to enable reconnection
     """
     from .resources import ResourceMapper
+
+    # Process module options - combine --mod and --mods
+    module_list = list(mod) if mod else []
+    if mods:
+        # Split on comma or space
+        import re
+
+        module_list.extend(re.split(r"[,\s]+", mods.strip()))
+    module_list = [m.strip() for m in module_list if m.strip()]
+
+    # Validate: must have at least one execution context or allow default
+    if not env and not module_list:
+        # Allow default interactive session without conda/modules
+        pass  # This is now valid - just a plain interactive shell
+
+    # Check for conflicting options
+    if env and module_list:
+        raise click.ClickException(
+            "Cannot specify both --env (conda) and --mod/--mods (modules). "
+            "Choose one execution context."
+        )
 
     # Resolve defaults
     shell = shell or _get_default_shell()
@@ -486,12 +598,13 @@ def interactive_cli(
 
     # Build the interactive script
     script = _build_interactive_script(
-        env=env,
         shell=shell,
         working_dir=working_dir,
         pre_cmd=pre,
         post_cmd=post,
         tmux_session=tmux_session,
+        conda_env=env,
+        modules=module_list if module_list else None,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -507,11 +620,19 @@ def interactive_cli(
         storage=storage,
     )
 
+    # Determine context description for output
+    if env:
+        context_desc = f"Conda env: {env}"
+    elif module_list:
+        context_desc = f"Modules: {', '.join(module_list)}"
+    else:
+        context_desc = "Default (no conda/modules)"
+
     if verbose or dry:
         click.echo("=" * 60)
         click.echo("qxub interactive session")
         click.echo("=" * 60)
-        click.echo(f"Environment: {env}")
+        click.echo(f"Context: {context_desc}")
         click.echo(f"Shell: {shell}")
         click.echo(f"Working dir: {working_dir}")
         click.echo(f"Queue: {queue}")
@@ -555,8 +676,8 @@ def interactive_cli(
         pass  # Don't fail if history logging fails
 
     # Execute interactive session
-    click.echo(f"🚀 Starting interactive session...")
-    click.echo(f"   Environment: {env}")
+    click.echo("🚀 Starting interactive session...")
+    click.echo(f"   {context_desc}")
     click.echo(f"   Queue: {queue}")
     click.echo(f"   Runtime: {runtime}")
     if tmux_session:
