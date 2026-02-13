@@ -90,12 +90,14 @@ def _build_interactive_script(
     tmux_session: str | None,
     conda_env: str | None = None,
     modules: list[str] | None = None,
+    container: str | None = None,
+    bind: str | None = None,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
 
     This script:
-    1. Activates the conda environment or loads modules
+    1. Activates the conda environment, loads modules, or enters container
     2. Runs pre-commands
     3. Optionally starts tmux
     4. Drops into interactive shell
@@ -108,9 +110,12 @@ def _build_interactive_script(
     elif modules:
         context_type = "module"
         context_display = f"📦 Modules: {', '.join(modules)}"
+    elif container:
+        context_type = "container"
+        context_display = f"📦 Container: {container}"
     else:
         context_type = "default"
-        context_display = "🔧 Default environment (no conda/modules)"
+        context_display = "🔧 Default environment (no conda/modules/container)"
 
     lines = [
         "#!/bin/bash",
@@ -223,6 +228,23 @@ def _build_interactive_script(
                 "",
             ]
         )
+    elif container:
+        # Singularity container - load singularity module first
+        lines.extend(
+            [
+                "# Load singularity module",
+                "if ! command -v singularity > /dev/null 2>&1; then",
+                '    echo "📦 Loading singularity module..."',
+                "    if ! module load singularity 2>/dev/null; then",
+                '        echo "❌ ERROR: Failed to load singularity module"',
+                "        exit 1",
+                "    fi",
+                "fi",
+                "",
+                f'echo "📦 Using container: {container}"',
+                "",
+            ]
+        )
 
     # Pre-command
     if pre_cmd:
@@ -280,6 +302,17 @@ def _build_interactive_script(
                 '    echo "🆕 Creating new tmux session: $TMUX_SESSION"',
                 f'    exec tmux new-session -s "$TMUX_SESSION" "{shell}"',
                 "fi",
+            ]
+        )
+    elif container:
+        # Container mode: exec into singularity shell directly
+        bind_opts = f"--bind {bind} " if bind else ""
+        lines.extend(
+            [
+                f'echo "🚀 Entering container: {container}"',
+                'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
+                'echo ""',
+                f'exec singularity shell {bind_opts}"{container}"',
             ]
         )
     else:
@@ -383,6 +416,17 @@ def _build_qsub_command(
     "mods",
     default=None,
     help="Comma or space-separated list of modules to load",
+)
+@click.option(
+    "--sif",
+    "--container",
+    default=None,
+    help="Singularity container (.sif file) for the interactive session",
+)
+@click.option(
+    "--bind",
+    default=None,
+    help="Singularity bind mounts (e.g., '/data:/mnt', only used with --sif)",
 )
 @click.option(
     "-l",
@@ -494,6 +538,8 @@ def interactive_cli(
     verbose,
     mod,
     mods,
+    sif,
+    bind,
 ):
     """
     Start an interactive PBS session with environment setup.
@@ -511,6 +557,11 @@ def interactive_cli(
     With environment modules:
         qxub interactive --mod python3 --mod numpy
         qxub interactive --mods "python3 numpy scipy"
+
+    \b
+    With Singularity container:
+        qxub interactive --sif /path/to/container.sif
+        qxub interactive --sif container.sif --bind /data:/mnt
 
     \b
     With resources:
@@ -543,17 +594,17 @@ def interactive_cli(
         module_list.extend(re.split(r"[,\s]+", mods.strip()))
     module_list = [m.strip() for m in module_list if m.strip()]
 
-    # Validate: must have at least one execution context or allow default
-    if not env and not module_list:
-        # Allow default interactive session without conda/modules
-        pass  # This is now valid - just a plain interactive shell
-
-    # Check for conflicting options
-    if env and module_list:
+    # Count execution contexts specified
+    contexts = sum([bool(env), bool(module_list), bool(sif)])
+    if contexts > 1:
         raise click.ClickException(
-            "Cannot specify both --env (conda) and --mod/--mods (modules). "
-            "Choose one execution context."
+            "Cannot specify multiple execution contexts. "
+            "Choose one of: --env (conda), --mod/--mods (modules), or --sif (container)."
         )
+
+    # Warn if --bind is used without --sif
+    if bind and not sif:
+        raise click.ClickException("--bind can only be used with --sif (container).")
 
     # Resolve defaults
     shell = shell or _get_default_shell()
@@ -605,6 +656,8 @@ def interactive_cli(
         tmux_session=tmux_session,
         conda_env=env,
         modules=module_list if module_list else None,
+        container=sif,
+        bind=bind,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -625,8 +678,12 @@ def interactive_cli(
         context_desc = f"Conda env: {env}"
     elif module_list:
         context_desc = f"Modules: {', '.join(module_list)}"
+    elif sif:
+        context_desc = f"Container: {sif}"
+        if bind:
+            context_desc += f" (bind: {bind})"
     else:
-        context_desc = "Default (no conda/modules)"
+        context_desc = "Default (no conda/modules/container)"
 
     if verbose or dry:
         click.echo("=" * 60)
