@@ -37,6 +37,7 @@ setup(
     entry_points={
         "console_scripts": [
             "qxub=qxub.cli:qxub",
+            "qxi=qxub.interactive_cli:qxi_main",
             "qx=qxub.config.aliases:qx_main",
             "qxtat=qxub.config.aliases:qxtat_main",
             "qxet=qxub.config.aliases:qxet_main",
