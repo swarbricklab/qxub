@@ -118,12 +118,45 @@ def _build_interactive_script(
         ]
     )
 
-    # Conda activation
+    # Source bash initialization to get conda in PATH
+    # PBS jobs don't source .bashrc by default for non-login shells
+    lines.extend(
+        [
+            "# Initialize shell environment (PBS doesn't source .bashrc by default)",
+            "if [ -f ~/.bashrc ]; then",
+            '    echo "🔧 Sourcing ~/.bashrc for conda initialization..."',
+            "    source ~/.bashrc",
+            "fi",
+            "",
+        ]
+    )
+
+    # Conda activation with fallback paths
     lines.extend(
         [
             "# Activate conda environment",
             "if ! command -v conda > /dev/null 2>&1; then",
+            '    echo "⚠️  conda not found in PATH, trying common locations..."',
+            "    # Try common conda installation paths",
+            "    for CONDA_PATH in \\",
+            '        "$HOME/miniconda3" \\',
+            '        "$HOME/anaconda3" \\',
+            '        "$HOME/miniforge3" \\',
+            '        "$HOME/mambaforge" \\',
+            '        "/g/data/a56/conda/miniconda3" \\',
+            '        "/apps/conda"; do',
+            '        if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then',
+            '            echo "📦 Found conda at: $CONDA_PATH"',
+            '            source "$CONDA_PATH/etc/profile.d/conda.sh"',
+            "            break",
+            "        fi",
+            "    done",
+            "fi",
+            "",
+            "# Final check for conda",
+            "if ! command -v conda > /dev/null 2>&1; then",
             '    echo "❌ ERROR: conda command not found"',
+            '    echo "💡 Tip: Ensure conda is initialized in ~/.bashrc or specify CONDA_PATH"',
             "    exit 1",
             "fi",
             "",
