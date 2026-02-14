@@ -147,6 +147,7 @@ def _build_interactive_script(
     container: str | None = None,
     bind: str | None = None,
     verbose: bool = False,
+    run_cmd: str | None = None,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
@@ -441,10 +442,33 @@ def _build_interactive_script(
                 'rm -f "$QXUB_RCFILE" 2>/dev/null',
                 "RCEOF",
                 "",
-                "# Start bash with our custom rcfile",
-                'exec /bin/bash --rcfile "$QXUB_RCFILE"',
             ]
         )
+
+        if run_cmd:
+            # Run the specified command instead of dropping to shell
+            # Source the rcfile to set up environment, then exec the command
+            lines.extend(
+                [
+                    f'echo "🚀 Running: {run_cmd}"',
+                    'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
+                    'echo ""',
+                    "",
+                    "# Source the rcfile to set up environment",
+                    'source "$QXUB_RCFILE"',
+                    "",
+                    "# Run the specified command",
+                    f"exec {run_cmd}",
+                ]
+            )
+        else:
+            # Start interactive shell
+            lines.extend(
+                [
+                    "# Start bash with our custom rcfile",
+                    'exec /bin/bash --rcfile "$QXUB_RCFILE"',
+                ]
+            )
 
     return "\n".join(lines)
 
@@ -606,10 +630,16 @@ def _build_qsub_command(
     help="Increase verbosity",
 )
 @click.option(
+    "--cmd",
+    default=None,
+    help="Command to run (alternative to positional arguments)",
+)
+@click.option(
     "--no-defaults",
     is_flag=True,
     help="Skip default modules and conda env from config",
 )
+@click.argument("command", nargs=-1, required=False)
 @click.pass_context
 def interactive_cli(
     ctx,
@@ -630,11 +660,13 @@ def interactive_cli(
     tmux_session,
     dry,
     verbose,
+    cmd,
     no_defaults,
     mod,
     mods,
     sif,
     bind,
+    command,
 ):
     """
     Start an interactive PBS session with environment setup.
@@ -644,9 +676,16 @@ def interactive_cli(
     on compute nodes.
 
     \b
-    With conda environment:
+    Basic usage (drops into shell):
         qxub interactive --env myenv
         qxi --env myenv
+
+    \b
+    Run a command directly (e.g., start Python/R interpreter):
+        qxi --env myenv -- python
+        qxi --env myenv -- ipython
+        qxi --env myenv -- R
+        qxi --cmd "python -i script.py"  # alternative for complex args
 
     \b
     With environment modules:
@@ -688,6 +727,18 @@ def interactive_cli(
         - Reconnect to tmux with: tmux attach -t <session>
     """
     from .resources import ResourceMapper
+
+    # Resolve command from --cmd or positional arguments
+    if cmd and command:
+        raise click.ClickException(
+            "Cannot specify both --cmd and positional command arguments"
+        )
+
+    run_cmd = None
+    if cmd:
+        run_cmd = cmd
+    elif command:
+        run_cmd = " ".join(command)
 
     # Process module options - combine --mod, --mods, and config defaults
     # Skip defaults when using container mode (--sif)
@@ -792,6 +843,7 @@ def interactive_cli(
         container=sif,
         bind=bind,
         verbose=verbose > 0,
+        run_cmd=run_cmd,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -842,6 +894,8 @@ def interactive_cli(
             click.echo(f"Pre-command: {pre}")
         if post:
             click.echo(f"Post-command: {post}")
+        if run_cmd:
+            click.echo(f"Run command: {run_cmd}")
         if no_defaults:
             click.echo("Config defaults: SKIPPED (--no-defaults)")
         click.echo("")
