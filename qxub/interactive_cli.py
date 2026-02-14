@@ -542,6 +542,16 @@ def _build_qsub_command(
     help="Singularity bind mounts (e.g., '/data:/mnt', only used with --sif)",
 )
 @click.option(
+    "--shortcut",
+    default=None,
+    help="Use a predefined shortcut for execution settings",
+)
+@click.option(
+    "--alias",
+    default=None,
+    help="Use a predefined alias for execution settings",
+)
+@click.option(
     "-l",
     "--resources",
     multiple=True,
@@ -666,6 +676,8 @@ def interactive_cli(
     mods,
     sif,
     bind,
+    shortcut,
+    alias,
     command,
 ):
     """
@@ -720,6 +732,16 @@ def interactive_cli(
         qxub interactive --mods python3 --post "echo 'Session ended'"
 
     \b
+    With shortcuts (auto-detected or explicit):
+        qxi -- python                  # Auto-detects 'python' shortcut
+        qxi --shortcut pytorch         # Explicit shortcut usage
+        qxi --shortcut gpu -- python   # Shortcut + command
+
+    \b
+    With aliases:
+        qxi --alias train              # Use predefined alias settings
+
+    \b
     Tips:
         - Use Ctrl+D or 'exit' to end the PBS session normally
         - If --post is set, use 'qxub_exit' function to ensure post runs
@@ -727,6 +749,132 @@ def interactive_cli(
         - Reconnect to tmux with: tmux attach -t <session>
     """
     from .resources import ResourceMapper
+
+    # Check for conflicting shortcut/alias usage
+    if shortcut and alias:
+        raise click.ClickException(
+            "Cannot specify both --shortcut and --alias. Use only one."
+        )
+
+    # Handle shortcut processing
+    if shortcut:
+        from .shortcut_manager import ShortcutManager
+
+        shortcut_manager = ShortcutManager()
+        shortcut_def = shortcut_manager.get_shortcut(shortcut)
+
+        if not shortcut_def:
+            available_shortcuts = shortcut_manager.list_shortcuts()
+            click.echo(f"❌ Shortcut '{shortcut}' not found")
+            if available_shortcuts:
+                click.echo("💡 Available shortcuts:")
+                for name in sorted(available_shortcuts.keys()):
+                    click.echo(f"  • {name}")
+            raise click.ClickException(f"Shortcut '{shortcut}' not found")
+
+        # Apply shortcut settings (CLI options override shortcut settings)
+        if not env and shortcut_def.get("env"):
+            env = shortcut_def["env"]
+        if not mod and shortcut_def.get("mod"):
+            mod_val = shortcut_def["mod"]
+            mod = tuple(mod_val) if isinstance(mod_val, list) else (mod_val,)
+        if not mods and shortcut_def.get("mods"):
+            mods = shortcut_def["mods"]
+        if not queue and shortcut_def.get("queue"):
+            queue = shortcut_def["queue"]
+        if not resources and shortcut_def.get("resources"):
+            res_val = shortcut_def["resources"]
+            resources = tuple(res_val) if isinstance(res_val, list) else (res_val,)
+        if not sif and shortcut_def.get("sif"):
+            sif = shortcut_def["sif"]
+        if not bind and shortcut_def.get("bind"):
+            bind = shortcut_def["bind"]
+
+        click.echo(f"🎯 Using shortcut '{shortcut}'")
+
+    # Handle alias processing
+    elif alias:
+        config_mgr = _get_config_manager()
+        alias_def = config_mgr.get_alias(alias)
+
+        if not alias_def:
+            available_aliases = config_mgr.list_aliases()
+            click.echo(f"❌ Alias '{alias}' not found")
+            if available_aliases:
+                click.echo("💡 Available aliases:")
+                for alias_name in sorted(available_aliases):
+                    click.echo(f"  • {alias_name}")
+            raise click.ClickException(f"Alias '{alias}' not found")
+
+        # Flatten hierarchical alias structure if present
+        flat_alias = {}
+        if "main" in alias_def and isinstance(alias_def["main"], dict):
+            flat_alias.update(alias_def["main"])
+        if "subcommand" in alias_def and isinstance(alias_def["subcommand"], dict):
+            subcommand_section = alias_def["subcommand"]
+            subcommand_type = subcommand_section.get("type")
+            if subcommand_type == "conda" and "env" in subcommand_section:
+                flat_alias["env"] = subcommand_section["env"]
+            elif subcommand_type == "module":
+                if "mod" in subcommand_section:
+                    flat_alias["mod"] = subcommand_section["mod"]
+                elif "mods" in subcommand_section:
+                    flat_alias["mods"] = subcommand_section["mods"]
+            elif subcommand_type == "sing" and "sif" in subcommand_section:
+                flat_alias["sif"] = subcommand_section["sif"]
+                if "bind" in subcommand_section:
+                    flat_alias["bind"] = subcommand_section["bind"]
+        # Also handle flat structure
+        for key, value in alias_def.items():
+            if key not in ["main", "subcommand", "target"]:
+                flat_alias[key] = value
+
+        # Apply alias settings (CLI options override alias settings)
+        if not env and flat_alias.get("env"):
+            env = flat_alias["env"]
+        if not mod and flat_alias.get("mod"):
+            mod_val = flat_alias["mod"]
+            mod = tuple(mod_val) if isinstance(mod_val, list) else (mod_val,)
+        if not mods and flat_alias.get("mods"):
+            mods = flat_alias["mods"]
+        if not queue and flat_alias.get("queue"):
+            queue = flat_alias["queue"]
+        if not resources and flat_alias.get("resources"):
+            res_val = flat_alias["resources"]
+            resources = tuple(res_val) if isinstance(res_val, list) else (res_val,)
+        if not sif and flat_alias.get("sif"):
+            sif = flat_alias["sif"]
+        if not bind and flat_alias.get("bind"):
+            bind = flat_alias["bind"]
+
+        click.echo(f"🎯 Using alias '{alias}'")
+
+    # Auto-detect shortcut from command (if no explicit shortcut/alias and command provided)
+    elif command and not env and not mod and not mods and not sif:
+        from .shortcut_manager import ShortcutManager
+
+        shortcut_manager = ShortcutManager()
+        shortcut_match = shortcut_manager.find_shortcut(list(command))
+
+        if shortcut_match:
+            shortcut_def = shortcut_match["definition"]
+            shortcut_name = shortcut_match["name"]
+
+            # Apply shortcut settings
+            if shortcut_def.get("env"):
+                env = shortcut_def["env"]
+            if shortcut_def.get("mod"):
+                mod_val = shortcut_def["mod"]
+                mod = tuple(mod_val) if isinstance(mod_val, list) else (mod_val,)
+            if shortcut_def.get("mods"):
+                mods = shortcut_def["mods"]
+            if not queue and shortcut_def.get("queue"):
+                queue = shortcut_def["queue"]
+            if not resources and shortcut_def.get("resources"):
+                res_val = shortcut_def["resources"]
+                resources = tuple(res_val) if isinstance(res_val, list) else (res_val,)
+
+            click.echo(f"🎯 Auto-detected shortcut '{shortcut_name}'")
 
     # Resolve command from --cmd or positional arguments
     if cmd and command:
