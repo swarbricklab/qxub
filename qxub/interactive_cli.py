@@ -104,6 +104,15 @@ def _get_default_env() -> str | None:
         return None
 
 
+def _get_default_tmux_session() -> str | None:
+    """Get default tmux session name from config."""
+    try:
+        config_mgr = _get_config_manager()
+        return config_mgr.get_config_value("defaults.interactive.tmux_session")
+    except Exception:
+        return None
+
+
 def _get_container_prompt(container_name: str) -> str:
     """Get container prompt from config or use default.
 
@@ -596,6 +605,11 @@ def _build_qsub_command(
     count=True,
     help="Increase verbosity",
 )
+@click.option(
+    "--no-defaults",
+    is_flag=True,
+    help="Skip default modules and conda env from config",
+)
 @click.pass_context
 def interactive_cli(
     ctx,
@@ -616,6 +630,7 @@ def interactive_cli(
     tmux_session,
     dry,
     verbose,
+    no_defaults,
     mod,
     mods,
     sif,
@@ -684,15 +699,15 @@ def interactive_cli(
         module_list.extend(re.split(r"[,\s]+", mods.strip()))
     module_list = [m.strip() for m in module_list if m.strip()]
 
-    # Add default modules from config (only if not using container)
-    if not sif:
+    # Add default modules from config (only if not using container and not --no-defaults)
+    if not sif and not no_defaults:
         default_modules = _get_default_modules()
         for default_mod in default_modules:
             if default_mod not in module_list:
                 module_list.append(default_mod)
 
     # Apply default conda environment from config (if --env not specified and not container)
-    if not env and not sif:
+    if not env and not sif and not no_defaults:
         env = _get_default_env()
 
     # Validate execution contexts:
@@ -714,6 +729,23 @@ def interactive_cli(
     queue = queue or _get_default_queue()
     runtime = runtime or _get_default_runtime()
     name = name or "qxub-interactive"
+
+    # Handle tmux: detect if already inside a tmux session
+    already_in_tmux = os.environ.get("TMUX") is not None
+
+    if already_in_tmux and tmux_session:
+        # User explicitly requested --tmux but we're already in tmux
+        raise click.ClickException(
+            "Already inside a tmux session. Cannot create nested tmux sessions.\n"
+            "   Run without --tmux to start the PBS job directly in this session."
+        )
+
+    if already_in_tmux:
+        # Already in tmux - skip default session name, run qsub directly
+        tmux_session = None
+    elif not tmux_session and not no_defaults:
+        # Not in tmux - apply default session from config
+        tmux_session = _get_default_tmux_session()
 
     # Build resources using ResourceMapper
     mapper = ResourceMapper()
@@ -810,6 +842,8 @@ def interactive_cli(
             click.echo(f"Pre-command: {pre}")
         if post:
             click.echo(f"Post-command: {post}")
+        if no_defaults:
+            click.echo("Config defaults: SKIPPED (--no-defaults)")
         click.echo("")
         click.echo("qsub command:")
         click.echo(f"  {' '.join(qsub_cmd)}")
@@ -886,9 +920,56 @@ def interactive_cli(
         session_exists = result.returncode == 0
 
         if session_exists:
-            # Session exists - attach to it
+            # Session exists - get its current directory and send info message
+            pane_path_result = subprocess.run(
+                [
+                    "tmux",
+                    "display-message",
+                    "-t",
+                    tmux_session,
+                    "-p",
+                    "#{pane_current_path}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            session_pwd = (
+                pane_path_result.stdout.strip()
+                if pane_path_result.returncode == 0
+                else "unknown"
+            )
+
+            # Build info message to send to the session
+            info_lines = [
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"🔗 Attached to existing tmux session: {tmux_session}",
+            ]
+            if session_pwd != working_dir:
+                info_lines.append(f"📁 Session PWD: {session_pwd}")
+                info_lines.append(f"   (You requested: {working_dir})")
+                info_lines.append("   Use 'cd' to change directory if needed")
+            info_lines.append("   If PBS job ended, run 'qxi' again to start a new job")
+            info_lines.append(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            info_lines.append("")
+
+            # Send the info message to the tmux session (will appear after attach)
+            info_message = "\\n".join(info_lines)
+            subprocess.run(
+                [
+                    "tmux",
+                    "send-keys",
+                    "-t",
+                    tmux_session,
+                    f"echo -e '{info_message}'",
+                    "Enter",
+                ],
+                capture_output=True,
+            )
+
             click.echo(f"🔗 Attaching to existing tmux session: {tmux_session}")
-            click.echo("   (If PBS job ended, run the qsub command again inside tmux)")
             os.execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
         else:
             # Create new session and run qsub inside it
