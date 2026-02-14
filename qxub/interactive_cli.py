@@ -77,6 +77,33 @@ def _get_default_volumes() -> str | None:
         return None
 
 
+def _get_default_modules() -> list[str]:
+    """Get default modules from config."""
+    try:
+        config_mgr = _get_config_manager()
+        modules = config_mgr.get_config_value("defaults.interactive.modules")
+        if modules:
+            # Handle both string and list formats
+            if isinstance(modules, str):
+                import re
+
+                return [m.strip() for m in re.split(r"[,\s]+", modules) if m.strip()]
+            elif isinstance(modules, list):
+                return [str(m).strip() for m in modules if m]
+        return []
+    except Exception:
+        return []
+
+
+def _get_default_env() -> str | None:
+    """Get default conda environment from config."""
+    try:
+        config_mgr = _get_config_manager()
+        return config_mgr.get_config_value("defaults.interactive.env")
+    except Exception:
+        return None
+
+
 def _get_container_prompt(container_name: str) -> str:
     """Get container prompt from config or use default.
 
@@ -647,7 +674,8 @@ def interactive_cli(
     """
     from .resources import ResourceMapper
 
-    # Process module options - combine --mod and --mods
+    # Process module options - combine --mod, --mods, and config defaults
+    # Skip defaults when using container mode (--sif)
     module_list = list(mod) if mod else []
     if mods:
         # Split on comma or space
@@ -655,6 +683,17 @@ def interactive_cli(
 
         module_list.extend(re.split(r"[,\s]+", mods.strip()))
     module_list = [m.strip() for m in module_list if m.strip()]
+
+    # Add default modules from config (only if not using container)
+    if not sif:
+        default_modules = _get_default_modules()
+        for default_mod in default_modules:
+            if default_mod not in module_list:
+                module_list.append(default_mod)
+
+    # Apply default conda environment from config (if --env not specified and not container)
+    if not env and not sif:
+        env = _get_default_env()
 
     # Validate execution contexts:
     # - Container (--sif) is mutually exclusive with conda/modules
