@@ -106,24 +106,27 @@ def _build_interactive_script(
     working_dir: str,
     pre_cmd: str | None,
     post_cmd: str | None,
-    tmux_session: str | None,
     conda_env: str | None = None,
     modules: list[str] | None = None,
     container: str | None = None,
     bind: str | None = None,
+    verbose: bool = False,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
 
     This script:
-    1. Activates the conda environment, loads modules, or enters container
-    2. Runs pre-commands
-    3. Optionally starts tmux
+    1. Loads modules (if any) - with environment diff tracking
+    2. Activates conda environment (if any)
+    3. Runs pre-commands
     4. Drops into interactive shell
     5. Runs post-commands on exit (best effort)
     """
     # Determine context type for display
-    if conda_env:
+    if conda_env and modules:
+        context_type = "conda+modules"
+        context_display = f"🐍 Conda: {conda_env} + 📦 Modules: {', '.join(modules)}"
+    elif conda_env:
         context_type = "conda"
         context_display = f"🐍 Conda environment: {conda_env}"
     elif modules:
@@ -140,6 +143,7 @@ def _build_interactive_script(
         "#!/bin/bash",
         "",
         "# qxub interactive session",
+        f'export QXUB_VERBOSE={"1" if verbose else "0"}',
         f'echo "🖥️  Interactive session starting on $(hostname)"',
         f'echo "📁 Working directory: {working_dir}"',
         f'echo "{context_display}"',
@@ -168,8 +172,78 @@ def _build_interactive_script(
     )
 
     # Environment-specific activation
+    # Order: modules first (if any), then conda (if any)
+    # This allows utility modules (singularity, dvc, etc.) to coexist with conda envs
+
+    if modules:
+        # Module loading with environment diff tracking
+        module_list_str = " ".join(modules)
+        lines.extend(
+            [
+                "# Load environment modules",
+                "if ! command -v module > /dev/null 2>&1; then",
+                '    echo "⚠️  module command not found, trying to initialize..."',
+                "    # Try common module initialization paths",
+                "    if [ -f /etc/profile.d/modules.sh ]; then",
+                "        source /etc/profile.d/modules.sh",
+                "    elif [ -f /opt/modules/init/bash ]; then",
+                "        source /opt/modules/init/bash",
+                "    fi",
+                "fi",
+                "",
+                "if ! command -v module > /dev/null 2>&1; then",
+                '    echo "❌ ERROR: module command not found"',
+                "    exit 1",
+                "fi",
+                "",
+                "# Capture environment before loading modules (for diff tracking)",
+                "QXUB_ENV_BEFORE=$(mktemp)",
+                'printenv | sort > "$QXUB_ENV_BEFORE"',
+                "",
+            ]
+        )
+        # Load each module
+        for mod in modules:
+            lines.extend(
+                [
+                    f'echo "📦 Loading module: {mod}"',
+                    f"if ! module load {mod}; then",
+                    f'    echo "❌ ERROR: Failed to load module: {mod}"',
+                    '    rm -f "$QXUB_ENV_BEFORE"',
+                    "    exit 1",
+                    "fi",
+                ]
+            )
+        lines.extend(
+            [
+                f'echo "✅ Loaded modules: {module_list_str}"',
+                "",
+                "# Check for environment changes that might conflict with conda",
+                "QXUB_ENV_AFTER=$(mktemp)",
+                'printenv | sort > "$QXUB_ENV_AFTER"',
+                "",
+                "# Warn about potentially problematic environment changes",
+                "for VAR in PYTHONPATH PYTHONHOME LD_LIBRARY_PATH R_HOME R_LIBS; do",
+                '    if diff "$QXUB_ENV_BEFORE" "$QXUB_ENV_AFTER" | grep -q "^[<>].*$VAR="; then',
+                '        echo "⚠️  Warning: Module modified $VAR - may conflict with conda"',
+                "    fi",
+                "done",
+                "",
+                "# Show full environment diff in verbose mode",
+                'if [ "${QXUB_VERBOSE:-0}" = "1" ]; then',
+                '    echo ""',
+                '    echo "📊 Environment changes from modules:"',
+                '    diff "$QXUB_ENV_BEFORE" "$QXUB_ENV_AFTER" | grep -E "^[<>]" || echo "  (no changes)"',
+                '    echo ""',
+                "fi",
+                "",
+                'rm -f "$QXUB_ENV_BEFORE" "$QXUB_ENV_AFTER"',
+                "",
+            ]
+        )
+
     if conda_env:
-        # Conda activation with fallback paths
+        # Conda activation (after modules if both specified)
         lines.extend(
             [
                 "# Activate conda environment",
@@ -207,48 +281,10 @@ def _build_interactive_script(
                 "",
             ]
         )
-    elif modules:
-        # Module loading
-        module_list = " ".join(modules)
-        lines.extend(
-            [
-                "# Load environment modules",
-                "if ! command -v module > /dev/null 2>&1; then",
-                '    echo "⚠️  module command not found, trying to initialize..."',
-                "    # Try common module initialization paths",
-                "    if [ -f /etc/profile.d/modules.sh ]; then",
-                "        source /etc/profile.d/modules.sh",
-                "    elif [ -f /opt/modules/init/bash ]; then",
-                "        source /opt/modules/init/bash",
-                "    fi",
-                "fi",
-                "",
-                "if ! command -v module > /dev/null 2>&1; then",
-                '    echo "❌ ERROR: module command not found"',
-                "    exit 1",
-                "fi",
-                "",
-            ]
-        )
-        # Load each module
-        for mod in modules:
-            lines.extend(
-                [
-                    f'echo "📦 Loading module: {mod}"',
-                    f"if ! module load {mod}; then",
-                    f'    echo "❌ ERROR: Failed to load module: {mod}"',
-                    "    exit 1",
-                    "fi",
-                ]
-            )
-        lines.extend(
-            [
-                f'echo "✅ Loaded modules: {module_list}"',
-                "",
-            ]
-        )
-    elif container:
+
+    if container:
         # Singularity container - load singularity module first
+        # Note: container is mutually exclusive with conda/modules
         lines.extend(
             [
                 "# Load singularity module",
@@ -307,23 +343,7 @@ def _build_interactive_script(
         )
 
     # Main interactive part
-    if tmux_session:
-        # Tmux mode: create or attach to session
-        lines.extend(
-            [
-                "# Tmux session management",
-                f'TMUX_SESSION="{tmux_session}"',
-                "",
-                'if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then',
-                '    echo "🔗 Attaching to existing tmux session: $TMUX_SESSION"',
-                '    exec tmux attach-session -t "$TMUX_SESSION"',
-                "else",
-                '    echo "🆕 Creating new tmux session: $TMUX_SESSION"',
-                f'    exec tmux new-session -s "$TMUX_SESSION" "{shell}"',
-                "fi",
-            ]
-        )
-    elif container:
+    if container:
         # Container mode: exec into singularity shell directly
         # Extract container basename for prompt
         container_name = container.split("/")[-1].replace(".sif", "")
@@ -365,6 +385,11 @@ def _build_interactive_script(
         )
 
         # Add environment-specific activation to rcfile
+        # Order: modules first, then conda (same as main script)
+        if modules:
+            for mod in modules:
+                lines.append(f"module load {mod} 2>/dev/null")
+
         if conda_env:
             lines.extend(
                 [
@@ -373,9 +398,6 @@ def _build_interactive_script(
                     f"conda activate {conda_env}",
                 ]
             )
-        elif modules:
-            for mod in modules:
-                lines.append(f"module load {mod} 2>/dev/null")
 
         lines.extend(
             [
@@ -590,6 +612,12 @@ def interactive_cli(
         qxub interactive --mods "python3 numpy scipy"
 
     \b
+    With conda + modules (modules loaded first, then conda):
+        qxub interactive --env myenv --mod singularity --mod dvc
+        # Warnings shown if modules modify PYTHONPATH, LD_LIBRARY_PATH, etc.
+        # Use -v to see full environment diff from module loading
+
+    \b
     With Singularity container:
         qxub interactive --sif /path/to/container.sif
         qxub interactive --sif container.sif --bind /data:/mnt
@@ -599,9 +627,11 @@ def interactive_cli(
         qxub interactive --env myenv --mem 32GB --cpus 4 --runtime 2h
 
     \b
-    With tmux for session persistence:
+    With tmux for session persistence (on login node):
         qxub interactive --env myenv --tmux mysession
-        # If disconnected, resubmit to reattach
+        # Tmux runs on login node - survives PBS job ending
+        # If disconnected: tmux attach -t mysession
+        # To resubmit PBS job from inside tmux, run qxi again
 
     \b
     With pre/post commands:
@@ -610,9 +640,10 @@ def interactive_cli(
 
     \b
     Tips:
-        - Use Ctrl+D or 'exit' to end the session normally
+        - Use Ctrl+D or 'exit' to end the PBS session normally
         - If --post is set, use 'qxub_exit' function to ensure post runs
-        - Use --tmux for long sessions to enable reconnection
+        - With --tmux: session persists on login node after PBS job ends
+        - Reconnect to tmux with: tmux attach -t <session>
     """
     from .resources import ResourceMapper
 
@@ -625,12 +656,13 @@ def interactive_cli(
         module_list.extend(re.split(r"[,\s]+", mods.strip()))
     module_list = [m.strip() for m in module_list if m.strip()]
 
-    # Count execution contexts specified
-    contexts = sum([bool(env), bool(module_list), bool(sif)])
-    if contexts > 1:
+    # Validate execution contexts:
+    # - Container (--sif) is mutually exclusive with conda/modules
+    # - Conda (--env) and modules (--mod/--mods) CAN be combined
+    if sif and (env or module_list):
         raise click.ClickException(
-            "Cannot specify multiple execution contexts. "
-            "Choose one of: --env (conda), --mod/--mods (modules), or --sif (container)."
+            "Cannot use --sif (container) with --env or --mod/--mods. "
+            "Container mode is mutually exclusive with other execution contexts."
         )
 
     # Warn if --bind is used without --sif
@@ -684,11 +716,11 @@ def interactive_cli(
         working_dir=working_dir,
         pre_cmd=pre,
         post_cmd=post,
-        tmux_session=tmux_session,
         conda_env=env,
         modules=module_list if module_list else None,
         container=sif,
         bind=bind,
+        verbose=verbose > 0,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -705,7 +737,9 @@ def interactive_cli(
     )
 
     # Determine context description for output
-    if env:
+    if env and module_list:
+        context_desc = f"Conda: {env} + Modules: {', '.join(module_list)}"
+    elif env:
         context_desc = f"Conda env: {env}"
     elif module_list:
         context_desc = f"Modules: {', '.join(module_list)}"
@@ -797,18 +831,48 @@ def interactive_cli(
         click.echo(f"Full command: {' '.join(qsub_cmd)}")
         click.echo("")
 
-    # Use os.execvp to replace this process with qsub -I
-    # This ensures proper TTY handling and signal propagation
-    try:
-        os.execvp("qsub", qsub_cmd)
-    except Exception as e:
-        # Clean up script file on error
+    # Handle tmux: start tmux on LOGIN node, run qsub INSIDE tmux
+    # This ensures the tmux session persists when the PBS job ends
+    if tmux_session:
+        import shlex
+        import subprocess
+
+        qsub_cmd_str = " ".join(shlex.quote(arg) for arg in qsub_cmd)
+
+        # Check if tmux session already exists
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", tmux_session],
+            capture_output=True,
+        )
+        session_exists = result.returncode == 0
+
+        if session_exists:
+            # Session exists - attach to it
+            click.echo(f"🔗 Attaching to existing tmux session: {tmux_session}")
+            click.echo("   (If PBS job ended, run the qsub command again inside tmux)")
+            os.execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
+        else:
+            # Create new session and run qsub inside it
+            click.echo(
+                f"🆕 Creating tmux session '{tmux_session}' and starting PBS job..."
+            )
+            os.execvp(
+                "tmux",
+                ["tmux", "new-session", "-s", tmux_session, qsub_cmd_str],
+            )
+    else:
+        # No tmux - use os.execvp to replace this process with qsub -I
+        # This ensures proper TTY handling and signal propagation
         try:
-            script_file.unlink()
-        except Exception:
-            pass
-        click.echo(f"❌ Error starting interactive session: {e}")
-        sys.exit(1)
+            os.execvp("qsub", qsub_cmd)
+        except Exception as e:
+            # Clean up script file on error
+            try:
+                script_file.unlink()
+            except Exception:
+                pass
+            click.echo(f"❌ Error starting interactive session: {e}")
+            sys.exit(1)
 
 
 def qxi_main():
