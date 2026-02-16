@@ -1128,6 +1128,9 @@ def interactive_cli(
             click.echo(f"Post-command: {post}")
         if run_cmd:
             click.echo(f"Run command: {run_cmd}")
+        if record:
+            record_location = resolved_record_dir or working_dir
+            click.echo(f"Recording to: {record_location}")
         if no_defaults:
             click.echo("Config defaults: SKIPPED (--no-defaults)")
         click.echo("")
