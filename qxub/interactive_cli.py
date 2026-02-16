@@ -518,7 +518,16 @@ def _build_interactive_script(
                         "# -e: return child's exit code",
                         "# -q: quiet mode (no 'Script started' messages)",
                         "# -t: output timing to file for replay",
-                        f'exec script -eqc "{run_cmd}" -t"$TIMING_FILE" "$TRANSCRIPT_FILE"',
+                        "# Note: no 'exec' so we can print summary after session ends",
+                        f'script -eqc "{run_cmd}" -t"$TIMING_FILE" "$TRANSCRIPT_FILE"',
+                        "SCRIPT_EXIT=$?",
+                        "",
+                        "# Print transcript location on exit",
+                        'echo ""',
+                        'echo "📝 Session transcript saved to: $TRANSCRIPT_FILE"',
+                        'echo "   Timing: $TIMING_FILE"',
+                        'echo "   Replay: scriptreplay "$TIMING_FILE" "$TRANSCRIPT_FILE""',
+                        "exit $SCRIPT_EXIT",
                     ]
                 )
             else:
