@@ -1209,57 +1209,22 @@ def interactive_cli(
         session_exists = result.returncode == 0
 
         if session_exists:
-            # Session exists - get its current directory and send info message
-            pane_path_result = subprocess.run(
-                [
-                    "tmux",
-                    "display-message",
-                    "-t",
-                    tmux_session,
-                    "-p",
-                    "#{pane_current_path}",
-                ],
-                capture_output=True,
-                text=True,
+            # Session already exists - refuse to continue automatically
+            # This avoids accidentally interrupting an active R/Python session
+            # or other running process with send-keys
+            click.echo(f"⚠️  Tmux session '{tmux_session}' already exists.", err=True)
+            click.echo("", err=True)
+            click.echo(
+                "To attach to the existing session first (recommended):", err=True
             )
-            session_pwd = (
-                pane_path_result.stdout.strip()
-                if pane_path_result.returncode == 0
-                else "unknown"
-            )
-
-            # Build info message to send to the session
-            info_lines = [
-                "",
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-                f"🔗 Attached to existing tmux session: {tmux_session}",
-            ]
-            if session_pwd != working_dir:
-                info_lines.append(f"📁 Session PWD: {session_pwd}")
-                info_lines.append(f"   (You requested: {working_dir})")
-                info_lines.append("   Use 'cd' to change directory if needed")
-            info_lines.append("   If PBS job ended, run 'qxi' again to start a new job")
-            info_lines.append(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
-            info_lines.append("")
-
-            # Send the info message to the tmux session (will appear after attach)
-            info_message = "\\n".join(info_lines)
-            subprocess.run(
-                [
-                    "tmux",
-                    "send-keys",
-                    "-t",
-                    tmux_session,
-                    f"echo -e '{info_message}'",
-                    "Enter",
-                ],
-                capture_output=True,
-            )
-
-            click.echo(f"🔗 Attaching to existing tmux session: {tmux_session}")
-            os.execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
+            click.echo(f"    tmux attach -t {tmux_session}", err=True)
+            click.echo("", err=True)
+            click.echo("Or use a different session name:", err=True)
+            click.echo(f"    qxi --tmux {tmux_session}-2 ...", err=True)
+            click.echo("", err=True)
+            click.echo("Or kill the existing session and retry:", err=True)
+            click.echo(f"    tmux kill-session -t {tmux_session}", err=True)
+            sys.exit(1)
         else:
             # Create new session and run qsub inside it
             click.echo(
