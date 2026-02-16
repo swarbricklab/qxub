@@ -113,6 +113,26 @@ def _get_default_tmux_session() -> str | None:
         return None
 
 
+def _get_default_record_dir() -> str | None:
+    """Get default transcript recording directory from config.
+
+    Supports template variables like {user}, {project}, etc.
+    """
+    try:
+        config_mgr = _get_config_manager()
+        record_dir = config_mgr.get_config_value("defaults.interactive.record_dir")
+        if record_dir:
+            # Resolve template variables
+            template_vars = {
+                "user": os.environ.get("USER", "unknown"),
+                "project": os.environ.get("PROJECT", "unknown"),
+            }
+            return config_mgr.resolve_templates(record_dir, template_vars)
+        return None
+    except Exception:
+        return None
+
+
 def _get_container_prompt(container_name: str) -> str:
     """Get container prompt from config or use default.
 
@@ -148,6 +168,8 @@ def _build_interactive_script(
     bind: str | None = None,
     verbose: bool = False,
     run_cmd: str | None = None,
+    record: bool = False,
+    record_dir: str | None = None,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
@@ -447,20 +469,66 @@ def _build_interactive_script(
 
         if run_cmd:
             # Run the specified command instead of dropping to shell
-            # Source the rcfile to set up environment, then exec the command
+            #
+            # Signal handling challenge in PBS:
+            # PBS runs scripts in a non-interactive context. When Ctrl+C is pressed,
+            # SIGINT goes to the process group, killing everything including R.
+            #
+            # Solution: Use the `script` command to create a pseudo-terminal (pty).
+            # Programs like R detect they're running on a pty and set up proper
+            # signal handlers that interrupt the current command instead of exiting.
+            #
+            # The `script` command:
+            # - Creates a new pseudo-terminal
+            # - Runs the command with that pty as stdin/stdout
+            # - R sees a proper terminal and handles Ctrl+C correctly
+            # - `-q`: quiet mode (no "Script started" messages)
+            # - `-c`: run this command
+            # - `-e`: return exit code of the child process
+            # - With --record: save transcript and timing for playback
             lines.extend(
                 [
                     f'echo "🚀 Running: {run_cmd}"',
                     'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                     'echo ""',
                     "",
-                    "# Source the rcfile to set up environment",
+                    "# Source the rcfile to set up environment (conda/modules)",
                     'source "$QXUB_RCFILE"',
                     "",
-                    "# Run the specified command",
-                    f"exec {run_cmd}",
                 ]
             )
+
+            if record:
+                # Record transcript and timing data
+                # Use specified directory or working directory
+                rec_dir = record_dir if record_dir else "$PWD"
+                lines.extend(
+                    [
+                        "# Generate transcript filename with timestamp",
+                        f'RECORD_DIR="{rec_dir}"',
+                        'mkdir -p "$RECORD_DIR" 2>/dev/null',
+                        'TRANSCRIPT_FILE="$RECORD_DIR/qxub-transcript-$(date +%Y%m%d-%H%M%S).txt"',
+                        'TIMING_FILE="$RECORD_DIR/qxub-timing-$(date +%Y%m%d-%H%M%S).txt"',
+                        'echo "📝 Recording session to: $TRANSCRIPT_FILE"',
+                        'echo "⏱️  Timing data: $TIMING_FILE"',
+                        'echo "   Replay with: scriptreplay "$TIMING_FILE" "$TRANSCRIPT_FILE""',
+                        'echo ""',
+                        "",
+                        "# Use 'script' with recording enabled",
+                        "# -e: return child's exit code",
+                        "# -q: quiet mode (no 'Script started' messages)",
+                        "# -t: output timing to file for replay",
+                        f'exec script -eqc "{run_cmd}" -t"$TIMING_FILE" "$TRANSCRIPT_FILE"',
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        "# Use 'script' to create a pseudo-terminal for the command",
+                        "# -e: return child's exit code, -q: quiet mode",
+                        f'exec script -eqc "{run_cmd}" /dev/null',
+                    ]
+                )
         else:
             # Start interactive shell
             lines.extend(
@@ -649,6 +717,16 @@ def _build_qsub_command(
     is_flag=True,
     help="Skip default modules and conda env from config",
 )
+@click.option(
+    "--record",
+    is_flag=True,
+    help="Record session transcript",
+)
+@click.option(
+    "--record-dir",
+    default=None,
+    help="Directory for transcript files (default: config or working directory)",
+)
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
 def interactive_cli(
@@ -672,6 +750,8 @@ def interactive_cli(
     verbose,
     cmd,
     no_defaults,
+    record,
+    record_dir,
     mod,
     mods,
     sif,
@@ -981,6 +1061,8 @@ def interactive_cli(
     all_resources = list(resources) + mapped_resources
 
     # Build the interactive script
+    # Resolve record_dir from config if not specified
+    resolved_record_dir = record_dir or _get_default_record_dir()
     script = _build_interactive_script(
         shell=shell,
         working_dir=working_dir,
@@ -992,6 +1074,8 @@ def interactive_cli(
         bind=bind,
         verbose=verbose > 0,
         run_cmd=run_cmd,
+        record=record,
+        record_dir=resolved_record_dir,
     )
 
     # Resolve storage volumes - use default if not specified
