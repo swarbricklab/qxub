@@ -1328,7 +1328,6 @@ def interactive_cli(
     # This ensures the tmux session persists when the PBS job ends
     if tmux_session:
         import shlex
-        import subprocess
 
         qsub_cmd_str = " ".join(shlex.quote(arg) for arg in qsub_cmd)
 
