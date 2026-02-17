@@ -19,8 +19,10 @@ from .cancel_cli import cancel_cli
 from .config_cli import config_cli
 from .exec_cli import exec_cli
 from .history_cli import history
+from .interactive_cli import interactive_cli
 from .monitor_cli import monitor_cli
 from .platform import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
+from .replay_cli import replay_cli
 from .resources_cli import resources
 from .status_cli import status_cli
 
@@ -65,6 +67,8 @@ def qxub(ctx, version):
 
 # Register all subcommands
 qxub.add_command(exec_cli)
+qxub.add_command(interactive_cli)
+qxub.add_command(replay_cli)
 qxub.add_command(config_cli)
 qxub.add_command(alias_cli)  # Deprecated - use qxub exec --alias instead
 qxub.add_command(cancel_cli)
