@@ -21,8 +21,19 @@ qxub exec -- python script.py                    # Direct submission
 
 # Built-in command aliases for faster typing
 qx dvc push                                      # Short for 'qxub exec -- dvc push'
+qxi --env pytorch                                # Short for 'qxub interactive --env pytorch'
 qxtat 12345.gadi-pbs                             # Short for 'qxub status'
 qxet "command" --env base                        # Short for 'qxub config shortcut set "command" --env base'
+
+# Interactive PBS sessions with environment activation
+qxub interactive --env pytorch                   # Start interactive session
+qxi --env pytorch --tmux ml-session              # With tmux persistence
+qxi --record --env pytorch                       # Record session for replay
+
+# Replay recorded sessions
+qxub replay --list                               # List recordings
+qxub replay 1                                    # Replay most recent
+qxub replay --view 1                             # View transcript
 
 # Resource specification - choose your style!
 qxub exec --mem 16GB --cpus 8 --runtime 2h --env myenv -- python script.py        # Workflow-friendly
@@ -177,6 +188,8 @@ qxub config get defaults
 ```bash
 qxub --help                       # General help
 qxub exec --help                 # Execution command help
+qxub interactive --help          # Interactive session help
+qxub replay --help               # Session replay help
 qxub config --help               # Configuration help
 qxub config shortcut --help      # Shortcut management help
 qxub history --help              # History management help
@@ -185,6 +198,7 @@ qxub monitor --help              # Monitor multiple jobs
 
 # Built-in alias help
 qx --help                        # qxub exec help
+qxi --help                       # qxub interactive help
 qxtat --help                     # qxub status help
 qxet --help                      # qxub config shortcut set help
 ```

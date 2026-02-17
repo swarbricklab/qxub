@@ -151,6 +151,74 @@ qxub exec -- python train.py     # Auto-detects 'python' shortcut
 qxub exec -- gcc --version       # Auto-detects 'gcc' shortcut
 ```
 
+## Interactive Sessions (v3.3.0)
+
+Start interactive PBS sessions with environment activation, resource allocation, and optional session recording.
+
+```bash
+# Basic interactive session (alias: qxi)
+qxub interactive --env pytorch
+qxi --env pytorch                # Short alias
+
+# With resources
+qxi --env pytorch --mem 32GB --cpus 8 --runtime 4h
+
+# With tmux for session persistence (reconnect if disconnected)
+qxi --env pytorch --tmux ml-session
+
+# Record session for later replay
+qxi --record --env pytorch
+```
+
+### Recording and Replay
+
+Record sessions and replay them later for documentation or debugging:
+
+```bash
+# Start a recorded session
+qxi --record --env pytorch
+
+# List recorded sessions
+qxub replay --list
+
+# Replay most recent session
+qxub replay 1
+
+# View transcript without timing
+qxub replay --view 1
+
+# Replay at 2x speed with max 1s delays
+qxub replay --speed 2 --max-delay 1 1
+```
+
+### Configuration Defaults
+
+```bash
+# Set default runtime for interactive sessions
+qxub config set defaults.interactive.runtime "4:00:00"
+
+# Set default modules to load
+qxub config set defaults.interactive.modules "gcc python3"
+
+# Set recording directory
+qxub config set defaults.interactive.record_dir "/scratch/{project}/{user}/transcripts"
+```
+
+### Interactive Options Reference
+
+| Option | Description |
+|--------|-------------|
+| `--env` | Conda environment |
+| `--mod` | Module to load (repeatable) |
+| `--sif` | Singularity container |
+| `--tmux NAME` | Create/attach tmux session |
+| `--record` | Record session transcript |
+| `--runtime` | Session duration (default: 4h) |
+| `--mem`, `--cpus`, `--disk` | Resource specifications |
+| `--shell` | Shell to use (default: $SHELL) |
+| `--pre`, `--post` | Commands to run before/after |
+| `--dry` | Preview without running |
+
 ## Remote Execution (v3.3.0)
 
 Execute jobs on remote HPC systems via SSH with platform definition delegation.
