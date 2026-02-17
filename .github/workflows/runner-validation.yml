@@ -40,7 +40,10 @@ jobs:
         echo "=== qxub Installation ==="
         which qxub
         qxub --version
-        pip3 show qxub | grep -E "Version|Location"
+        # Try pip3, pip, or conda to find package info
+        pip3 show qxub 2>/dev/null | grep -E "Version|Location" || \
+        pip show qxub 2>/dev/null | grep -E "Version|Location" || \
+        echo "Package installed via conda or alternative method"
         echo ""
 
     - name: Check qxub configuration
