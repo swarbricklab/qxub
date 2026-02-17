@@ -7,7 +7,9 @@ tmux integration for session persistence.
 """
 
 import os
+import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import click
@@ -157,6 +159,84 @@ def _encode_command(cmd: str) -> str:
     return base64.b64encode(cmd.encode("utf-8")).decode("ascii")
 
 
+def _process_session_completion(session_id: str, ctx=None) -> dict | None:
+    """
+    Process the completion of an interactive session.
+
+    Reads status files written by the bash script and updates history
+    with the actual job ID and exit status.
+
+    Args:
+        session_id: The unique session identifier used for status file lookup
+        ctx: Click context for logging (optional)
+
+    Returns:
+        dict with session info, or None if status files not found
+    """
+    import os
+    from pathlib import Path
+
+    project = os.environ.get("PROJECT", "a56")
+    user = os.environ.get("USER", "unknown")
+    status_dir = Path(f"/scratch/{project}/{user}/qxub/status/session_{session_id}")
+
+    if not status_dir.exists():
+        return None
+
+    session_info = {"session_id": session_id}
+
+    # Read job ID
+    job_id_file = status_dir / "job_id"
+    if job_id_file.exists():
+        try:
+            session_info["job_id"] = job_id_file.read_text().strip()
+        except Exception:
+            pass
+
+    # Read exit code
+    exit_code_file = status_dir / "exit_code"
+    if exit_code_file.exists():
+        try:
+            session_info["exit_code"] = int(exit_code_file.read_text().strip())
+        except Exception:
+            pass
+
+    # Read timing info
+    start_time_file = status_dir / "start_time"
+    end_time_file = status_dir / "end_time"
+    if start_time_file.exists() and end_time_file.exists():
+        try:
+            start_ts = int(start_time_file.read_text().strip())
+            end_ts = int(end_time_file.read_text().strip())
+            session_info["duration_seconds"] = end_ts - start_ts
+        except Exception:
+            pass
+
+    # Read hostname
+    hostname_file = status_dir / "hostname"
+    if hostname_file.exists():
+        try:
+            session_info["hostname"] = hostname_file.read_text().strip()
+        except Exception:
+            pass
+
+    # Parse qstat output for resource usage
+    qstat_file = status_dir / "qstat_output"
+    if qstat_file.exists():
+        try:
+            from .core.scheduler import parse_qstat_fx_output
+
+            qstat_content = qstat_file.read_text()
+            if qstat_content.strip():
+                resource_data = parse_qstat_fx_output(qstat_content)
+                if resource_data:
+                    session_info["resources"] = resource_data
+        except Exception:
+            pass
+
+    return session_info
+
+
 def _build_interactive_script(
     shell: str,
     working_dir: str,
@@ -170,6 +250,7 @@ def _build_interactive_script(
     run_cmd: str | None = None,
     record: bool = False,
     record_dir: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
@@ -203,11 +284,44 @@ def _build_interactive_script(
         "",
         "# qxub interactive session",
         f'export QXUB_VERBOSE={"1" if verbose else "0"}',
-        f'echo "🖥️  Interactive session starting on $(hostname)"',
-        f'echo "📁 Working directory: {working_dir}"',
-        f'echo "{context_display}"',
-        "",
     ]
+
+    # Add status file tracking if session_id is provided
+    if session_id:
+        lines.extend(
+            [
+                "",
+                "# Set up status tracking for qxub history",
+                'QXUB_STATUS_DIR="/scratch/${PROJECT:-a56}/${USER}/qxub/status"',
+                f'QXUB_SESSION_DIR="$QXUB_STATUS_DIR/session_{session_id}"',
+                'mkdir -p "$QXUB_SESSION_DIR"',
+                "",
+                "# Write job ID and start time",
+                'echo "$PBS_JOBID" > "$QXUB_SESSION_DIR/job_id"',
+                'date +%s > "$QXUB_SESSION_DIR/start_time"',
+                'hostname > "$QXUB_SESSION_DIR/hostname"',
+                "",
+                "# Set up cleanup trap to write exit status",
+                "_qxub_write_status() {",
+                "    local exit_code=$?",
+                '    date +%s > "$QXUB_SESSION_DIR/end_time"',
+                '    echo "$exit_code" > "$QXUB_SESSION_DIR/exit_code"',
+                "    # Capture resource usage from qstat before job ends",
+                '    qstat -f "$PBS_JOBID" 2>/dev/null > "$QXUB_SESSION_DIR/qstat_output" || true',
+                "}",
+                "trap _qxub_write_status EXIT",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            f'echo "🖥️  Interactive session starting on $(hostname)"',
+            f'echo "📁 Working directory: {working_dir}"',
+            f'echo "{context_display}"',
+            "",
+        ]
+    )
 
     # Change to working directory
     lines.extend(
@@ -1072,6 +1186,11 @@ def interactive_cli(
     # Build the interactive script
     # Resolve record_dir from config if not specified
     resolved_record_dir = record_dir or _get_default_record_dir()
+
+    # Generate a unique session ID for status tracking
+    # This allows us to correlate the bash script's output with post-session processing
+    session_id = str(uuid.uuid4())[:12]  # Short UUID for readability
+
     script = _build_interactive_script(
         shell=shell,
         working_dir=working_dir,
@@ -1085,6 +1204,7 @@ def interactive_cli(
         run_cmd=run_cmd,
         record=record,
         record_dir=resolved_record_dir,
+        session_id=session_id,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -1155,12 +1275,14 @@ def interactive_cli(
         return
 
     # Log to history using the existing API
+    # We capture the execution_timestamp so we can update the record later
+    execution_timestamp = None
     try:
         from .history import history_manager
 
         # Log execution with context - the history manager will extract
         # recipe info from sys.argv
-        history_manager.log_execution(
+        execution_timestamp = history_manager.log_execution(
             ctx=ctx,
             success=True,  # We assume success on start
             job_id=None,  # We don't have job_id yet (qsub -I hasn't run)
@@ -1244,10 +1366,11 @@ def interactive_cli(
                 ["tmux", "new-session", "-s", tmux_session, qsub_cmd_str],
             )
     else:
-        # No tmux - use os.execvp to replace this process with qsub -I
-        # This ensures proper TTY handling and signal propagation
+        # No tmux - use subprocess.run() so we can process session completion
+        # This maintains TTY handling while allowing post-session processing
         try:
-            os.execvp("qsub", qsub_cmd)
+            result = subprocess.run(qsub_cmd)
+            qsub_exit_code = result.returncode
         except Exception as e:
             # Clean up script file on error
             try:
@@ -1256,6 +1379,43 @@ def interactive_cli(
                 pass
             click.echo(f"❌ Error starting interactive session: {e}")
             sys.exit(1)
+
+        # Process session completion - read status files and update history
+        try:
+            session_info = _process_session_completion(session_id, ctx)
+
+            if session_info and execution_timestamp:
+                # Update the history record with actual job details
+                try:
+                    from .history import history_manager
+
+                    job_id = session_info.get("job_id")
+                    resource_data = session_info.get("resources", {})
+
+                    # Add exit_code to resource_data for consistency with existing API
+                    if "exit_code" in session_info:
+                        resource_data["exit_status"] = session_info["exit_code"]
+
+                    if job_id and resource_data:
+                        history_manager.update_execution_with_resources(
+                            execution_timestamp=execution_timestamp,
+                            job_id=job_id,
+                            resource_data=resource_data,
+                        )
+                except Exception:
+                    pass  # Don't fail if history update fails
+
+        except Exception:
+            pass  # Don't fail if post-processing fails
+
+        # Clean up script file
+        try:
+            script_file.unlink()
+        except Exception:
+            pass
+
+        # Exit with the same code as the qsub process
+        sys.exit(qsub_exit_code)
 
 
 def qxi_main():
