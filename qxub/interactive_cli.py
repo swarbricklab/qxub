@@ -46,6 +46,46 @@ def _get_default_runtime() -> str:
         return "4:00:00"
 
 
+def _get_default_memory() -> str | None:
+    """Get default memory from config or fallback."""
+    try:
+        config_mgr = _get_config_manager()
+        # Check interactive defaults first
+        interactive_mem = config_mgr.get_config_value("defaults.interactive.mem")
+        if interactive_mem:
+            return interactive_mem
+        interactive_memory = config_mgr.get_config_value("defaults.interactive.memory")
+        if interactive_memory:
+            return interactive_memory
+        # Fall back to general defaults
+        general_mem = config_mgr.get_config_value("defaults.mem")
+        if general_mem:
+            return general_mem
+        general_memory = config_mgr.get_config_value("defaults.memory")
+        if general_memory:
+            return general_memory
+        return None
+    except Exception:
+        return None
+
+
+def _get_default_cpus() -> int | None:
+    """Get default CPU count from config or fallback."""
+    try:
+        config_mgr = _get_config_manager()
+        # Check interactive defaults first
+        interactive_cpus = config_mgr.get_config_value("defaults.interactive.cpus")
+        if interactive_cpus:
+            return int(interactive_cpus)
+        # Fall back to general defaults
+        general_cpus = config_mgr.get_config_value("defaults.cpus")
+        if general_cpus:
+            return int(general_cpus)
+        return None
+    except Exception:
+        return None
+
+
 def _get_default_queue() -> str:
     """Get default queue from config or fallback."""
     try:
@@ -1130,6 +1170,11 @@ def interactive_cli(
     working_dir = working_dir or os.getcwd()
     queue = queue or _get_default_queue()
     runtime = runtime or _get_default_runtime()
+
+    if not no_defaults:
+        mem = mem or _get_default_memory()
+        cpus = cpus or _get_default_cpus()
+
     name = name or "qxub-interactive"
 
     # Handle tmux: detect if already inside a tmux session
