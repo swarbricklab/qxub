@@ -17,10 +17,129 @@ from .resources import resource_tracker
 console = Console()
 
 
-@click.group(name="status")
-def status_cli():
+class StatusGroup(click.Group):
+    """Custom group that allows job IDs as default command."""
+
+    def list_commands(self, ctx):
+        return super().list_commands(ctx)
+
+    def get_command(self, ctx, cmd_name):
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+
+        # If not a known command, check if it looks like a job ID or we have --snakemake
+        # But we don't have access to options here easily unless we parse them.
+        # However, cmd_name is the "subcommand" string.
+
+        # If cmd_name looks like a job ID (digits, pbs suffix), return CHECK command?
+        if cmd_name[0].isdigit() or "pbs" in cmd_name or "." in cmd_name:
+            # We return 'check' command.
+            # BUT 'check' command expects 'job_id' argument.
+            # Code below handles argument injection hack.
+            check_cmd = super().get_command(ctx, "check")
+
+            # We need to inject 'cmd_name' back into arguments for 'check' command?
+            # No, get_command just returns the command object.
+            # The parser has already consumed 'cmd_name' as the subcommand name.
+            # The command will be invoked with remaining args.
+            # 'check' command expects 1 positional argument 'job_id'.
+            # If we invoke it, it will fail with "Missing argument 'job_id'".
+
+            # Unless we wrap the command?
+            return JobIdCheckCommand(check_cmd, cmd_name)
+
+        return None
+
+
+class JobIdCheckCommand(click.Command):
+    def __init__(self, original_cmd, job_id):
+        self.original_cmd = original_cmd
+        self.job_id = job_id
+        # Copy attributes
+        super().__init__(
+            original_cmd.name,
+            params=original_cmd.params,
+            callback=original_cmd.callback,
+        )
+
+    def invoke(self, ctx):
+        # Inject job_id into params?
+        # Expects job_id as argument.
+        # Arguments are in ctx.args? No, parsed into params.
+        # But parsing happens in make_context.
+        # We need to PRE-FILL job_id argument.
+        ctx.params["job_id"] = self.job_id
+        return self.original_cmd.invoke(ctx)
+
+    def make_context(self, info_name, args, parent=None, **extra):
+        # We need to NOT require job_id argument during parsing because it's already "provided" by command name.
+        # This is hard because params definition requires it.
+        # We can pass job_id as start of args?
+        # But args here are remaining args.
+        # If we prepend self.job_id to args?
+        # No, make_context parses args.
+        # Since 'check' expects 1 argument, if we prepend it, it will parse it!
+        # YES!
+        # But wait, we need to pass strict params?
+        return self.original_cmd.make_context(
+            info_name, [self.job_id] + args, parent=parent, **extra
+        )
+
+
+@click.group(
+    name="status",
+    cls=StatusGroup,
+    invoke_without_command=True,
+    context_settings={"ignore_unknown_options": True},
+)
+@click.option(
+    "--snakemake", is_flag=True, help="Output status for Snakemake (requires job_id)"
+)
+@click.pass_context
+def status_cli(ctx, snakemake):
     """View job status and manage job tracking database."""
-    pass
+
+    # Check if a subcommand was invoked
+    if ctx.invoked_subcommand:
+        # If we are running a subcommand, pass snakemake flag via context object
+        # But 'check' command might need it?
+        # 'check' has --format argument.
+        if snakemake:
+            # We can't easily modify invoked subcommand params from here.
+            # But we can set a global/ctx object value.
+            ctx.ensure_object(dict)
+            ctx.obj["snakemake"] = True
+        return
+
+    # If no subcommand invoke (invoke_without_command=True)
+    # This happens if NO arguments provided (qxub status)
+    # OR if options provided but no subcommand-like arg (qxub status --snakemake)
+
+    if snakemake:
+        # If --snakemake provided without job ID (because if job ID provided, get_command would return check)
+        # Verify if args exist?
+        # Group parse_args consumes arguments if we defined them?
+        # We REMOVED arguments from decorator in this version.
+        # So remaining args are in ctx.args?
+        # If get_command returned None, and we are here.
+        # It means args did NOT match any command logic in get_command either.
+
+        # If args exist in ctx.args, maybe they are job IDs that get_command missed?
+        # or get_command wasn't called?
+
+        # If we have ctx.args, check them.
+        if ctx.args:
+            job_id = ctx.args[0]
+            # Invoke check
+            ctx.invoke(check, job_id=job_id, output_format="snakemake")
+            return
+
+        sys.stderr.write("Error: --snakemake option requires a job_id argument\n")
+        sys.exit(1)
+
+    # Default behavior: help or list
+    click.echo(ctx.get_help())
 
 
 @status_cli.command()
