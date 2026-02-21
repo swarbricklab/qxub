@@ -529,6 +529,21 @@ class ResourceTracker:
             logging.debug("Failed to update job status for %s: %s", job_id, e)
             return False
 
+    def update_job_exit_code(self, job_id: str, exit_code: int) -> bool:
+        """Update the exit code for a job."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    "UPDATE job_resources SET exit_code=? WHERE job_id=?",
+                    (exit_code, job_id),
+                )
+                conn.commit()
+            logging.debug("Updated job %s exit_code to %s", job_id, exit_code)
+            return True
+        except Exception as e:
+            logging.debug("Failed to update exit code for %s: %s", job_id, e)
+            return False
+
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job."""
         try:
