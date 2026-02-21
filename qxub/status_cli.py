@@ -12,6 +12,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from .core.scheduler import job_status_from_files
 from .resources import resource_tracker
 
 console = Console()
@@ -234,6 +235,23 @@ def check(job_id, output_format, snakemake):
         sys.exit(1)
 
     status = job_info.get("status", "unknown")
+
+    # When the database shows an active state, check the file-based status
+    # written by the jobscript. This handles jobs that finished without a
+    # long-running qxub process watching them (e.g. --terse Snakemake profiles)
+    # without spamming the scheduler with qstat calls.
+    if status in ("submitted", "running"):
+        file_status, file_exit_code = job_status_from_files(job_id)
+        if file_status in ("C", "F"):
+            # Job has finished according to status files - override DB status
+            status = "completed" if file_status == "C" else "failed"
+            if file_exit_code is not None:
+                job_info = dict(job_info)
+                job_info["exit_code"] = file_exit_code
+            # Persist the resolved status so subsequent calls skip the file check
+            resource_tracker.update_job_status(job_id, status)
+            if file_exit_code is not None:
+                resource_tracker.update_job_exit_code(job_id, file_exit_code)
 
     # Map internal status to workflow engine formats
     if output_format == "snakemake":
