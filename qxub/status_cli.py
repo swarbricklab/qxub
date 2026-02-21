@@ -17,10 +17,12 @@ from .resources import resource_tracker
 console = Console()
 
 
-@click.group(name="status")
-def status_cli():
+@click.group(invoke_without_command=True, name="status")
+@click.pass_context
+def status_cli(ctx):
     """View job status and manage job tracking database."""
-    pass
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
 
 
 @status_cli.command()
@@ -190,7 +192,12 @@ def cleanup(days, dry_run):
     default="snakemake",
     help="Output format for workflow engine integration",
 )
-def check(job_id, output_format):
+@click.option(
+    "--snakemake",
+    is_flag=True,
+    help="Force snakemake output format (alias for --format=snakemake)",
+)
+def check(job_id, output_format, snakemake):
     """Check job status for workflow engine integration.
 
     Returns machine-readable status information suitable for workflow engines
@@ -209,6 +216,8 @@ def check(job_id, output_format):
     For --format=exitcode:
     - Outputs: (empty), exit code 0=running, 1=failed, 2=completed
     """
+    if snakemake:
+        output_format = "snakemake"
 
     # Add .gadi-pbs suffix if not present
     if not job_id.endswith(".gadi-pbs"):
