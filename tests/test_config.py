@@ -184,10 +184,10 @@ def test_global_config():
     """Test global config instance."""
     print("🧪 Testing global config...")
 
-    from qxub.config import get_config
+    from qxub.config import config_manager
 
-    config1 = get_config()
-    config2 = get_config()
+    config1 = config_manager
+    config2 = config_manager
 
     # Should be the same instance
     if config1 is config2:

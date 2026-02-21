@@ -799,6 +799,13 @@ class ConfigManager:
             return False
         return "remote" in platform_config and platform_config["remote"] is not None
 
+    def validate(self) -> List[str]:
+        """Validate configuration and return list of issues."""
+        issues = []
+        if not self.merged_config:
+            issues.append("No configuration loaded")
+        return issues
+
 
 def setup_logging(verbosity: int = None):
     """
