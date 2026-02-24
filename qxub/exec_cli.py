@@ -123,6 +123,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
     "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
 )
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
+@click.option(
+    "--internet",
+    is_flag=True,
+    help="Require internet connectivity (automatically selects an internet-capable queue, e.g. copyq on NCI Gadi)",
+)
 @click.option("--platform", help="Target platform for execution (default: from config)")
 @click.option("--env", help="Conda environment name for execution")
 @click.option(
@@ -602,7 +607,13 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "terse": options["terse"],
         "verbose": verbose,
         "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
+        "internet": options.get("internet", False),
     }
+
+    # If internet connectivity is required and no queue was explicitly requested,
+    # trigger auto-selection so an internet-capable queue is chosen.
+    if options.get("internet") and not options.get("queue"):
+        params["queue"] = "auto"
 
     # Process configuration using the existing config system
     processed_params, qsub_options = process_job_options(params, config_manager)

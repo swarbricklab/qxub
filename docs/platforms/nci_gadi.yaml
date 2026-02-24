@@ -222,7 +222,8 @@ platform:
         max_jobs_queued: 1000
       priority: normal
       su_billing_rate: 2.0
-      description: "Data transfer and file operations queue"
+      internet_connectivity: true
+      description: "Data transfer and file operations queue (internet access available)"
 
   # Auto-selection rules - determine best queue based on resource requirements
   # Optimized for cost-effectiveness and resource availability
