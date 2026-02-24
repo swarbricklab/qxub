@@ -210,7 +210,36 @@ class Platform:
 
     def select_queue(self, resources: Dict[str, Any]) -> Optional[str]:
         """Select best queue for given resource requirements."""
-        # Apply auto-selection rules in order
+        internet_required = resources.get("internet", False)
+
+        # When internet connectivity is required, restrict candidates to queues
+        # that have internet_connectivity=True.  If no queue on this platform
+        # declares the capability, assume platform-wide internet access (e.g. a
+        # cloud HPC where all nodes have outbound access) and fall through to
+        # normal selection.
+        if internet_required:
+            internet_queues = {
+                name for name, q in self.queues.items() if q.internet_connectivity
+            }
+            if internet_queues:
+                # Apply auto-selection rules restricted to internet-capable queues
+                for rule in self.auto_selection_rules:
+                    if rule.is_default:
+                        continue
+                    if (
+                        evaluate_condition(rule.condition, resources)
+                        and rule.queue in internet_queues
+                    ):
+                        return rule.queue
+                # Try the default rule if it happens to be internet-capable
+                for rule in self.auto_selection_rules:
+                    if rule.is_default and rule.queue in internet_queues:
+                        return rule.queue
+                # Fall back to first internet-capable queue
+                return next(iter(internet_queues))
+            # No queues flagged → assume universal internet; normal selection below.
+
+        # Apply auto-selection rules in order - most specific conditions first
         for rule in self.auto_selection_rules:
             if rule.is_default:
                 continue
@@ -526,11 +555,29 @@ class QueueSelector:
                 result.suggestions.append(f"Auto-selected based on platform rules")
                 return result
 
+        # Filter to internet-capable queues if connectivity is required.
+        # Only apply the filter if at least one queue declares the capability;
+        # an empty set means the platform grants internet access everywhere.
+        internet_required = resources.get("internet", False)
+        internet_queues: Optional[set] = None
+        if internet_required:
+            flagged = {
+                name
+                for name, q in self.platform.queues.items()
+                if q.internet_connectivity
+            }
+            if flagged:
+                internet_queues = flagged
+
         # Validate and collect eligible queues
         valid_queues = []
         invalid_queues = {}
 
         for queue_name, queue in self.platform.queues.items():
+            if internet_queues is not None and queue_name not in internet_queues:
+                invalid_queues[queue_name] = "Does not have internet connectivity"
+                continue
+
             validation_result = queue.validate_resources(resources)
 
             if validation_result.is_valid:

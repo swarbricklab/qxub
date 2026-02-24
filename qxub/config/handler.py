@@ -165,6 +165,10 @@ def select_auto_queue(params):
                         )
                         requirements["gpus"] = gpu_count  # Keep "gpus" for validation
 
+        # Add internet connectivity requirement if specified
+        if params.get("internet"):
+            requirements["internet"] = True
+
         # Try to find best queue from any platform
         best_queue = None
         best_cost = float("inf")

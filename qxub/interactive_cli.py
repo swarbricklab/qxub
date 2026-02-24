@@ -11,6 +11,7 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -101,6 +102,25 @@ def _get_default_queue() -> str:
         return "normal"
     except Exception:
         return "normal"
+
+
+def _get_internet_queue() -> Optional[str]:
+    """Find an internet-capable queue from the current platform definition.
+
+    Returns the name of the first internet-capable queue on the detected
+    platform, or None if the platform cannot be loaded or no queue declares
+    internet_connectivity=True (which implies platform-wide access).
+    """
+    try:
+        from .platform import get_current_platform
+
+        platform = get_current_platform()
+        if platform:
+            queue_name = platform.select_queue({"internet": True})
+            return queue_name
+    except Exception:
+        pass
+    return None
 
 
 def _get_default_volumes() -> str | None:
@@ -865,6 +885,11 @@ def _build_qsub_command(
     help="Show what would be executed without running",
 )
 @click.option(
+    "--internet",
+    is_flag=True,
+    help="Require internet connectivity (automatically selects an internet-capable queue, e.g. copyq on NCI Gadi)",
+)
+@click.option(
     "-v",
     "--verbose",
     count=True,
@@ -910,6 +935,7 @@ def interactive_cli(
     post,
     tmux_session,
     dry,
+    internet,
     verbose,
     cmd,
     no_defaults,
@@ -1168,7 +1194,15 @@ def interactive_cli(
     # Resolve defaults
     shell = shell or _get_default_shell()
     working_dir = working_dir or os.getcwd()
-    queue = queue or _get_default_queue()
+
+    # Resolve queue: if --internet is requested and the user did not explicitly
+    # pass --queue, ask the platform system for an internet-capable queue.
+    user_set_queue = queue is not None
+    if internet and not user_set_queue:
+        queue = _get_internet_queue() or _get_default_queue()
+    else:
+        queue = queue or _get_default_queue()
+
     runtime = runtime or _get_default_runtime()
 
     if not no_defaults:
