@@ -562,7 +562,9 @@ class QueueSelector:
         internet_queues: Optional[set] = None
         if internet_required:
             flagged = {
-                name for name, q in self.platform.queues.items() if q.internet_connectivity
+                name
+                for name, q in self.platform.queues.items()
+                if q.internet_connectivity
             }
             if flagged:
                 internet_queues = flagged
