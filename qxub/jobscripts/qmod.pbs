@@ -27,7 +27,8 @@ try:
     if '$status' == 'running':
         resource_tracker.update_job_status('${PBS_JOBID:-unknown}', 'running')
     else:
-        resource_tracker.finalize_job('${PBS_JOBID:-unknown}', int('$exit_code'))
+        joblog = '${out%.out}.log'
+        resource_tracker.finalize_job('${PBS_JOBID:-unknown}', int('$exit_code'), joblog)
 except Exception:
     pass
 " 2>/dev/null || true
