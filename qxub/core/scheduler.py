@@ -362,6 +362,37 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     return "Q", None
 
 
+def _read_exit_from_joblog_file(joblog_path):
+    """
+    Read the PBS exit status from a specific job log file.
+
+    PBS appends a resource usage block to the .log file when the job ends,
+    including when the job is killed (e.g. walltime exceeded).  The block
+    contains a line like:
+        Exit Status:        -29 (Job failed due to exceeding walltime)
+
+    This function is intentionally cheap — it opens one known file, so it
+    can be called in a tight polling loop without directory scanning.
+
+    Args:
+        joblog_path: Path to the PBS .log file for this job
+
+    Returns:
+        int: Exit code if the resource-usage block has been written, else None
+    """
+    import re
+
+    try:
+        with open(str(joblog_path), "r", encoding="utf-8") as f:
+            content = f.read()
+        exit_match = re.search(r"Exit Status:\s*(-?\d+)", content)
+        if exit_match:
+            return int(exit_match.group(1))
+    except (IOError, OSError):
+        pass
+    return None
+
+
 def _check_pbs_job_log_for_exit(job_id, log_dir):
     """
     Check PBS job log files for exit status when job was killed by PBS.
@@ -377,34 +408,27 @@ def _check_pbs_job_log_for_exit(job_id, log_dir):
     Returns:
         int: Exit code if found in PBS log, None otherwise
     """
-    import glob
-    import re
     from pathlib import Path
 
     log_dir = Path(log_dir)
     if not log_dir.exists():
         return None
 
-    # Search for log files containing this job ID
-    # PBS appends resource usage to .log files
     try:
         for log_file in log_dir.glob("*.log"):
             try:
-                # Only check recently modified files (within last hour for efficiency)
-                # and files that could contain this job
                 with open(log_file, "r", encoding="utf-8") as f:
                     content = f.read()
 
-                    # Check if this log file is for our job
-                    if f"Job Id:             {job_id}" not in content:
-                        continue
+                # Only process log files that belong to this job
+                if f"Job Id:             {job_id}" not in content:
+                    continue
 
-                    # Look for PBS resource usage block with exit status
-                    # Format: "   Exit Status:        -29 (Job failed due to exceeding walltime)"
-                    # or:     "   Exit Status:        0"
-                    exit_match = re.search(r"Exit Status:\s*(-?\d+)", content)
-                    if exit_match:
-                        return int(exit_match.group(1))
+                import re
+
+                exit_match = re.search(r"Exit Status:\s*(-?\d+)", content)
+                if exit_match:
+                    return int(exit_match.group(1))
 
             except (IOError, OSError) as e:
                 logging.debug(f"Could not read log file {log_file}: {e}")
@@ -926,7 +950,15 @@ def start_background_resource_collection(
 
 
 def monitor_job_single_thread(
-    job_id, out_file, err_file, quiet=False, joblog_file=None, verbose=0
+    job_id,
+    out_file,
+    err_file,
+    quiet=False,
+    joblog_file=None,
+    verbose=0,
+    walltime_str=None,
+    joblog_check_interval=60,
+    walltime_offset_sec=0,
 ):
     """
     Single-thread job monitoring with proper spinner integration using status files.
@@ -989,13 +1021,43 @@ def monitor_job_single_thread(
     finally:
         spinner.clear()  # Always clear spinner when exiting
 
+    # Derive joblog path early — needed for both walltime-kill detection during
+    # streaming and background resource collection afterwards.
+    if joblog_file:
+        joblog_path = str(joblog_file)
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
+    else:
+        # Fallback: derive joblog path from out_file path (change .out to .log)
+        joblog_path = str(out_file).replace(".out", ".log")
+        if verbose >= 2:
+            print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
+
+    # Parse walltime string to seconds for NFS-friendly joblog gating.
+    # walltime_offset_sec shifts the gate: positive = extra grace period after
+    # walltime before first check; negative = start checking earlier.
+    walltime_sec = None
+    if walltime_str:
+        try:
+            walltime_sec = max(0, time_to_seconds(walltime_str) + walltime_offset_sec)
+            logging.debug("Monitoring with walltime gate: %s s", walltime_sec)
+        except Exception:
+            pass  # Unknown format — fall back to immediate 60 s polling
+
     # 6. Show output streaming message
     if not quiet:
         print_status("📡 Streaming job output", final=True)
 
-    # 7. Stream job output
+    # 7. Stream job output (also watches joblog for PBS-killed / walltime jobs)
     exit_status = stream_job_output_with_status_files(
-        job_id, out_file, err_file, final_exit_code_file, quiet=quiet
+        job_id,
+        out_file,
+        err_file,
+        final_exit_code_file,
+        quiet=quiet,
+        joblog_file=joblog_path,
+        walltime_sec=walltime_sec,
+        joblog_check_interval=joblog_check_interval,
     )
 
     # 8. Completion message
@@ -1009,17 +1071,6 @@ def monitor_job_single_thread(
             "🎉 Job completed! Resource collection starting in background...",
             final=True,
         )
-
-    # Use provided joblog path or derive from out_file path as fallback
-    if joblog_file:
-        joblog_path = str(joblog_file)
-        if verbose >= 2:
-            print(f"🔍 DEBUG: Using provided joblog path: {joblog_path}")
-    else:
-        # Fallback: derive joblog path from out_file path (change .out to .log)
-        joblog_path = str(out_file).replace(".out", ".log")
-        if verbose >= 2:
-            print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
 
     # If user requested very verbose debug (e.g. -vvv) run collection in foreground
     run_foreground = bool(verbose and int(verbose) >= 3)
@@ -1047,7 +1098,14 @@ def read_exit_status_from_file(exit_code_file):
 
 
 def stream_job_output_with_status_files(
-    job_id, out_file, err_file, final_exit_code_file, quiet=False
+    job_id,
+    out_file,
+    err_file,
+    final_exit_code_file,
+    quiet=False,
+    joblog_file=None,
+    walltime_sec=None,
+    joblog_check_interval=60,
 ):
     """
     Stream job output files until job completion using status files for detection.
@@ -1058,6 +1116,17 @@ def stream_job_output_with_status_files(
         err_file: Path to stderr file
         final_exit_code_file: Path to status file containing exit code
         quiet: If True, suppress output streaming (for terse/quiet modes)
+        joblog_file: Optional path to the PBS .log file.  When provided, the
+            loop also watches for PBS writing its resource-usage block (which
+            contains an ``Exit Status:`` line).  This catches jobs killed by
+            PBS (e.g. walltime exceeded) before our in-job cleanup code runs
+            and writes final_exit_code_file.
+        walltime_sec: Expected walltime in seconds (optional, already offset-
+            adjusted by caller).  When set, joblog checks are deferred until
+            this many seconds have elapsed.  When not set, joblog checks start
+            immediately but are still rate-limited to catch unexpected PBS kills.
+        joblog_check_interval: Seconds between joblog reads once eligible
+            (default 60).  Increase on busy NFS systems to reduce load.
 
     Returns:
         int: Job exit status
@@ -1067,6 +1136,15 @@ def stream_job_output_with_status_files(
     # Keep track of file positions to avoid re-reading
     out_pos = 0
     err_pos = 0
+
+    # Joblog polling state -- NFS-friendly rate limiting.
+    # - If walltime_sec is known: don't even open the joblog until that many
+    #   seconds have elapsed (zero NFS reads during normal operation).
+    # - If walltime_sec is unknown: start checking immediately as a safety net
+    #   for unexpected PBS kills (node failure, qdel, etc.).
+    # Either way, cap checks at one per joblog_check_interval seconds.
+    monitoring_start = time.time()
+    last_joblog_check = None  # timestamp of last actual joblog open
 
     # Monitor job completion via status file
     while True:
@@ -1108,7 +1186,7 @@ def stream_job_output_with_status_files(
             except (OSError, IOError):
                 pass
 
-        # Check if job finished using status file
+        # Check if job finished using status file (normal completion path)
         if final_exit_code_file.exists():
             # Read any final output (skip if quiet mode)
             if not quiet and os.path.exists(out_file):
@@ -1132,5 +1210,45 @@ def stream_job_output_with_status_files(
             # Get final exit status from status file
             exit_status = read_exit_status_from_file(final_exit_code_file)
             return exit_status
+
+        # Check PBS job log for exit status (walltime-kill / PBS-kill path).
+        # PBS writes an Exit Status line to the .log file even when it kills
+        # a job before our cleanup code can write final_exit_code_file.
+        # We rate-limit to joblog_check_interval and defer until walltime
+        # has elapsed (when known) to minimise NFS pressure.
+        if joblog_file:
+            now = time.time()
+            elapsed = now - monitoring_start
+            past_walltime = walltime_sec is None or elapsed >= walltime_sec
+            due_for_check = last_joblog_check is None or (
+                now - last_joblog_check >= joblog_check_interval
+            )
+            if past_walltime and due_for_check:
+                last_joblog_check = now
+                pbs_exit = _read_exit_from_joblog_file(joblog_file)
+                if pbs_exit is not None:
+                    # Flush whatever partial output the job managed to write
+                    if not quiet and os.path.exists(out_file):
+                        try:
+                            with open(out_file, "r", encoding="utf-8") as f:
+                                f.seek(out_pos)
+                                for line in f:
+                                    print(line.rstrip(), file=sys.stdout, flush=True)
+                        except (OSError, IOError):
+                            pass
+                    if not quiet and os.path.exists(err_file):
+                        try:
+                            with open(err_file, "r", encoding="utf-8") as f:
+                                f.seek(err_pos)
+                                for line in f:
+                                    print(line.rstrip(), file=sys.stderr, flush=True)
+                        except (OSError, IOError):
+                            pass
+                    logging.debug(
+                        "Job %s terminated by PBS (exit %s), detected via job log",
+                        job_id,
+                        pbs_exit,
+                    )
+                    return pbs_exit
 
         time.sleep(0.2)  # Check every 200ms for good output responsiveness
