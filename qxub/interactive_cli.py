@@ -1372,10 +1372,16 @@ def interactive_cli(
     # Execute interactive session
     click.echo("🚀 Starting interactive session...")
     click.echo(f"   {context_desc}")
-    click.echo(f"   Queue: {queue}")
+    click.echo(f"   Queue:   {queue}")
     click.echo(f"   Runtime: {runtime}")
+    if mem:
+        click.echo(f"   Memory:  {mem}")
+    if cpus:
+        click.echo(f"   CPUs:    {cpus}")
+    if storage:
+        click.echo(f"   Storage: {storage}")
     if tmux_session:
-        click.echo(f"   Tmux: {tmux_session}")
+        click.echo(f"   Tmux:    {tmux_session}")
     click.echo("")
 
     # Write the initialization script to a temporary file
