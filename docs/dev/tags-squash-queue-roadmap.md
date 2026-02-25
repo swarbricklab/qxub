@@ -1,7 +1,7 @@
 # Tags, Job Squashing, and Queue Management: Roadmap
 
-**Status**: Planning — not yet implemented
-**Last updated**: 2026-02-25
+**Status**: Phases 1–2 complete; Phase 3 next
+**Last updated**: 2026-02-26
 
 This document captures the agreed design for three interconnected features:
 
@@ -17,13 +17,13 @@ individually.
 
 ## Implementation Phases
 
-| Phase | Scope | Key deliverables |
-|-------|-------|-----------------|
-| 1 | Tags | `--tag`/`--tags` on `exec` and `interactive`, stored in DB + history, filterable |
-| 2 | Shared DB + status-in-DB | Replace exit-code files with DB writes, virtual job IDs, dispatch-on-status-check |
-| 3 | Queue management | Headroom limit, pending entries, `qxub queue` commands |
-| 4 | Serial squashing | Squash conditions config, serial mode |
-| 5 | Parallel squashing | Parallel mode |
+| Phase | Scope | Key deliverables | Status |
+|-------|-------|-----------------|--------|
+| 1 | Tags | `--tag`/`--tags` on `exec` and `interactive`, stored in DB + history, filterable | ✅ Done |
+| 2 | Shared DB + status-in-DB | Replace exit-code files with DB writes, virtual job IDs, dispatch-on-status-check | ✅ Done |
+| 3 | Queue management | Headroom limit, pending entries, `qxub queue` commands | — |
+| 4 | Serial squashing | Squash conditions config, serial mode | — |
+| 5 | Parallel squashing | Parallel mode | — |
 
 Phases are designed to be independently shippable and useful.
 
@@ -110,6 +110,17 @@ WHERE EXISTS (
 ---
 
 ## Phase 2: Shared Project DB and Status-in-DB
+
+> **Implemented** (2026-02-26). Key decisions:
+> - `qxub/queue/db.py` is the new canonical DB module — `ResourceTracker` delegates path
+>   resolution to it so both use the same `qxub.db` file.
+> - In `--terse` mode `qxub exec` still emits the real PBS ID. Virtual IDs will be
+>   emitted in `--terse` mode once Phase 3 introduces pending-dispatch (the first situation
+>   where a virtual ID exists but no PBS ID yet).
+> - `_maybe_dispatch_pending()` is a no-op stub in `status_cli.py`; Phase 3 fills it in.
+> - File-based status writes (`job_started_*`, `final_exit_code_*`) are **retained** as a
+>   fallback — `status check` still reads them for any job where the DB write failed or
+>   was submitted before Phase 2.
 
 ### Motivation
 

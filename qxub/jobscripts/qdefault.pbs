@@ -49,18 +49,33 @@ echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "🚀 Job started at $(date -Iseconds)"
 
-# Update database status to 'running'
+# DB status helper function
 update_job_status() {
     local status="$1"
+    local exit_code="${2:-0}"
     if command -v python3 > /dev/null 2>&1; then
         python3 -c "
 import sys, os
 sys.path.insert(0, '/g/data/a56/software/qsub_tools')
 try:
-    from qxub.resource_tracker import resource_tracker
+    from qxub.resources.tracker import resource_tracker
     resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
-except Exception as e:
-    pass  # Silently ignore database update failures
+except Exception:
+    pass
+" 2>/dev/null || true
+    fi
+    if [ -n "$QXUB_SHARED_DB" ] && command -v python3 > /dev/null 2>&1; then
+        python3 -c "
+import sys
+sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+try:
+    from qxub.queue.db import mark_running, mark_complete
+    if '$status' == 'running':
+        mark_running('${PBS_JOBID:-unknown}', db_path='$QXUB_SHARED_DB')
+    elif '$status' in ('completed', 'failed'):
+        mark_complete('${PBS_JOBID:-unknown}', int('$exit_code'), db_path='$QXUB_SHARED_DB')
+except Exception:
+    pass
 " 2>/dev/null || true
     fi
 }
@@ -78,7 +93,7 @@ error_handler() {
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 
     # Update database status to 'failed'
-    update_job_status "failed"
+    update_job_status "failed" "$exit_code"
 
     exit $exit_code
 }
@@ -207,6 +222,6 @@ echo "$FINAL_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 
 # Update database status to 'completed'
-update_job_status "completed"
+update_job_status "completed" "0"
 
 echo "🎉 Job completed successfully"

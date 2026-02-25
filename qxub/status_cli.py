@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .core.scheduler import job_status_from_files
+from .queue import is_virtual_id, resolve_virtual_id
 from .resources import resource_tracker
 
 console = Console()
@@ -220,6 +221,54 @@ def check(job_id, output_format, snakemake):
     if snakemake:
         output_format = "snakemake"
 
+    # -----------------------------------------------------------------------
+    # Dispatch-on-status-check hook (Phase 3 will fill this in; no-op now)
+    # -----------------------------------------------------------------------
+    _maybe_dispatch_pending()
+
+    # -----------------------------------------------------------------------
+    # Virtual job ID resolution (Phase 2+)
+    # -----------------------------------------------------------------------
+    if is_virtual_id(job_id):
+        entry = resolve_virtual_id(job_id)
+        if entry is None:
+            if output_format == "json":
+                print(
+                    json.dumps({"error": "Virtual job ID not found", "job_id": job_id})
+                )
+            else:
+                sys.stderr.write(f"qxub: Virtual job ID {job_id} not found\n")
+            sys.exit(1)
+
+        virtual_status = entry.get("status", "unknown")
+
+        if virtual_status == "pending":
+            # Still waiting to be dispatched to PBS
+            _output_status("running", None, job_id, output_format)
+            return
+
+        if virtual_status == "cancelled":
+            _output_status("failed", 1, job_id, output_format)
+            return
+
+        if virtual_status in ("completed", "failed"):
+            exit_code = entry.get("exit_code")
+            _output_status(virtual_status, exit_code, job_id, output_format)
+            return
+
+        # status == 'dispatched' (or any other): resolve to real PBS job ID
+        pbs_job_id = entry.get("pbs_job_id")
+        if not pbs_job_id:
+            # No PBS ID yet — treat as still running
+            _output_status("running", None, job_id, output_format)
+            return
+
+        # Continue below with the real PBS job ID
+        job_id = pbs_job_id
+
+    # -----------------------------------------------------------------------
+    # Standard PBS job ID lookup
+    # -----------------------------------------------------------------------
     # Add .gadi-pbs suffix if not present
     if not job_id.endswith(".gadi-pbs"):
         job_id = f"{job_id}.gadi-pbs"
@@ -310,6 +359,49 @@ def check(job_id, output_format, snakemake):
             sys.exit(0)  # running
         else:  # failed, unknown, etc.
             sys.exit(1)  # failed
+
+
+def _maybe_dispatch_pending() -> None:
+    """Trigger dispatch of pending queue entries if headroom allows.
+
+    This is a no-op in Phase 2 (all entries are dispatched immediately).
+    Phase 3 will implement the actual headroom check and dispatch logic here.
+    """
+    # TODO Phase 3: check active_count vs job_limit, dispatch pending entries
+    pass
+
+
+def _output_status(
+    status: str,
+    exit_code,
+    job_id: str,
+    output_format: str,
+) -> None:
+    """Emit status in the requested output format and exit appropriately."""
+    if output_format == "snakemake":
+        if status == "completed":
+            print("success" if (exit_code is None or exit_code == 0) else "failed")
+        elif status in ("submitted", "running"):
+            print("running")
+        else:
+            print("failed")
+
+    elif output_format == "json":
+        result = {
+            "status": status,
+            "job_id": job_id,
+            "timestamp": datetime.now().isoformat(),
+            "exit_code": exit_code,
+        }
+        print(json.dumps(result))
+
+    elif output_format == "exitcode":
+        if status == "completed":
+            sys.exit(2 if (exit_code is None or exit_code == 0) else 1)
+        elif status in ("submitted", "running"):
+            sys.exit(0)
+        else:
+            sys.exit(1)
 
 
 def _format_status(status):
