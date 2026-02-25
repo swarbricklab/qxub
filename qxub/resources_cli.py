@@ -52,6 +52,7 @@ def list(limit, tag, output_csv):
         writer.writerow(
             [
                 "job_id",
+                "status",
                 "submitted_at",
                 "command",
                 "exit_code",
@@ -76,6 +77,7 @@ def list(limit, tag, output_csv):
             writer.writerow(
                 [
                     job.get("job_id", ""),
+                    job.get("status", ""),
                     job.get("submitted_at") or job.get("timestamp", ""),
                     job.get("command", ""),
                     job.get("exit_code", ""),
@@ -96,7 +98,8 @@ def list(limit, tag, output_csv):
     table = Table(title="Recent Jobs - Resource Efficiency")
     table.add_column("Submitted", style="dim", no_wrap=True, width=12)
     table.add_column("Job ID", style="cyan", no_wrap=True, width=10)
-    table.add_column("Command", style="white", width=28)
+    table.add_column("Status", no_wrap=True, width=5)
+    table.add_column("Command", style="white", width=26)
     table.add_column("Exit", style="blue", no_wrap=True, width=6)
     table.add_column("Mem", style="green", no_wrap=True, width=5)
     table.add_column("Time", style="yellow", no_wrap=True, width=6)
@@ -153,6 +156,17 @@ def list(limit, tag, output_csv):
                 else:
                     command = command[:32] + "..."
 
+        # Format status
+        status = job.get("status") or "unknown"
+        status_map = {
+            "submitted": "[yellow]sub[/yellow]",
+            "running": "[cyan]run[/cyan]",
+            "completed": "[green]done[/green]",
+            "failed": "[red]fail[/red]",
+            "cancelled": "[dim]canc[/dim]",
+        }
+        status_str = status_map.get(status, f"[dim]{status[:4]}[/dim]")
+
         # Format exit code
         exit_code = job["exit_code"]
         if exit_code == 0:
@@ -178,6 +192,7 @@ def list(limit, tag, output_csv):
         table.add_row(
             submitted_str,
             job_id,
+            status_str,
             command,
             exit_style,
             mem_eff,
