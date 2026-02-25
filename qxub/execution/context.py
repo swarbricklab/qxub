@@ -270,6 +270,8 @@ def execute_unified(
             joblog_file=ctx_obj.get("joblog"),
             verbose=verbose_level,
             walltime_str=ctx_obj.get("runtime"),
+            joblog_check_interval=ctx_obj.get("joblog_check_interval", 60),
+            walltime_offset_sec=ctx_obj.get("walltime_offset_sec", 0),
         )
         # Exit with the job's exit status
         sys.exit(exit_status)

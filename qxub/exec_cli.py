@@ -642,7 +642,16 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     ctx.obj.update(processed_params)
     ctx.obj["options"] = qsub_options
 
-    # Platform selection and execution mode detection
+    # Monitoring config -- how aggressively to poll the joblog on NFS.
+    # Both values are user-overridable via:
+    #   qxub config set monitoring.joblog_check_interval_sec 120
+    #   qxub config set monitoring.walltime_offset_sec 30
+    ctx.obj["joblog_check_interval"] = int(
+        config_manager.get_config_value("monitoring.joblog_check_interval_sec") or 60
+    )
+    ctx.obj["walltime_offset_sec"] = int(
+        config_manager.get_config_value("monitoring.walltime_offset_sec") or 0
+    )
     default_platform = config_manager.get_default_platform_name()
     platform_name = options.get("platform") or default_platform
 

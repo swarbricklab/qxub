@@ -957,6 +957,8 @@ def monitor_job_single_thread(
     joblog_file=None,
     verbose=0,
     walltime_str=None,
+    joblog_check_interval=60,
+    walltime_offset_sec=0,
 ):
     """
     Single-thread job monitoring with proper spinner integration using status files.
@@ -1032,10 +1034,12 @@ def monitor_job_single_thread(
             print(f"🔍 DEBUG: Derived joblog path from out_file: {joblog_path}")
 
     # Parse walltime string to seconds for NFS-friendly joblog gating.
+    # walltime_offset_sec shifts the gate: positive = extra grace period after
+    # walltime before first check; negative = start checking earlier.
     walltime_sec = None
     if walltime_str:
         try:
-            walltime_sec = time_to_seconds(walltime_str)
+            walltime_sec = max(0, time_to_seconds(walltime_str) + walltime_offset_sec)
             logging.debug("Monitoring with walltime gate: %s s", walltime_sec)
         except Exception:
             pass  # Unknown format — fall back to immediate 60 s polling
@@ -1053,6 +1057,7 @@ def monitor_job_single_thread(
         quiet=quiet,
         joblog_file=joblog_path,
         walltime_sec=walltime_sec,
+        joblog_check_interval=joblog_check_interval,
     )
 
     # 8. Completion message
@@ -1100,6 +1105,7 @@ def stream_job_output_with_status_files(
     quiet=False,
     joblog_file=None,
     walltime_sec=None,
+    joblog_check_interval=60,
 ):
     """
     Stream job output files until job completion using status files for detection.
@@ -1115,11 +1121,12 @@ def stream_job_output_with_status_files(
             contains an ``Exit Status:`` line).  This catches jobs killed by
             PBS (e.g. walltime exceeded) before our in-job cleanup code runs
             and writes final_exit_code_file.
-        walltime_sec: Expected walltime in seconds (optional).  When set, joblog
-            checks are deferred until this many seconds have elapsed, avoiding
-            all NFS reads during normal operation.  When not set, joblog checks
-            start immediately but are still rate-limited (every 60 s) to catch
-            unexpected PBS kills (node failure, qdel, etc.) at low NFS cost.
+        walltime_sec: Expected walltime in seconds (optional, already offset-
+            adjusted by caller).  When set, joblog checks are deferred until
+            this many seconds have elapsed.  When not set, joblog checks start
+            immediately but are still rate-limited to catch unexpected PBS kills.
+        joblog_check_interval: Seconds between joblog reads once eligible
+            (default 60).  Increase on busy NFS systems to reduce load.
 
     Returns:
         int: Job exit status
@@ -1135,8 +1142,7 @@ def stream_job_output_with_status_files(
     #   seconds have elapsed (zero NFS reads during normal operation).
     # - If walltime_sec is unknown: start checking immediately as a safety net
     #   for unexpected PBS kills (node failure, qdel, etc.).
-    # Either way, cap checks at one per JOBLOG_CHECK_INTERVAL seconds.
-    JOBLOG_CHECK_INTERVAL = 60  # seconds
+    # Either way, cap checks at one per joblog_check_interval seconds.
     monitoring_start = time.time()
     last_joblog_check = None  # timestamp of last actual joblog open
 
@@ -1208,14 +1214,14 @@ def stream_job_output_with_status_files(
         # Check PBS job log for exit status (walltime-kill / PBS-kill path).
         # PBS writes an Exit Status line to the .log file even when it kills
         # a job before our cleanup code can write final_exit_code_file.
-        # We rate-limit to JOBLOG_CHECK_INTERVAL and defer until walltime
+        # We rate-limit to joblog_check_interval and defer until walltime
         # has elapsed (when known) to minimise NFS pressure.
         if joblog_file:
             now = time.time()
             elapsed = now - monitoring_start
             past_walltime = walltime_sec is None or elapsed >= walltime_sec
             due_for_check = last_joblog_check is None or (
-                now - last_joblog_check >= JOBLOG_CHECK_INTERVAL
+                now - last_joblog_check >= joblog_check_interval
             )
             if past_walltime and due_for_check:
                 last_joblog_check = now
