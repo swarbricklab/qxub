@@ -16,6 +16,8 @@ import click
 
 from ..core.scheduler import qsub
 from ..history import history_manager
+from ..queue import create_queue_entry
+from ..queue.db import get_db_path
 from ..resources import resource_tracker
 
 
@@ -97,6 +99,10 @@ class ExecutionContext:
         if post:
             post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
             submission_vars += f',post_cmd_b64="{post_b64}"'
+
+        # Pass the resolved DB path so job scripts can write status to the right DB
+        db_path = str(get_db_path())
+        submission_vars += f",QXUB_SHARED_DB={db_path}"
 
         return submission_vars
 
@@ -199,6 +205,29 @@ def execute_unified(
     # Submit job
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
+    # Register the job in the queue DB and obtain a virtual ID (qx-{uuid})
+    virtual_id = None
+    try:
+        cmd_str = " ".join(command)
+        tags = ctx_obj.get("tags") or []
+        exec_context_info = {
+            "type": execution_context.context_type,
+            "value": (
+                execution_context.context_value
+                if not isinstance(execution_context.context_value, list)
+                else " ".join(execution_context.context_value)
+            ),
+        }
+        virtual_id = create_queue_entry(
+            pbs_job_id=job_id,
+            command=cmd_str,
+            tags=tags,
+            working_dir=ctx_obj.get("execdir") or os.getcwd(),
+            exec_context=exec_context_info,
+        )
+    except Exception as e:
+        logging.debug("Failed to create queue entry: %s", e)
+
     # Log job submission for status and resource tracking (do this before terse return)
     try:
         cmd_str = " ".join(command)
@@ -225,11 +254,13 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 
-    # Handle terse mode - emit job ID and return immediately (for pipeline use)
+    # Handle terse mode - emit virtual ID (or PBS ID as fallback) and return immediately
     if ctx_obj.get("terse", False):
-        click.echo(job_id)
+        emitted_id = virtual_id if virtual_id else job_id
+        click.echo(emitted_id)
         logging.info(
-            "Terse mode: emitted job ID %s and returning immediately",
+            "Terse mode: emitted ID %s (pbs=%s) and returning immediately",
+            emitted_id,
             job_id,
         )
         return  # Return immediately for terse mode
