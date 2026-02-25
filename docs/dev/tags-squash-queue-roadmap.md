@@ -50,11 +50,16 @@ annotation required:
 
 ```bash
 # cluster-generic profile config.yaml
-submit-cmd: "qxub exec --env {resources.conda_env} [...] --tags \"workflow={resources.workflow},rule={rule}\" -- {exec_job_cmd}"
+submit-cmd: "qxub exec [...] --tags \"workflow={resources.workflow},rule={rule}\" -- {exec_job_cmd}"
 
 default-resources:
   workflow: "my_workflow_name"
 ```
+
+Note: **do not add `--env` to the submit command**. Snakemake handles environment
+switching itself — rules may use `conda:` directives, `container:` directives, or
+neither. The qxub submit command is environment-agnostic; it only needs to carry
+resource parameters and tags.
 
 This stamps every job with its rule name and the workflow name automatically.
 Additional per-rule tags can be added by defining named resources in individual rules
