@@ -1374,6 +1374,24 @@ def interactive_cli(
     resolved_tags = list(tag or [])
     tags_str = tags or ""
     resolved_tags += [t.strip() for t in tags_str.split(",") if t.strip()]
+
+    # Log to resource tracker DB (creates a record with tags for qxub resources list)
+    # Interactive sessions don't have a PBS job ID at submission time, so we use
+    # a synthetic session-scoped ID that is recognisable in the DB.
+    try:
+        import time as _time
+
+        from .resources import resource_tracker
+
+        session_id = f"qxi_{name}_{int(_time.time())}"
+        resource_tracker.log_job_submitted(
+            job_id=session_id,
+            command=context_desc,
+            tags=resolved_tags,
+        )
+    except Exception:
+        pass
+
     try:
         from .history import history_manager
 
