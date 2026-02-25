@@ -205,8 +205,8 @@ def execute_unified(
     # Submit job
     job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
 
-    # Register the job in the queue DB and obtain a virtual ID (qx-{uuid})
-    virtual_id = None
+    # Register the job in the queue DB (for tracking; virtual ID not emitted yet —
+    # Phase 3 pending-dispatch will be the first time callers see a virtual ID)
     try:
         cmd_str = " ".join(command)
         tags = ctx_obj.get("tags") or []
@@ -218,7 +218,7 @@ def execute_unified(
                 else " ".join(execution_context.context_value)
             ),
         }
-        virtual_id = create_queue_entry(
+        create_queue_entry(
             pbs_job_id=job_id,
             command=cmd_str,
             tags=tags,
@@ -254,13 +254,12 @@ def execute_unified(
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
 
-    # Handle terse mode - emit virtual ID (or PBS ID as fallback) and return immediately
+    # Handle terse mode - emit real PBS job ID and return immediately (for pipeline use)
+    # Virtual IDs will be emitted here once Phase 3 introduces pending-dispatch.
     if ctx_obj.get("terse", False):
-        emitted_id = virtual_id if virtual_id else job_id
-        click.echo(emitted_id)
+        click.echo(job_id)
         logging.info(
-            "Terse mode: emitted ID %s (pbs=%s) and returning immediately",
-            emitted_id,
+            "Terse mode: emitted job ID %s and returning immediately",
             job_id,
         )
         return  # Return immediately for terse mode

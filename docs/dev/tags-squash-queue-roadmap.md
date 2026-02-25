@@ -114,8 +114,9 @@ WHERE EXISTS (
 > **Implemented** (2026-02-26). Key decisions:
 > - `qxub/queue/db.py` is the new canonical DB module — `ResourceTracker` delegates path
 >   resolution to it so both use the same `qxub.db` file.
-> - In `--terse` mode `qxub exec` emits the virtual `qx-{uuid}` ID (not the raw PBS ID).
->   Snakemake profiles using `--terse` will automatically receive virtual IDs.
+> - In `--terse` mode `qxub exec` still emits the real PBS ID. Virtual IDs will be
+>   emitted in `--terse` mode once Phase 3 introduces pending-dispatch (the first situation
+>   where a virtual ID exists but no PBS ID yet).
 > - `_maybe_dispatch_pending()` is a no-op stub in `status_cli.py`; Phase 3 fills it in.
 > - File-based status writes (`job_started_*`, `final_exit_code_*`) are **retained** as a
 >   fallback — `status check` still reads them for any job where the DB write failed or
