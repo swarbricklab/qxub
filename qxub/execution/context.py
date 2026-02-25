@@ -269,6 +269,7 @@ def execute_unified(
             quiet=monitoring_quiet,
             joblog_file=ctx_obj.get("joblog"),
             verbose=verbose_level,
+            walltime_str=ctx_obj.get("runtime"),
         )
         # Exit with the job's exit status
         sys.exit(exit_status)
