@@ -19,43 +19,28 @@ from .parser import size_to_bytes, time_to_seconds
 def _resolve_tracker_db_path() -> Path:
     """Resolve the default database path for ResourceTracker.
 
-    Priority:
-    1. ``QXUB_DB_PATH`` environment variable (testing / override)
-    2. ``shared_db.path`` from loaded config hierarchy
-    3. ``~/.config/qxub/qxub.db`` per-user database
-
-    Also migrates the legacy ``resources.db`` → ``qxub.db`` if needed.
+    Delegates to ``qxub.queue.db.get_db_path()`` so the resource tracker
+    always writes to the same database as the queue system.  Also performs
+    a one-time migration of the legacy ``resources.db`` → ``qxub.db`` for
+    existing user installs.
     """
-    env_override = os.environ.get("QXUB_DB_PATH")
-    if env_override:
-        return Path(env_override)
+    from ..queue.db import get_db_path  # pylint: disable=import-outside-toplevel
 
-    # Try shared_db.path from config (lazy import to avoid circular deps)
-    try:
-        from ..config import config_manager  # pylint: disable=import-outside-toplevel
+    resolved = get_db_path()
 
-        shared_path = config_manager.get_config_value("shared_db.path")
-        if shared_path:
-            return Path(shared_path)
-    except Exception:  # pylint: disable=broad-except
-        pass
-
+    # One-time migration: copy resources.db → qxub.db for existing installs
     config_dir = Path.home() / ".config" / "qxub"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    new_path = config_dir / "qxub.db"
-
-    # One-time migration: rename resources.db → qxub.db for existing installs
     old_path = config_dir / "resources.db"
-    if old_path.exists() and not new_path.exists():
+    if old_path.exists() and not resolved.exists():
         import shutil  # pylint: disable=import-outside-toplevel
 
         try:
-            shutil.copy2(str(old_path), str(new_path))
-            logging.debug("Migrated resources.db → qxub.db")
+            shutil.copy2(str(old_path), str(resolved))
+            logging.debug("Migrated resources.db → %s", resolved)
         except Exception as exc:  # pylint: disable=broad-except
             logging.debug("Could not migrate resources.db: %s", exc)
 
-    return new_path
+    return resolved
 
 
 class ResourceTracker:

@@ -31,12 +31,17 @@ def get_db_path() -> Path:
 
     Priority:
     1. ``QXUB_DB_PATH`` environment variable (testing / manual override)
-    2. ``shared_db.path`` from the loaded config hierarchy
-    3. ``~/.config/qxub/qxub.db`` per-user fallback
+    2. ``QXUB_SHARED_DB`` environment variable (set by job scripts on compute nodes)
+    3. ``shared_db.path`` from the loaded config hierarchy
+    4. ``~/.config/qxub/qxub.db`` per-user fallback
     """
     env_override = os.environ.get("QXUB_DB_PATH")
     if env_override:
         return Path(env_override)
+
+    shared_db_env = os.environ.get("QXUB_SHARED_DB")
+    if shared_db_env:
+        return Path(shared_db_env)
 
     try:
         from ..config import config_manager  # pylint: disable=import-outside-toplevel
