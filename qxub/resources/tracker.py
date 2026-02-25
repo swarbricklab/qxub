@@ -631,6 +631,124 @@ class ResourceTracker:
             logging.debug("Failed to update exit code for %s: %s", job_id, e)
             return False
 
+    def finalize_job(self, job_id: str, exit_code: int) -> bool:
+        """Record job completion: store exit code, PBS resource data, and final status.
+
+        Called from within the PBS job script at end-of-job.
+        Uses UPDATE so submission-time metadata (tags, username, command) is preserved.
+
+        Resource data is collected from:
+        - ``exit_code`` argument (from bash ``$?``)
+        - ``$PBS_QUEUE`` / ``$PBS_NCPUS`` env vars (always available inside a PBS job)
+        - ``qstat -fx {job_id}`` for actual used resources (best-effort)
+        """
+        import subprocess  # pylint: disable=import-outside-toplevel
+
+        now = datetime.now().isoformat()
+        status = "completed" if exit_code == 0 else "failed"
+
+        updates: Dict[str, Any] = {
+            "exit_code": exit_code,
+            "status": status,
+            "completed_at": now,
+            "last_status_update": now,
+        }
+
+        # PBS environment variables reliably available inside a running job
+        pbs_queue = os.environ.get("PBS_QUEUE")
+        if pbs_queue:
+            updates["queue"] = pbs_queue
+
+        ncpus_str = os.environ.get("PBS_NCPUS") or os.environ.get("NCPUS")
+        if ncpus_str:
+            try:
+                updates["cpus_requested"] = int(ncpus_str)
+            except ValueError:
+                pass
+
+        # Try qstat -fx for used/requested resource data (best-effort)
+        try:
+            result = subprocess.run(
+                ["qstat", "-fx", job_id],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                from ..core.scheduler import (  # pylint: disable=import-outside-toplevel
+                    parse_qstat_fx_output,
+                )
+
+                data = parse_qstat_fx_output(result.stdout)
+                if data:
+                    req = data.get("resources_requested", {})
+                    used = data.get("resources_used", {})
+                    eff = data.get("efficiency", {})
+                    exec_info = data.get("execution", {})
+
+                    # Requested resources
+                    if req.get("mem"):
+                        mb = self._parse_size_to_mb(req["mem"])
+                        if mb:
+                            updates["mem_requested_mb"] = mb
+                    if req.get("walltime"):
+                        sec = self._parse_time_to_sec(req["walltime"])
+                        if sec:
+                            updates["time_requested_sec"] = sec
+                    if req.get("ncpus"):
+                        n = self._parse_int(req["ncpus"])
+                        if n:
+                            updates["cpus_requested"] = n
+
+                    # Used resources
+                    if used.get("mem"):
+                        mb = self._parse_size_to_mb(used["mem"])
+                        if mb:
+                            updates["mem_used_mb"] = mb
+                    if used.get("walltime"):
+                        sec = self._parse_time_to_sec(used["walltime"])
+                        if sec:
+                            updates["time_used_sec"] = sec
+                    if used.get("cpupercent"):
+                        try:
+                            updates["cpu_percent"] = float(used["cpupercent"])
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Efficiency (pre-calculated by _enhance_resource_data)
+                    if eff.get("memory_efficiency") is not None:
+                        updates["mem_efficiency"] = eff["memory_efficiency"]
+                    if eff.get("time_efficiency") is not None:
+                        updates["time_efficiency"] = eff["time_efficiency"]
+                    if eff.get("cpu_efficiency") is not None:
+                        updates["cpu_efficiency"] = eff["cpu_efficiency"]
+
+                    # Queue from qstat is authoritative; overrides env-var value
+                    if exec_info.get("queue"):
+                        updates["queue"] = exec_info["queue"]
+
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.debug("qstat resource collection failed for %s: %s", job_id, exc)
+
+        try:
+            set_clauses = ", ".join(f"{k} = ?" for k in updates)
+            values = list(updates.values()) + [job_id]
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(
+                    f"UPDATE job_resources SET {set_clauses} WHERE job_id = ?",
+                    values,
+                )
+                conn.commit()
+            logging.debug(
+                "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
+            )
+            return True
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.debug("Failed to finalize job %s: %s", job_id, exc)
+            return False
+
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job."""
         try:
