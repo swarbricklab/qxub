@@ -22,9 +22,15 @@ def resources():
 
 @resources.command()
 @click.option("--limit", default=20, help="Number of recent jobs to show")
-def list(limit):
+@click.option(
+    "--tag",
+    multiple=True,
+    metavar="TAG",
+    help="Filter by tag (can be used multiple times, e.g. --tag rule=align)",
+)
+def list(limit, tag):
     """List recent jobs with resource efficiency."""
-    jobs = resource_tracker.get_recent_jobs(limit)
+    jobs = resource_tracker.get_recent_jobs(limit, tags=tag if tag else None)
 
     if not jobs:
         console.print("📊 No resource data found", style="yellow")

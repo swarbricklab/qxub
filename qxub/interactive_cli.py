@@ -915,6 +915,18 @@ def _build_qsub_command(
     default=None,
     help="Directory for transcript files (default: config or working directory)",
 )
+@click.option(
+    "--tag",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Tag this session (can be used multiple times, e.g. --tag workflow=brca)",
+)
+@click.option(
+    "--tags",
+    default=None,
+    metavar="TAG_STRING",
+    help='Comma-separated tags, e.g. --tags "workflow=brca,rule=align"',
+)
 @click.argument("command", nargs=-1, required=False)
 @click.pass_context
 def interactive_cli(
@@ -948,6 +960,8 @@ def interactive_cli(
     shortcut,
     alias,
     command,
+    tag,
+    tags,
 ):
     """
     Start an interactive PBS session with environment setup.
@@ -1356,6 +1370,10 @@ def interactive_cli(
     # Log to history using the existing API
     # We capture the execution_timestamp so we can update the record later
     execution_timestamp = None
+    # Resolve tags from --tag (multiple) and --tags (comma-separated string)
+    resolved_tags = list(tag or [])
+    tags_str = tags or ""
+    resolved_tags += [t.strip() for t in tags_str.split(",") if t.strip()]
     try:
         from .history import history_manager
 
@@ -1365,6 +1383,7 @@ def interactive_cli(
             ctx=ctx,
             success=True,  # We assume success on start
             job_id=None,  # We don't have job_id yet (qsub -I hasn't run)
+            tags=resolved_tags,
         )
     except Exception:
         pass  # Don't fail if history logging fails

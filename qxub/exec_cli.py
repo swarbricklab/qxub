@@ -124,6 +124,18 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
 @click.option(
+    "--tag",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Tag this job (can be used multiple times, e.g. --tag rule=align)",
+)
+@click.option(
+    "--tags",
+    default=None,
+    metavar="TAG_STRING",
+    help='Comma-separated tags, e.g. --tags "workflow=brca,rule=align"',
+)
+@click.option(
     "--internet",
     is_flag=True,
     help="Require internet connectivity (automatically selects an internet-capable queue, e.g. copyq on NCI Gadi)",
@@ -609,6 +621,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
         "internet": options.get("internet", False),
     }
+
+    # Resolve and merge tags from --tag (multiple) and --tags (comma-separated string)
+    resolved_tags = list(options.get("tag") or [])
+    tags_str = options.get("tags") or ""
+    resolved_tags += [t.strip() for t in tags_str.split(",") if t.strip()]
+    params["tags"] = resolved_tags
 
     # If internet connectivity is required and no queue was explicitly requested,
     # trigger auto-selection so an internet-capable queue is chosen.
