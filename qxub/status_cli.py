@@ -253,6 +253,24 @@ def check(job_id, output_format, snakemake):
             if file_exit_code is not None:
                 resource_tracker.update_job_exit_code(job_id, file_exit_code)
 
+            # Backfill resource efficiency from the PBS joblog stored on disk.
+            # This populates mem/time/cpu columns for terse/Snakemake-submitted
+            # jobs that were never monitored by a long-running qxub process.
+            try:
+                import os as _os
+
+                from .history import history_manager
+                from .resources import parse_joblog_resources
+
+                files = history_manager.get_execution_file_paths(job_id)
+                joblog = (files or {}).get("joblog")
+                if joblog and _os.path.exists(joblog):
+                    resource_data = parse_joblog_resources(joblog)
+                    if resource_data:
+                        resource_tracker.update_job_resources(job_id, resource_data)
+            except Exception:
+                pass  # Non-fatal: resource data remains empty until next check
+
     # Map internal status to workflow engine formats
     if output_format == "snakemake":
         if status == "completed":
