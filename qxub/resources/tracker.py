@@ -75,7 +75,10 @@ class ResourceTracker:
                     execution_sec INTEGER,
 
                     -- Tags
-                    tags TEXT DEFAULT '[]'
+                    tags TEXT DEFAULT '[]',
+
+                    -- Identity
+                    username TEXT
                 )
             """
             )
@@ -128,6 +131,12 @@ class ResourceTracker:
                 )
                 conn.commit()
                 logging.debug("Tags column migration completed")
+
+            if "username" not in columns:
+                logging.debug("Migrating database schema to add username column")
+                conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
+                conn.commit()
+                logging.debug("Username column migration completed")
         except Exception as e:
             logging.debug("Database migration failed (may be normal): %s", e)
 
@@ -513,25 +522,38 @@ class ResourceTracker:
         job_id: str,
         command: str,
         tags: Optional[Sequence[str]] = None,
+        username: Optional[str] = None,
     ) -> bool:
         """Log initial job submission."""
         try:
             now = datetime.now().isoformat()
             clean_command = self._clean_command(command)
             tags_json = json.dumps(list(tags) if tags else [])
+            if username is None:
+                try:
+                    import getpass
+
+                    username = getpass.getuser()
+                except Exception:
+                    username = ""
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
-                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags)
-                    VALUES (?, ?, ?, 'submitted', ?, ?, ?)
+                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags, username)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?)
                     """,
-                    (job_id, now, clean_command, now, now, tags_json),
+                    (job_id, now, clean_command, now, now, tags_json, username),
                 )
                 conn.commit()
 
-            logging.debug("Logged job submission for %s (tags: %s)", job_id, tags_json)
+            logging.debug(
+                "Logged job submission for %s (user: %s, tags: %s)",
+                job_id,
+                username,
+                tags_json,
+            )
             return True
         except Exception as e:
             logging.debug("Failed to log job submission for %s: %s", job_id, e)

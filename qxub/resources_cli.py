@@ -52,6 +52,7 @@ def list(limit, tag, output_csv):
         writer.writerow(
             [
                 "job_id",
+                "username",
                 "status",
                 "submitted_at",
                 "command",
@@ -77,6 +78,7 @@ def list(limit, tag, output_csv):
             writer.writerow(
                 [
                     job.get("job_id", ""),
+                    job.get("username", ""),
                     job.get("status", ""),
                     job.get("submitted_at") or job.get("timestamp", ""),
                     job.get("command", ""),
@@ -97,6 +99,7 @@ def list(limit, tag, output_csv):
 
     table = Table(title="Recent Jobs - Resource Efficiency")
     table.add_column("Submitted", style="dim", no_wrap=True, width=12)
+    table.add_column("User", style="dim", no_wrap=True, width=10)
     table.add_column("Job ID", style="cyan", no_wrap=True, width=10)
     table.add_column("Status", no_wrap=True, width=5)
     table.add_column("Command", style="white", width=26)
@@ -189,8 +192,11 @@ def list(limit, tag, output_csv):
 
         queue = job["queue"] or "?"
 
+        username = job.get("username") or "?"
+
         table.add_row(
             submitted_str,
+            username,
             job_id,
             status_str,
             command,
