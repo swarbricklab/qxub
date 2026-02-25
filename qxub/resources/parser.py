@@ -366,12 +366,15 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
             result["service_units"] = float(service_units_match.group(1))
 
         # NCPUs Requested and Used
-        ncpus_match = re.search(
-            r"NCPUs Requested:\s*(\d+)\s+NCPUs Used:\s*(\d+)", resource_text
-        )
+        # NCPUs Requested (used is reported as CPU Time Used, not a separate NCPUs Used field)
+        ncpus_match = re.search(r"NCPUs Requested:\s*(\d+)", resource_text)
         if ncpus_match:
             result["ncpus_requested"] = int(ncpus_match.group(1))
-            result["ncpus_used"] = int(ncpus_match.group(2))
+
+        # NCPUs Used (only present on some Gadi variants; skip silently if absent)
+        ncpus_used_match = re.search(r"NCPUs Used:\s*(\d+)", resource_text)
+        if ncpus_used_match:
+            result["ncpus_used"] = int(ncpus_used_match.group(1))
 
         # CPU Time Used
         cpu_time_match = re.search(r"CPU Time Used:\s*(\d+:\d+:\d+)", resource_text)
@@ -389,7 +392,7 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
 
         # Walltime Requested and Used
         walltime_match = re.search(
-            r"Walltime requested:\s*(\d+:\d+:\d+)\s+Walltime Used:\s*(\d+:\d+:\d+)",
+            r"Walltime [Rr]equested:\s*(\d+:\d+:\d+)\s+Walltime Used:\s*(\d+:\d+:\d+)",
             resource_text,
         )
         if walltime_match:
@@ -400,7 +403,8 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
 
         # JobFS Requested and Used
         jobfs_match = re.search(
-            r"JobFS requested:\s*([\d.]+\w+)\s+JobFS used:\s*([\d.]+\w+)", resource_text
+            r"JobFS [Rr]equested:\s*([\d.]+\w+)\s+JobFS [Uu]sed:\s*([\d.]+\w+)",
+            resource_text,
         )
         if jobfs_match:
             result["jobfs_requested_bytes"] = size_to_bytes(jobfs_match.group(1))
