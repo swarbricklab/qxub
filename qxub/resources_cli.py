@@ -2,6 +2,10 @@
 CLI commands for resource efficiency tracking and analysis.
 """
 
+import csv as csv_mod
+import json
+import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -22,27 +26,107 @@ def resources():
 
 @resources.command()
 @click.option("--limit", default=20, help="Number of recent jobs to show")
-def list(limit):
+@click.option(
+    "--tag",
+    multiple=True,
+    metavar="TAG",
+    help="Filter by tag (can be used multiple times, e.g. --tag rule=align)",
+)
+@click.option(
+    "--csv",
+    "output_csv",
+    is_flag=True,
+    help="Output as CSV to stdout (redirect to file with > output.csv)",
+)
+def list(limit, tag, output_csv):
     """List recent jobs with resource efficiency."""
-    jobs = resource_tracker.get_recent_jobs(limit)
+    jobs = resource_tracker.get_recent_jobs(limit, tags=tag if tag else None)
 
     if not jobs:
-        console.print("📊 No resource data found", style="yellow")
+        if not output_csv:
+            console.print("📊 No resource data found", style="yellow")
         return
 
-    table = Table(title=f"Recent Jobs - Resource Efficiency")
+    if output_csv:
+        writer = csv_mod.writer(sys.stdout)
+        writer.writerow(
+            [
+                "job_id",
+                "username",
+                "status",
+                "submitted_at",
+                "command",
+                "exit_code",
+                "queue",
+                "mem_requested_mb",
+                "mem_used_mb",
+                "mem_efficiency",
+                "time_requested_sec",
+                "time_used_sec",
+                "time_efficiency",
+                "cpus_requested",
+                "cpu_efficiency",
+                "tags",
+            ]
+        )
+        for job in jobs:
+            raw_tags = job.get("tags") or "[]"
+            try:
+                tags_display = ", ".join(json.loads(raw_tags))
+            except Exception:
+                tags_display = ""
+            writer.writerow(
+                [
+                    job.get("job_id", ""),
+                    job.get("username", ""),
+                    job.get("status", ""),
+                    job.get("submitted_at") or job.get("timestamp", ""),
+                    job.get("command", ""),
+                    job.get("exit_code", ""),
+                    job.get("queue", ""),
+                    job.get("mem_requested_mb", ""),
+                    job.get("mem_used_mb", ""),
+                    job.get("mem_efficiency", ""),
+                    job.get("time_requested_sec", ""),
+                    job.get("time_used_sec", ""),
+                    job.get("time_efficiency", ""),
+                    job.get("cpus_requested", ""),
+                    job.get("cpu_efficiency", ""),
+                    tags_display,
+                ]
+            )
+        return
+
+    table = Table(title="Recent Jobs - Resource Efficiency")
+    table.add_column("Submitted", style="dim", no_wrap=True, width=12)
+    table.add_column("User", style="dim", no_wrap=True, width=10)
     table.add_column("Job ID", style="cyan", no_wrap=True, width=10)
-    table.add_column("Command", style="white", width=30)
+    table.add_column("Status", no_wrap=True, width=5)
+    table.add_column("Command", style="white", width=26)
     table.add_column("Exit", style="blue", no_wrap=True, width=6)
     table.add_column("Mem", style="green", no_wrap=True, width=5)
     table.add_column("Time", style="yellow", no_wrap=True, width=6)
     table.add_column("CPU", style="magenta", no_wrap=True, width=5)
     table.add_column("Queue", style="dim", no_wrap=True, width=12)
+    table.add_column("Tags", style="cyan", width=22)
 
     for job in jobs:
         # Format job ID (show first 8 chars)
         job_id = job["job_id"][:8] if job["job_id"] else "unknown"
 
+        # Format submitted_at timestamp
+        raw_ts = job.get("submitted_at") or job.get("timestamp") or ""
+        try:
+            submitted_str = datetime.fromisoformat(raw_ts).strftime("%m-%d %H:%M")
+        except Exception:
+            submitted_str = raw_ts[:10] if raw_ts else "?"
+
+        # Format tags
+        raw_tags = job.get("tags") or "[]"
+        try:
+            tags_display = " ".join(json.loads(raw_tags))
+        except Exception:
+            tags_display = ""
         # Format command (smart truncation)
         command = job["command"] or ""
         if len(command) > 35:
@@ -75,6 +159,17 @@ def list(limit):
                 else:
                     command = command[:32] + "..."
 
+        # Format status
+        status = job.get("status") or "unknown"
+        status_map = {
+            "submitted": "[yellow]sub[/yellow]",
+            "running": "[cyan]run[/cyan]",
+            "completed": "[green]done[/green]",
+            "failed": "[red]fail[/red]",
+            "cancelled": "[dim]canc[/dim]",
+        }
+        status_str = status_map.get(status, f"[dim]{status[:4]}[/dim]")
+
         # Format exit code
         exit_code = job["exit_code"]
         if exit_code == 0:
@@ -97,7 +192,21 @@ def list(limit):
 
         queue = job["queue"] or "?"
 
-        table.add_row(job_id, command, exit_style, mem_eff, time_eff, cpu_eff, queue)
+        username = job.get("username") or "?"
+
+        table.add_row(
+            submitted_str,
+            username,
+            job_id,
+            status_str,
+            command,
+            exit_style,
+            mem_eff,
+            time_eff,
+            cpu_eff,
+            queue,
+            tags_display,
+        )
 
     console.print(table)
 

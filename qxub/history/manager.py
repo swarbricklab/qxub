@@ -160,6 +160,7 @@ class HistoryManager:
         job_id: Optional[str] = None,
         resource_data: Optional[Dict] = None,
         file_paths: Optional[Dict[str, str]] = None,
+        tags: Optional[List[str]] = None,
     ) -> str:
         """Log a command execution and return the execution timestamp."""
         try:
@@ -271,6 +272,9 @@ class HistoryManager:
             if error:
                 execution_record["execution"]["error"] = error
 
+            # Add tags (resolved merged list)
+            execution_record["tags"] = tags or []
+
             # Add file paths if provided
             if file_paths:
                 execution_record["files"] = file_paths
@@ -352,8 +356,12 @@ class HistoryManager:
         except Exception:
             return {}
 
-    def get_executions(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent executions."""
+    def get_executions(
+        self,
+        limit: int = 10,
+        tags: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent executions, optionally filtered by tags."""
         if not self.executions_file.exists():
             return []
 
@@ -361,15 +369,22 @@ class HistoryManager:
             config = OmegaConf.load(self.executions_file)
             executions = config.get("executions", {})
 
-            # Sort by timestamp (most recent first) and limit
+            # Sort by timestamp (most recent first)
             sorted_timestamps = sorted(executions.keys(), key=int, reverse=True)
-            recent_timestamps = sorted_timestamps[:limit]
 
             result = []
-            for ts in recent_timestamps:
-                execution = executions[ts].copy()
+            for ts in sorted_timestamps:
+                execution = dict(executions[ts])
                 execution["timestamp"] = ts
+
+                if tags:
+                    record_tags = list(execution.get("tags") or [])
+                    if not all(t in record_tags for t in tags):
+                        continue
+
                 result.append(execution)
+                if len(result) >= limit:
+                    break
 
             return result
         except Exception:

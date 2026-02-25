@@ -97,9 +97,15 @@ def recipes(limit):
 
 @history.command()
 @click.option("--limit", default=10, help="Number of executions to show")
-def executions(limit):
+@click.option(
+    "--tag",
+    multiple=True,
+    metavar="TAG",
+    help="Filter by tag (can be used multiple times, e.g. --tag rule=align)",
+)
+def executions(limit, tag):
     """List recent executions."""
-    executions_list = history_manager.get_executions(limit)
+    executions_list = history_manager.get_executions(limit, tags=tag if tag else None)
 
     if not executions_list:
         console.print("📝 No executions found", style="yellow")

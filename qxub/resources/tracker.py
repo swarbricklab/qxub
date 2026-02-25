@@ -5,11 +5,12 @@ Tracks only key metrics: job_id, requested vs used resources, efficiency.
 Uses SQLite for simple querying and analysis.
 """
 
+import json
 import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .parser import size_to_bytes, time_to_seconds
 
@@ -71,7 +72,13 @@ class ResourceTracker:
 
                     -- Timing
                     queue_wait_sec INTEGER,
-                    execution_sec INTEGER
+                    execution_sec INTEGER,
+
+                    -- Tags
+                    tags TEXT DEFAULT '[]',
+
+                    -- Identity
+                    username TEXT
                 )
             """
             )
@@ -116,6 +123,20 @@ class ResourceTracker:
 
                 conn.commit()
                 logging.debug("Database schema migration completed")
+
+            if "tags" not in columns:
+                logging.debug("Migrating database schema to add tags column")
+                conn.execute(
+                    "ALTER TABLE job_resources ADD COLUMN tags TEXT DEFAULT '[]'"
+                )
+                conn.commit()
+                logging.debug("Tags column migration completed")
+
+            if "username" not in columns:
+                logging.debug("Migrating database schema to add username column")
+                conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
+                conn.commit()
+                logging.debug("Username column migration completed")
         except Exception as e:
             logging.debug("Database migration failed (may be normal): %s", e)
 
@@ -372,18 +393,40 @@ class ResourceTracker:
         except Exception:
             return None
 
-    def get_recent_jobs(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Get recent jobs with resource data."""
+    def get_recent_jobs(
+        self,
+        limit: int = 20,
+        tags: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get recent jobs with resource data, optionally filtered by tags."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
+
+            if tags:
+                # Build a filter: all specified tags must be present in the JSON array.
+                # One EXISTS sub-query per tag value.
+                tag_conditions = " AND ".join(
+                    [
+                        "EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"
+                        for _ in tags
+                    ]
+                )
+                query = f"""
+                    SELECT * FROM job_resources
+                    WHERE {tag_conditions}
+                    ORDER BY timestamp DESC
+                    LIMIT ?
                 """
-                SELECT * FROM job_resources
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """,
-                (limit,),
-            )
+                cursor = conn.execute(query, (*tags, limit))
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM job_resources
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
 
             return [dict(row) for row in cursor.fetchall()]
 
@@ -474,24 +517,43 @@ class ResourceTracker:
 
     # Job Status Tracking Methods (new for v3)
 
-    def log_job_submitted(self, job_id: str, command: str) -> bool:
+    def log_job_submitted(
+        self,
+        job_id: str,
+        command: str,
+        tags: Optional[Sequence[str]] = None,
+        username: Optional[str] = None,
+    ) -> bool:
         """Log initial job submission."""
         try:
             now = datetime.now().isoformat()
             clean_command = self._clean_command(command)
+            tags_json = json.dumps(list(tags) if tags else [])
+            if username is None:
+                try:
+                    import getpass
+
+                    username = getpass.getuser()
+                except Exception:
+                    username = ""
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
-                    (job_id, timestamp, command, status, submitted_at, last_status_update)
-                    VALUES (?, ?, ?, 'submitted', ?, ?)
+                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags, username)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?)
                     """,
-                    (job_id, now, clean_command, now, now),
+                    (job_id, now, clean_command, now, now, tags_json, username),
                 )
                 conn.commit()
 
-            logging.debug("Logged job submission for %s", job_id)
+            logging.debug(
+                "Logged job submission for %s (user: %s, tags: %s)",
+                job_id,
+                username,
+                tags_json,
+            )
             return True
         except Exception as e:
             logging.debug("Failed to log job submission for %s: %s", job_id, e)

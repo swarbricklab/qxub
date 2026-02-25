@@ -186,7 +186,12 @@ def execute_unified(
                 "err": ctx_obj["err"],
                 "joblog": ctx_obj.get("joblog"),  # May be None initially
             }
-            history_manager.log_execution(ctx, success=True, file_paths=file_paths)
+            history_manager.log_execution(
+                ctx,
+                success=True,
+                file_paths=file_paths,
+                tags=ctx_obj.get("tags") or [],
+            )
         except Exception as e:
             logging.debug("Failed to log execution history: %s", e)
         return
@@ -197,7 +202,8 @@ def execute_unified(
     # Log job submission for status and resource tracking (do this before terse return)
     try:
         cmd_str = " ".join(command)
-        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str)
+        tags = ctx_obj.get("tags") or []
+        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str, tags=tags)
     except Exception as e:
         logging.debug("Failed to log job submission: %s", e)
 
@@ -210,7 +216,11 @@ def execute_unified(
             "joblog": ctx_obj.get("joblog"),  # May be None initially
         }
         history_manager.log_execution(
-            ctx, success=True, job_id=job_id, file_paths=file_paths
+            ctx,
+            success=True,
+            job_id=job_id,
+            file_paths=file_paths,
+            tags=ctx_obj.get("tags") or [],
         )
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
