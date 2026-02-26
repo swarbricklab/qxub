@@ -8,12 +8,39 @@ Uses SQLite for simple querying and analysis.
 import json
 import logging
 import os
+import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from .parser import size_to_bytes, time_to_seconds
+
+
+def parse_date_filter(value: str) -> str:
+    """Parse a date filter string into an ISO datetime string.
+
+    Accepts relative offsets (``7d``, ``2h``, ``1w``, ``30m``) or ISO date /
+    datetime strings (``2026-02-20``, ``2026-02-20T10:00:00``).
+    """
+    value = value.strip()
+    m = re.fullmatch(r"(\d+)([dhwm])", value, re.IGNORECASE)
+    if m:
+        n, unit = int(m.group(1)), m.group(2).lower()
+        delta = {
+            "d": timedelta(days=n),
+            "h": timedelta(hours=n),
+            "w": timedelta(weeks=n),
+            "m": timedelta(minutes=n),
+        }[unit]
+        return (datetime.now() - delta).isoformat(sep=" ", timespec="seconds")
+    try:
+        dt = datetime.fromisoformat(value)
+        return dt.isoformat(sep=" ", timespec="seconds")
+    except ValueError:
+        raise ValueError(
+            f"Cannot parse date '{value}'. Use e.g. '7d', '2h', '1w', '2026-02-20'."
+        )
 
 
 def _resolve_tracker_db_path() -> Path:
@@ -431,37 +458,60 @@ class ResourceTracker:
         self,
         limit: int = 20,
         tags: Optional[Sequence[str]] = None,
+        user: Optional[str] = None,
+        since: Optional[str] = None,
+        before: Optional[str] = None,
+        queue_name: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Get recent jobs with resource data, optionally filtered by tags."""
+        """Get recent jobs with resource data, with optional filters.
+
+        Args:
+            limit:      Maximum rows to return.
+            tags:       All listed tag values must be present on the job.
+            user:       Exact username match.
+            since:      ISO datetime string; only jobs submitted at or after this time.
+            before:     ISO datetime string; only jobs submitted at or before this time.
+            queue_name: Exact queue name match.
+            status:     Exact status match (submitted/running/completed/failed/cancelled).
+        """
+        conditions: List[str] = []
+        params: List[Any] = []
+
+        if tags:
+            for t in tags:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"
+                )
+                params.append(t)
+        if user:
+            conditions.append("username = ?")
+            params.append(user)
+        if since:
+            conditions.append("COALESCE(submitted_at, timestamp) >= ?")
+            params.append(since)
+        if before:
+            conditions.append("COALESCE(submitted_at, timestamp) <= ?")
+            params.append(before)
+        if queue_name:
+            conditions.append("queue = ?")
+            params.append(queue_name)
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = f"""
+            SELECT * FROM job_resources
+            {where_clause}
+            ORDER BY COALESCE(submitted_at, timestamp) DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-
-            if tags:
-                # Build a filter: all specified tags must be present in the JSON array.
-                # One EXISTS sub-query per tag value.
-                tag_conditions = " AND ".join(
-                    [
-                        "EXISTS (SELECT 1 FROM json_each(tags) WHERE value = ?)"
-                        for _ in tags
-                    ]
-                )
-                query = f"""
-                    SELECT * FROM job_resources
-                    WHERE {tag_conditions}
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                """
-                cursor = conn.execute(query, (*tags, limit))
-            else:
-                cursor = conn.execute(
-                    """
-                    SELECT * FROM job_resources
-                    ORDER BY timestamp DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                )
-
+            cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
     def get_efficiency_stats(self) -> Dict[str, Any]:

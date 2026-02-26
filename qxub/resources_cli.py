@@ -14,6 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .resources import resource_tracker
+from .resources.tracker import parse_date_filter
 
 console = Console()
 
@@ -32,13 +33,41 @@ def resources():
     metavar="TAG",
     help="Filter by tag (can be used multiple times, e.g. --tag rule=align)",
 )
+@click.option("--user", default=None, help="Filter by username")
+@click.option(
+    "--since",
+    default=None,
+    metavar="DATE",
+    help="Show jobs submitted after DATE (e.g. '7d', '2h', '1w', '2026-02-20')",
+)
+@click.option(
+    "--before",
+    default=None,
+    metavar="DATE",
+    help="Show jobs submitted before DATE (e.g. '2026-02-25')",
+)
+@click.option(
+    "--queue",
+    "queue_name",
+    default=None,
+    help="Filter by queue name (e.g. normal, hugemem)",
+)
+@click.option(
+    "--status",
+    default=None,
+    type=click.Choice(
+        ["submitted", "running", "completed", "failed", "cancelled"],
+        case_sensitive=False,
+    ),
+    help="Filter by job status",
+)
 @click.option(
     "--csv",
     "output_csv",
     is_flag=True,
     help="Output as CSV to stdout (redirect to file with > output.csv)",
 )
-def list(limit, tag, output_csv):
+def list(limit, tag, user, since, before, queue_name, status, output_csv):
     """List recent jobs with resource efficiency."""
     # Backfill resource data for completed jobs whose joblogs are now available
     try:
@@ -50,7 +79,28 @@ def list(limit, tag, output_csv):
     except Exception:  # pylint: disable=broad-except
         pass
 
-    jobs = resource_tracker.get_recent_jobs(limit, tags=tag if tag else None)
+    # Parse date filter args, emitting a clear error for bad formats.
+    since_dt = before_dt = None
+    for label, raw in (("--since", since), ("--before", before)):
+        if raw:
+            try:
+                parsed = parse_date_filter(raw)
+            except ValueError as exc:
+                raise click.BadParameter(str(exc), param_hint=label) from exc
+            if label == "--since":
+                since_dt = parsed
+            else:
+                before_dt = parsed
+
+    jobs = resource_tracker.get_recent_jobs(
+        limit,
+        tags=tag if tag else None,
+        user=user,
+        since=since_dt,
+        before=before_dt,
+        queue_name=queue_name,
+        status=status,
+    )
 
     if not jobs:
         if not output_csv:
