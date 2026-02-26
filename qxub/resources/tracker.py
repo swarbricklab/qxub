@@ -679,12 +679,76 @@ class ResourceTracker:
             logging.debug("Failed to finalize job %s: %s", job_id, exc)
             return False
 
-    def backfill_resources(self, limit: int = 50) -> int:
+    # ------------------------------------------------------------------
+    # Joblog discovery helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_job_id_from_log(path: str) -> Optional[str]:
+        """Quickly extract the PBS Job Id from the tail of a .log file.
+
+        PBS appends the resource section at the very end of the file, so
+        reading the last 2 KB is enough to find "Job Id: <id>".
+        """
+        import re  # pylint: disable=import-outside-toplevel
+
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(0, 2)
+                size = fh.tell()
+                fh.seek(max(0, size - 2048))
+                tail = fh.read().decode("utf-8", errors="replace")
+            m = re.search(r"Job Id:\s*(\S+)", tail)
+            return m.group(1) if m else None
+        except Exception:  # pylint: disable=broad-except
+            return None
+
+    def _discover_joblog_paths(self, log_dirs: List[str]) -> Dict[str, str]:
+        """Scan *log_dirs* for ``*.log`` files and return ``{job_id: path}``."""
+        import glob  # pylint: disable=import-outside-toplevel
+
+        index: Dict[str, str] = {}
+        for d in log_dirs:
+            for path in glob.glob(os.path.join(d, "*.log")):
+                job_id = self._extract_job_id_from_log(path)
+                if job_id:
+                    index[job_id] = path
+        return index
+
+    def _resolve_log_dirs(self) -> List[str]:
+        """Return candidate log directories derived from already-stored paths."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT joblog_path FROM job_resources"
+                    " WHERE joblog_path IS NOT NULL LIMIT 20"
+                ).fetchall()
+            dirs: List[str] = []
+            seen: set = set()
+            for (p,) in rows:
+                d = os.path.dirname(p)
+                if d and d not in seen and os.path.isdir(d):
+                    dirs.append(d)
+                    seen.add(d)
+            return dirs
+        except Exception:  # pylint: disable=broad-except
+            return []
+
+    # ------------------------------------------------------------------
+    # Public backfill entry point
+    # ------------------------------------------------------------------
+
+    def backfill_resources(self, limit: int = 200) -> int:
         """Parse joblogs for recently completed jobs that have no resource data.
 
-        Designed to be called automatically at the start of ``qxub resources list``
-        so that terse/quiet jobs that bypassed the login-node monitor still get
-        their resource columns populated.
+        Two-phase approach:
+        1. Discovery — for completed jobs whose ``joblog_path`` is still NULL,
+           scan known log directories to find the matching file.
+        2. Parsing  — for all backfillable rows (now including newly discovered
+           ones), parse the joblog and populate the resource columns.
+
+        Designed to be called automatically on ``qxub resources list`` so data
+        appears without any manual intervention.
 
         Returns the number of jobs successfully backfilled.
         """
@@ -692,6 +756,50 @@ class ResourceTracker:
             parse_joblog_resources,
         )
 
+        # ---- Phase 1: discover joblog paths for jobs that lack them ----------
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                missing = conn.execute(
+                    """
+                    SELECT job_id FROM job_resources
+                    WHERE status IN ('completed', 'failed')
+                      AND mem_used_mb IS NULL
+                      AND joblog_path IS NULL
+                      AND submitted_at > datetime('now', '-180 days')
+                    ORDER BY completed_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+            missing_ids = {row[0] for row in missing}
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.debug("backfill phase-1 query failed: %s", exc)
+            missing_ids = set()
+
+        if missing_ids:
+            log_dirs = self._resolve_log_dirs()
+            if log_dirs:
+                index = self._discover_joblog_paths(log_dirs)
+                matched = {
+                    jid: path for jid, path in index.items() if jid in missing_ids
+                }
+                if matched:
+                    try:
+                        with sqlite3.connect(self.db_path) as conn:
+                            conn.executemany(
+                                "UPDATE job_resources SET joblog_path=?"
+                                " WHERE job_id=? AND joblog_path IS NULL",
+                                [(path, jid) for jid, path in matched.items()],
+                            )
+                            conn.commit()
+                        logging.debug(
+                            "Discovered joblog paths for %d historical jobs",
+                            len(matched),
+                        )
+                    except Exception as exc:  # pylint: disable=broad-except
+                        logging.debug("backfill path-update failed: %s", exc)
+
+        # ---- Phase 2: parse joblogs and fill resource columns ---------------
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -707,7 +815,7 @@ class ResourceTracker:
                     (limit,),
                 ).fetchall()
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("backfill_resources query failed: %s", exc)
+            logging.debug("backfill phase-2 query failed: %s", exc)
             return 0
 
         filled = 0
