@@ -268,6 +268,24 @@ def create_queue_entry(
     return entry_id
 
 
+def get_queue_entry(pbs_job_id: str, db_path: Optional[Path] = None) -> Optional[dict]:
+    """Look up a queue entry by PBS job ID.
+
+    Returns a dict with the queue row columns, or *None* if not found.
+    Failures are silently swallowed (returns *None*).
+    """
+    try:
+        with get_connection(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM queue WHERE pbs_job_id=?", (pbs_job_id,)
+            ).fetchone()
+            return dict(row) if row else None
+    except Exception as exc:  # pylint: disable=broad-except
+        logging.debug("get_queue_entry failed for %s: %s", pbs_job_id, exc)
+        return None
+
+
 def mark_running(pbs_job_id: str, db_path: Optional[Path] = None) -> None:
     """Mark a PBS job as running in ``project_jobs``.
 
