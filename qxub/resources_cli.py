@@ -40,6 +40,16 @@ def resources():
 )
 def list(limit, tag, output_csv):
     """List recent jobs with resource efficiency."""
+    # Backfill resource data for completed jobs whose joblogs are now available
+    try:
+        filled = resource_tracker.backfill_resources()
+        if filled:
+            import logging as _logging
+
+            _logging.debug("Backfilled resources for %d job(s)", filled)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
     jobs = resource_tracker.get_recent_jobs(limit, tags=tag if tag else None)
 
     if not jobs:

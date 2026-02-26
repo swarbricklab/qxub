@@ -103,7 +103,10 @@ class ResourceTracker:
                     tags TEXT DEFAULT '[]',
 
                     -- Identity
-                    username TEXT
+                    username TEXT,
+
+                    -- Path to PBS joblog for deferred resource backfill
+                    joblog_path TEXT
                 )
             """
             )
@@ -162,6 +165,12 @@ class ResourceTracker:
                 conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
                 conn.commit()
                 logging.debug("Username column migration completed")
+
+            if "joblog_path" not in columns:
+                logging.debug("Migrating database schema to add joblog_path column")
+                conn.execute("ALTER TABLE job_resources ADD COLUMN joblog_path TEXT")
+                conn.commit()
+                logging.debug("joblog_path column migration completed")
         except Exception as e:
             logging.debug("Database migration failed (may be normal): %s", e)
 
@@ -548,6 +557,7 @@ class ResourceTracker:
         command: str,
         tags: Optional[Sequence[str]] = None,
         username: Optional[str] = None,
+        joblog_path: Optional[str] = None,
     ) -> bool:
         """Log initial job submission."""
         try:
@@ -566,10 +576,19 @@ class ResourceTracker:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
-                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags, username)
-                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?)
+                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags, username, joblog_path)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?)
                     """,
-                    (job_id, now, clean_command, now, now, tags_json, username),
+                    (
+                        job_id,
+                        now,
+                        clean_command,
+                        now,
+                        now,
+                        tags_json,
+                        username,
+                        joblog_path,
+                    ),
                 )
                 conn.commit()
 
@@ -632,54 +651,77 @@ class ResourceTracker:
             return False
 
     def finalize_job(self, job_id: str, exit_code: int, joblog_path: str) -> bool:
-        """Record job completion: parse the joblog for resource data, update the DB.
+        """Record job completion: update status and exit code.
 
         Called from within the PBS job script at end-of-job.
-        Uses UPDATE so submission-time metadata (tags, username, command) is preserved.
-
-        Args:
-            job_id: PBS job ID
-            exit_code: Job exit code from bash ``$?``
-            joblog_path: Path to the PBS ``.log`` file written by qxub
+        Resource data (mem, walltime, cpu) is NOT collected here because PBS
+        only appends the resource section to the joblog AFTER the script exits.
+        The joblog_path is stored so that ``backfill_resources()`` can pick it
+        up the next time ``qxub resources list`` is run.
         """
-        from ..resources.parser import (  # pylint: disable=import-outside-toplevel
-            parse_joblog_resources,
-        )
-
         now = datetime.now().isoformat()
         status = "completed" if exit_code == 0 else "failed"
-
-        # Always record status and exit code
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
-                    "UPDATE job_resources SET status=?, exit_code=?, completed_at=?, last_status_update=? WHERE job_id=?",
-                    (status, exit_code, now, now, job_id),
+                    """UPDATE job_resources
+                       SET status=?, exit_code=?, completed_at=?, last_status_update=?,
+                           joblog_path=COALESCE(joblog_path, ?)
+                       WHERE job_id=?""",
+                    (status, exit_code, now, now, joblog_path, job_id),
                 )
                 conn.commit()
+            logging.debug(
+                "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
+            )
+            return True
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Failed to update status for job %s: %s", job_id, exc)
+            logging.debug("Failed to finalize job %s: %s", job_id, exc)
             return False
 
-        # Parse joblog for resource usage data and update remaining columns
-        try:
-            resource_data = parse_joblog_resources(joblog_path)
-            if resource_data:
-                self.update_job_resources(job_id, resource_data)
-            else:
-                logging.debug("No resource data found in joblog: %s", joblog_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            logging.debug(
-                "Joblog resource parse failed for %s (%s): %s",
-                job_id,
-                joblog_path,
-                exc,
-            )
+    def backfill_resources(self, limit: int = 50) -> int:
+        """Parse joblogs for recently completed jobs that have no resource data.
 
-        logging.debug(
-            "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
+        Designed to be called automatically at the start of ``qxub resources list``
+        so that terse/quiet jobs that bypassed the login-node monitor still get
+        their resource columns populated.
+
+        Returns the number of jobs successfully backfilled.
+        """
+        from .parser import (  # pylint: disable=import-outside-toplevel
+            parse_joblog_resources,
         )
-        return True
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT job_id, joblog_path FROM job_resources
+                    WHERE status IN ('completed', 'failed')
+                      AND mem_used_mb IS NULL
+                      AND joblog_path IS NOT NULL
+                    ORDER BY completed_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.debug("backfill_resources query failed: %s", exc)
+            return 0
+
+        filled = 0
+        for row in rows:
+            try:
+                data = parse_joblog_resources(row["joblog_path"])
+                if data:
+                    ok = self.update_job_resources(row["job_id"], data)
+                    if ok:
+                        filled += 1
+                        logging.debug("Backfilled resources for %s", row["job_id"])
+            except Exception as exc:  # pylint: disable=broad-except
+                logging.debug("Backfill failed for %s: %s", row["job_id"], exc)
+        return filled
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job."""

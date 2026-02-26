@@ -232,7 +232,12 @@ def execute_unified(
     try:
         cmd_str = " ".join(command)
         tags = ctx_obj.get("tags") or []
-        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str, tags=tags)
+        resource_tracker.log_job_submitted(
+            job_id=job_id,
+            command=cmd_str,
+            tags=tags,
+            joblog_path=ctx_obj.get("joblog"),
+        )
     except Exception as e:
         logging.debug("Failed to log job submission: %s", e)
 
