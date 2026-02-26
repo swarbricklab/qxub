@@ -21,11 +21,15 @@ update_job_status() {
     local exit_code="${2:-0}"
     if command -v python3 > /dev/null 2>&1; then
         python3 -c "
-import sys, os
+import sys
 sys.path.insert(0, '/g/data/a56/software/qsub_tools')
 try:
     from qxub.resources.tracker import resource_tracker
-    resource_tracker.update_job_status('${PBS_JOBID:-unknown}', '$status')
+    if '$status' == 'running':
+        resource_tracker.update_job_status('${PBS_JOBID:-unknown}', 'running')
+    else:
+        joblog = '${out%.out}.log'
+        resource_tracker.finalize_job('${PBS_JOBID:-unknown}', int('$exit_code'), joblog)
 except Exception:
     pass
 " 2>/dev/null || true

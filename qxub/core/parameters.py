@@ -98,6 +98,12 @@ def resolve_template_variables(params: Dict[str, Any]) -> Dict[str, Any]:
         name=params["name"], project=params["project"], queue=params["queue"]
     )
 
+    # Allow --log-dir CLI flag to override the configured {log_dir} template variable.
+    # This lets users redirect all output files for a single job without specifying
+    # --out, --err, and --joblog individually.
+    if params.get("log_dir"):
+        template_vars["log_dir"] = params["log_dir"]
+
     # Resolve template strings
     resolved_params = {}
     for key, value in params.items():

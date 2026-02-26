@@ -10,7 +10,7 @@ import base64
 import logging
 import os
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 import click
 
@@ -19,6 +19,18 @@ from ..history import history_manager
 from ..queue import create_queue_entry
 from ..queue.db import get_db_path
 from ..resources import resource_tracker
+
+
+def _parse_cpus_from_resources(resources: list) -> Optional[int]:
+    """Extract ncpus value from a PBS resources list like ['ncpus=2', 'mem=4gb']."""
+    import re  # pylint: disable=import-outside-toplevel
+
+    for item in resources or []:
+        for part in str(item).split(","):
+            m = re.match(r"ncpus=(\d+)", part.strip())
+            if m:
+                return int(m.group(1))
+    return None
 
 
 class ExecutionContext:
@@ -232,7 +244,14 @@ def execute_unified(
     try:
         cmd_str = " ".join(command)
         tags = ctx_obj.get("tags") or []
-        resource_tracker.log_job_submitted(job_id=job_id, command=cmd_str, tags=tags)
+        resource_tracker.log_job_submitted(
+            job_id=job_id,
+            command=cmd_str,
+            tags=tags,
+            joblog_path=ctx_obj.get("joblog"),
+            queue=ctx_obj.get("queue"),
+            cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
+        )
     except Exception as e:
         logging.debug("Failed to log job submission: %s", e)
 

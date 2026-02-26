@@ -17,7 +17,6 @@ import click
 
 from ..core.scheduler import monitor_job_single_thread, print_status, qsub
 from ..history import history_manager
-from ..resources import resource_tracker
 
 
 def expand_submission_variables(cmd_str: str) -> str:
@@ -342,17 +341,6 @@ def submit_and_monitor_job(
         history_manager.log_execution(ctx, success=True, job_id=job_id)
     except Exception as e:
         logging.debug("Failed to log execution history: %s", e)
-
-    # Log job execution for resource tracking
-    try:
-        cmd_str = " ".join(command)
-        resource_tracker.log_job_resources(
-            job_id=job_id,
-            resource_data={},  # Will be populated when job completes
-            command=cmd_str,
-        )
-    except Exception as e:
-        logging.debug("Failed to log job resources: %s", e)
 
     # Exit if in quiet mode
     if ctx_obj["quiet"]:
