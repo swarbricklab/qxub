@@ -5,10 +5,10 @@ on:
   push:
     branches:
       - main
-      - 'release/**'  # All release branches
+      - dev
   pull_request:
     branches:
-      - main
+      - main  # Only run heavy tests on dev → main PRs
 
 jobs:
   test-runner-qxub:

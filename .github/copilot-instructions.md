@@ -168,7 +168,45 @@ qxub config shortcut show "dvc pull"  # Will fail or use wrong version
 - **After implementation**: Update affected documentation immediately
 - **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
 
-### Git Workflow - CRITICAL
+### Branching Model — feature → dev → main
+
+The project uses a **three-tier branching model**:
+
+| Branch | Purpose | Merges into | CI intensity |
+|--------|---------|-------------|--------------|
+| `feature/*`, `fix/*` | Individual changes | `dev` | Lightweight (lint + format) |
+| `dev` | Integration & testing | `main` | Full (lint + format + self-hosted runner tests) |
+| `main` | Stable releases | — | Full + auto-release if version bumped |
+
+#### Day-to-day workflow
+
+```bash
+# 1. Start work from dev
+git checkout dev && git pull
+git checkout -b fix/my-bug   # or feature/my-feature
+
+# 2. Work, commit, push
+git add qxub/some_file.py
+git commit -m "fix: description"
+git push origin fix/my-bug
+
+# 3. Open PR targeting dev  ← lightweight CI
+#    Merge when formatting + pylint pass
+
+# 4. Periodically: create a dev → main PR for release
+#    - Bump version in qxub/__init__.py + setup.py
+#    - Full self-hosted runner tests run automatically
+#    - Merge triggers GitHub Release + tag creation
+```
+
+#### Rules
+
+- **Feature/fix PRs always target `dev`**, never `main` directly.
+- **Version bumps happen only in the dev → main PR**, not in feature branches.
+- **`main` always reflects the latest release.** Every merge into `main` should be releasable.
+- **`dev` may contain unreleased work.** It is the integration branch.
+
+### Git Hygiene
 
 **ALWAYS stage files consciously. NEVER use `git add .`**
 
@@ -187,20 +225,12 @@ git add .
 git add -A
 ```
 
-**Why**: Blanket staging creates zombie files, commits temp scripts, and bundles unrelated changes.
-
 **Run pre-commit checks manually before committing:**
 
 ```bash
-# Run pre-commit on staged files (fast, only checks what you're committing)
-pre-commit run
-
-# This catches formatting issues before commit
-# Fix any issues, then re-stage the fixed files
-# Then commit normally
+pre-commit run        # checks staged files
+# Fix any issues, re-stage, then commit
 ```
-
-This ensures your commit succeeds on the first try. The commit hook then acts as a final safety check.
 
 ### Refactoring Workflow
 
@@ -241,17 +271,17 @@ When bumping versions for a new release, **ALWAYS update version numbers in BOTH
 1. **`qxub/__init__.py`** - Contains `__version__ = "x.y.z"`
 2. **`setup.py`** - Contains `version="x.y.z"` in the setup() call
 
+Version bumps happen **only in the dev → main merge PR**, not in feature branches:
+
 ```bash
-# Example version bump workflow:
-# 1. Edit qxub/__init__.py
-__version__ = "3.2.3"
-
-# 2. Edit setup.py
-version="3.2.3"
-
-# 3. Commit both together
+# In the dev branch, just before creating the dev → main PR:
+git checkout dev
+# Edit qxub/__init__.py  →  __version__ = "3.5.0"
+# Edit setup.py           →  version="3.5.0"
 git add qxub/__init__.py setup.py
-git commit -m "Bump version to 3.2.3"
+git commit -m "Bump version to 3.5.0"
+git push origin dev
+# Then open PR: dev → main
 ```
 
 **Critical**: The GitHub release workflow reads from `setup.py`, so both files must match!
