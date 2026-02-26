@@ -337,25 +337,19 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
             )
             return "C", None  # Assume completed if file exists but unreadable
 
-    # Check if job has started
-    if job_started_file.exists():
-        # Job started but no final_exit_code - could be:
-        # 1. Still running
-        # 2. Killed by PBS before our cleanup code ran
-        #
-        # Check for PBS job log with exit status (appears after job ends)
-        exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
-        if exit_code is not None:
-            # PBS killed the job before cleanup code ran
-            logging.debug(
-                f"Found PBS exit status {exit_code} for job {job_id} in log file"
-            )
-            if exit_code == 0:
-                return "C", exit_code
-            else:
-                return "F", exit_code
+    # Check for PBS job log with exit status (appears after job ends).
+    # This covers two cases:
+    # 1. job_started_ exists: PBS killed the job before our cleanup code ran.
+    # 2. job_started_ missing: job failed before qxub's startup code could write
+    #    the file (e.g. conda activate failed, module load error, OOM at startup).
+    #    PBS still writes the resource-usage block, so we can detect completion.
+    exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
+    if exit_code is not None:
+        logging.debug(f"Found PBS exit status {exit_code} for job {job_id} in log file")
+        return ("C" if exit_code == 0 else "F"), exit_code
 
-        # No PBS log exit status found - job is still running
+    # Check if job has started (and PBS log not yet written — still running)
+    if job_started_file.exists():
         return "R", None
 
     # No status files found - job is either queued or unknown
