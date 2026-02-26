@@ -558,6 +558,8 @@ class ResourceTracker:
         tags: Optional[Sequence[str]] = None,
         username: Optional[str] = None,
         joblog_path: Optional[str] = None,
+        queue: Optional[str] = None,
+        cpus_requested: Optional[int] = None,
     ) -> bool:
         """Log initial job submission."""
         try:
@@ -576,8 +578,9 @@ class ResourceTracker:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
-                    (job_id, timestamp, command, status, submitted_at, last_status_update, tags, username, joblog_path)
-                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?)
+                    (job_id, timestamp, command, status, submitted_at, last_status_update,
+                     tags, username, joblog_path, queue, cpus_requested)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -588,6 +591,8 @@ class ResourceTracker:
                         tags_json,
                         username,
                         joblog_path,
+                        queue,
+                        cpus_requested,
                     ),
                 )
                 conn.commit()
