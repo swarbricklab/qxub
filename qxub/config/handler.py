@@ -78,6 +78,10 @@ def resolve_template_variables(params, config_manager):
         name=params["name"], project=params["project"], queue=params["queue"]
     )
 
+    # Allow --log-dir CLI flag to override the configured {log_dir} template variable.
+    if params.get("log_dir"):
+        template_vars["log_dir"] = params["log_dir"]
+
     # Resolve template strings
     resolved_params = {}
     for key, value in params.items():

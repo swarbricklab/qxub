@@ -1,6 +1,5 @@
 # Core utilities package
 
-from .parameters import build_qsub_options, process_parameters
 from .scheduler import (
     get_default_status_dir,
     get_job_resource_data,
@@ -23,7 +22,4 @@ __all__ = [
     "get_default_status_dir",
     # Template functions
     "get_template",
-    # Parameter functions
-    "build_qsub_options",
-    "process_parameters",
 ]
