@@ -337,32 +337,26 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
             )
             return "C", None  # Assume completed if file exists but unreadable
 
-    # Check if job has started
-    if job_started_file.exists():
-        # Job started but no final_exit_code - could be:
-        # 1. Still running
-        # 2. Killed by PBS before our cleanup code ran
-        #
-        # Check for PBS job log with exit status (appears after job ends)
-        exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
-        if exit_code is not None:
-            # PBS killed the job before cleanup code ran
-            logging.debug(
-                f"Found PBS exit status {exit_code} for job {job_id} in log file"
-            )
-            if exit_code == 0:
-                return "C", exit_code
-            else:
-                return "F", exit_code
+    # Check for PBS job log with exit status (appears after job ends).
+    # This covers two cases:
+    # 1. job_started_ exists: PBS killed the job before our cleanup code ran.
+    # 2. job_started_ missing: job failed before qxub's startup code could write
+    #    the file (e.g. conda activate failed, module load error, OOM at startup).
+    #    PBS still writes the resource-usage block, so we can detect completion.
+    exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
+    if exit_code is not None:
+        logging.debug(f"Found PBS exit status {exit_code} for job {job_id} in log file")
+        return ("C" if exit_code == 0 else "F"), exit_code
 
-        # No PBS log exit status found - job is still running
+    # Check if job has started (and PBS log not yet written — still running)
+    if job_started_file.exists():
         return "R", None
 
     # No status files found - job is either queued or unknown
     return "Q", None
 
 
-def _read_exit_from_joblog_file(joblog_path):
+def read_exit_from_joblog_file(joblog_path):
     """
     Read the PBS exit status from a specific job log file.
 
@@ -1225,7 +1219,7 @@ def stream_job_output_with_status_files(
             )
             if past_walltime and due_for_check:
                 last_joblog_check = now
-                pbs_exit = _read_exit_from_joblog_file(joblog_file)
+                pbs_exit = read_exit_from_joblog_file(joblog_file)
                 if pbs_exit is not None:
                     # Flush whatever partial output the job managed to write
                     if not quiet and os.path.exists(out_file):

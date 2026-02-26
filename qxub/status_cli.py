@@ -290,7 +290,37 @@ def check(job_id, output_format, snakemake):
     # long-running qxub process watching them (e.g. --terse Snakemake profiles)
     # without spamming the scheduler with qstat calls.
     if status in ("submitted", "running"):
-        file_status, file_exit_code = job_status_from_files(job_id)
+        # If the DB has a known joblog path, check it directly.
+        # This handles jobs submitted with --log-dir (relative or absolute path)
+        # that the directory scan in job_status_from_files cannot locate.
+        joblog_path = job_info.get("joblog_path")
+        if joblog_path:
+            import os as _os
+
+            from .core.scheduler import read_exit_from_joblog_file
+
+            # Resolve relative joblog paths using the working_dir from the
+            # queue table (the CWD at submission time). New jobs store
+            # absolute paths, but older DB entries may still have relative ones.
+            if not _os.path.isabs(joblog_path):
+                try:
+                    from .queue.db import get_queue_entry
+
+                    queue_entry = get_queue_entry(job_id)
+                    working_dir = (queue_entry or {}).get("working_dir")
+                    if working_dir:
+                        joblog_path = _os.path.join(working_dir, joblog_path)
+                except Exception:
+                    pass  # Fall through to directory-scan fallback
+
+            direct_exit = read_exit_from_joblog_file(joblog_path)
+            if direct_exit is not None:
+                file_status = "C" if direct_exit == 0 else "F"
+                file_exit_code = direct_exit
+            else:
+                file_status, file_exit_code = job_status_from_files(job_id)
+        else:
+            file_status, file_exit_code = job_status_from_files(job_id)
         if file_status in ("C", "F"):
             # Job has finished according to status files - override DB status
             status = "completed" if file_status == "C" else "failed"

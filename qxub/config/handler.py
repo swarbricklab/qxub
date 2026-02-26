@@ -113,6 +113,12 @@ def process_job_configuration(params, config_manager):
     if isinstance(joblog, str) and "{" in joblog:
         joblog = config_manager.resolve_templates(joblog, template_vars)
 
+    # Ensure joblog is always an absolute path so that status checks
+    # (which may run from a different CWD) can locate the file.
+    if joblog and not os.path.isabs(joblog):
+        execdir = params.get("execdir") or os.getcwd()
+        joblog = os.path.join(execdir, joblog)
+
     params["joblog"] = joblog
 
     return params
