@@ -356,7 +356,7 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     return "Q", None
 
 
-def _read_exit_from_joblog_file(joblog_path):
+def read_exit_from_joblog_file(joblog_path):
     """
     Read the PBS exit status from a specific job log file.
 
@@ -1219,7 +1219,7 @@ def stream_job_output_with_status_files(
             )
             if past_walltime and due_for_check:
                 last_joblog_check = now
-                pbs_exit = _read_exit_from_joblog_file(joblog_file)
+                pbs_exit = read_exit_from_joblog_file(joblog_file)
                 if pbs_exit is not None:
                     # Flush whatever partial output the job managed to write
                     if not quiet and os.path.exists(out_file):

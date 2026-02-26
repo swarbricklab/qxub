@@ -894,7 +894,7 @@ class ResourceTracker:
                 cursor = conn.execute(
                     """
                     SELECT job_id, status, command, submitted_at, started_at,
-                           completed_at, last_status_update, exit_code
+                           completed_at, last_status_update, exit_code, joblog_path
                     FROM job_resources WHERE job_id=?
                     """,
                     (job_id,),
