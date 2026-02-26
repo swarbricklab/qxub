@@ -103,6 +103,10 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Increase verbosity (use -v, -vv, -vvv for more detail)",
 )
 @click.option(
+    "--log-dir",
+    help="Override log directory for this job's .out/.err/.log files (overrides configured {log_dir})",
+)
+@click.option(
     "--out",
     help="Output file path (default: configured or {log_dir}/{name}_{timestamp}.out)",
 )
@@ -606,6 +610,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "queue": options["queue"],
         "name": options["name"],
         "project": options["project"],
+        "log_dir": options.get("log_dir"),  # CLI override for {log_dir} template var
         "out": options["out"],
         "err": options["err"],
         "joblog": None,  # Will be set by config system
