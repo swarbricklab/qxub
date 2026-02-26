@@ -121,6 +121,16 @@ def process_job_configuration(params, config_manager):
 
     params["joblog"] = joblog
 
+    # Ensure out/err are always absolute paths.  The PBS jobscripts derive
+    # STATUS_DIR from $out *before* ``cd $cwd``, so a relative path would
+    # resolve against $HOME (the PBS default CWD) instead of the intended
+    # execution directory, causing status file writes to fail after the cd.
+    execdir = params.get("execdir") or os.getcwd()
+    for key in ("out", "err"):
+        val = params.get(key)
+        if val and not os.path.isabs(str(val)):
+            params[key] = os.path.join(execdir, str(val))
+
     return params
 
 
