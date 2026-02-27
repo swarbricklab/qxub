@@ -5,6 +5,7 @@ Provides the `qxub status` command for viewing job status without qstat polling.
 """
 
 import json
+import logging
 import sys
 from datetime import datetime, timedelta
 
@@ -15,6 +16,7 @@ from rich.table import Table
 from .core.scheduler import job_status_from_files
 from .queue import is_virtual_id, resolve_virtual_id
 from .resources import resource_tracker
+from .resources.tracker import DatabaseError
 
 console = Console()
 
@@ -274,9 +276,33 @@ def check(job_id, output_format, snakemake):
         job_id = f"{job_id}.gadi-pbs"
 
     # Get job status from database
-    job_info = resource_tracker.get_job_status(job_id)
+    try:
+        job_info = resource_tracker.get_job_status(job_id)
+    except DatabaseError as exc:
+        # Transient DB failure — for snakemake mode, report "running" so the
+        # workflow engine retries instead of aborting.  For other formats,
+        # surface the error but still exit 0 to avoid false-positive failures.
+        logging.debug("Database error during status check: %s", exc)
+        if output_format == "snakemake":
+            print("running")
+            return
+        if output_format == "json":
+            print(
+                json.dumps(
+                    {"error": "database temporarily unavailable", "job_id": job_id}
+                )
+            )
+        else:
+            sys.stderr.write(f"qxub: database temporarily unavailable for {job_id}\n")
+        sys.exit(1)
 
     if not job_info:
+        # Job genuinely not found — for snakemake mode, assume it is still
+        # queued/pending (recently submitted jobs may not have been committed
+        # to the DB yet).  This avoids Snakemake aborting the entire workflow.
+        if output_format == "snakemake":
+            print("running")
+            return
         if output_format == "json":
             print(json.dumps({"error": "Job not found", "job_id": job_id}))
         else:
