@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -70,6 +71,21 @@ def _resolve_tracker_db_path() -> Path:
     return resolved
 
 
+# Default timeout (seconds) for all sqlite connections.  The shared DB on
+# /g/data can experience lock contention when many concurrent qxtat check
+# processes race on the same file.  30 s is generous enough to ride out
+# filesystem latency spikes on Gadi /scratch.
+_SQLITE_TIMEOUT = 30
+
+
+class DatabaseError(Exception):
+    """Raised when a sqlite query fails due to a transient or I/O error.
+
+    Distinct from a *missing row* (which returns ``None``).  Callers can
+    catch this to distinguish "DB unreachable" from "job not found".
+    """
+
+
 class ResourceTracker:
     """Simple resource tracking focused on efficiency metrics."""
 
@@ -83,7 +99,10 @@ class ResourceTracker:
 
     def _init_database(self):
         """Initialize SQLite database with resource tracking table."""
-        with sqlite3.connect(self.db_path) as conn:
+        with sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT) as conn:
+            # WAL mode allows concurrent readers even during writes,
+            # eliminating most lock-contention issues.
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS job_resources (
@@ -887,23 +906,45 @@ class ResourceTracker:
         return filled
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get current status of a specific job."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute(
-                    """
-                    SELECT job_id, status, command, submitted_at, started_at,
-                           completed_at, last_status_update, exit_code, joblog_path
-                    FROM job_resources WHERE job_id=?
-                    """,
-                    (job_id,),
+        """Get current status of a specific job.
+
+        Returns ``None`` when the job is genuinely not in the database.
+        Raises :class:`DatabaseError` on transient sqlite failures so the
+        caller can distinguish "not found" from "DB unreachable".
+
+        Retries up to 3 times with exponential backoff to tolerate
+        filesystem latency spikes and lock contention.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                with sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.execute(
+                        """
+                        SELECT job_id, status, command, submitted_at, started_at,
+                               completed_at, last_status_update, exit_code, joblog_path
+                        FROM job_resources WHERE job_id=?
+                        """,
+                        (job_id,),
+                    )
+                    row = cursor.fetchone()
+                    return dict(row) if row else None
+            except Exception as e:  # pylint: disable=broad-except
+                last_exc = e
+                logging.debug(
+                    "get_job_status attempt %d failed for %s: %s",
+                    attempt + 1,
+                    job_id,
+                    e,
                 )
-                row = cursor.fetchone()
-                return dict(row) if row else None
-        except Exception as e:
-            logging.debug("Failed to get job status for %s: %s", job_id, e)
-            return None
+                if attempt < 2:
+                    time.sleep(0.5 * (2**attempt))  # 0.5 s, 1 s
+
+        # All retries exhausted — raise so the caller knows the DB failed.
+        raise DatabaseError(
+            f"Failed to query job status for {job_id} after 3 attempts: {last_exc}"
+        ) from last_exc
 
     def get_jobs_by_status(
         self, status: str = None, limit: int = None
