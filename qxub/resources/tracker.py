@@ -97,9 +97,20 @@ class ResourceTracker:
         self.db_path = Path(db_path)
         self._init_database()
 
+    def _connect(self, timeout: float = _SQLITE_TIMEOUT):
+        """Return a new SQLite connection with mmap disabled.
+
+        Disabling mmap (``PRAGMA mmap_size=0``) prevents SIGBUS crashes
+        on shared/network filesystems (Lustre, GPFS) where concurrent
+        writers can corrupt memory-mapped pages.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=timeout)
+        conn.execute("PRAGMA mmap_size=0")
+        return conn
+
     def _init_database(self):
         """Initialize SQLite database with resource tracking table."""
-        with sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT) as conn:
+        with self._connect() as conn:
             # WAL mode allows concurrent readers even during writes,
             # eliminating most lock-contention issues.
             conn.execute("PRAGMA journal_mode=WAL")
@@ -278,7 +289,7 @@ class ResourceTracker:
             }
 
             # Insert into database
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 placeholders = ", ".join(["?" for _ in record])
                 columns = ", ".join(record.keys())
 
@@ -401,7 +412,7 @@ class ResourceTracker:
 
             values.append(job_id)  # For WHERE clause
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 # Legacy table
                 sql = f"UPDATE job_resources SET {', '.join(set_clauses)} WHERE job_id = ?"
                 result = conn.execute(sql, values)
@@ -535,14 +546,14 @@ class ResourceTracker:
         """
         params.append(limit)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
     def get_efficiency_stats(self) -> Dict[str, Any]:
         """Get overall efficiency statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """
                 SELECT
@@ -577,7 +588,7 @@ class ResourceTracker:
         self, efficiency_threshold: float = 50.0, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Get jobs with low resource efficiency."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -602,7 +613,7 @@ class ResourceTracker:
 
     def get_resource_trends(self, days: int = 30) -> Dict[str, Any]:
         """Get resource usage trends over time."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """
                 SELECT
@@ -655,7 +666,7 @@ class ResourceTracker:
                 except Exception:
                     username = ""
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 # Legacy table
                 conn.execute(
                     """
@@ -713,7 +724,7 @@ class ResourceTracker:
         try:
             now = datetime.now().isoformat()
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 # Legacy table
                 conn.execute(
                     "UPDATE job_resources SET status=?, last_status_update=? WHERE job_id=?",
@@ -759,7 +770,7 @@ class ResourceTracker:
     def update_job_exit_code(self, job_id: str, exit_code: int) -> bool:
         """Update the exit code for a job."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     "UPDATE job_resources SET exit_code=? WHERE job_id=?",
                     (exit_code, job_id),
@@ -785,7 +796,7 @@ class ResourceTracker:
         now = datetime.now().isoformat()
         status = "completed" if exit_code == 0 else "failed"
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 # Legacy table
                 conn.execute(
                     """UPDATE job_resources
@@ -852,7 +863,7 @@ class ResourceTracker:
     def _resolve_log_dirs(self) -> List[str]:
         """Return candidate log directories derived from already-stored paths."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT DISTINCT joblog_path FROM job_resources"
                     " WHERE joblog_path IS NOT NULL LIMIT 20"
@@ -892,7 +903,7 @@ class ResourceTracker:
 
         # ---- Phase 1: discover joblog paths for jobs that lack them ----------
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 missing = conn.execute(
                     """
                     SELECT job_id FROM job_resources
@@ -919,7 +930,7 @@ class ResourceTracker:
                 }
                 if matched:
                     try:
-                        with sqlite3.connect(self.db_path) as conn:
+                        with self._connect() as conn:
                             conn.executemany(
                                 "UPDATE job_resources SET joblog_path=?"
                                 " WHERE job_id=? AND joblog_path IS NULL",
@@ -935,7 +946,7 @@ class ResourceTracker:
 
         # ---- Phase 2: parse joblogs and fill resource columns ---------------
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     """
@@ -981,7 +992,7 @@ class ResourceTracker:
         last_exc: Optional[Exception] = None
         for attempt in range(3):
             try:
-                with sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT) as conn:
+                with self._connect() as conn:
                     conn.row_factory = sqlite3.Row
 
                     # Try unified queue table first (new jobs)
@@ -1028,7 +1039,7 @@ class ResourceTracker:
     ) -> List[Dict[str, Any]]:
         """Get jobs filtered by status."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
 
                 if status:
@@ -1061,7 +1072,7 @@ class ResourceTracker:
     def get_status_summary(self) -> Dict[str, int]:
         """Get counts of jobs by status."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     SELECT status, COUNT(*) as count
@@ -1078,7 +1089,7 @@ class ResourceTracker:
     def cleanup_old_jobs(self, days_old: int = 30) -> int:
         """Remove job records older than specified days. Returns count of deleted jobs."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     DELETE FROM job_resources
@@ -1101,7 +1112,7 @@ class ResourceTracker:
         """Export resource data to CSV."""
         import csv
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             query = "SELECT * FROM job_resources ORDER BY timestamp DESC"
             if limit:
                 query += f" LIMIT {limit}"
