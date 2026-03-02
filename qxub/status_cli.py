@@ -244,7 +244,7 @@ def check(job_id, output_format, snakemake):
 
         virtual_status = entry.get("status", "unknown")
 
-        if virtual_status == "pending":
+        if virtual_status in ("initiated", "pending"):
             # Still waiting to be dispatched to PBS
             _output_status("running", None, job_id, output_format)
             return
@@ -437,7 +437,7 @@ def _output_status(
     if output_format == "snakemake":
         if status == "completed":
             print("success" if (exit_code is None or exit_code == 0) else "failed")
-        elif status in ("submitted", "running"):
+        elif status in ("initiated", "dispatched", "submitted", "running"):
             print("running")
         else:
             print("failed")
@@ -454,7 +454,7 @@ def _output_status(
     elif output_format == "exitcode":
         if status == "completed":
             sys.exit(2 if (exit_code is None or exit_code == 0) else 1)
-        elif status in ("submitted", "running"):
+        elif status in ("initiated", "dispatched", "submitted", "running"):
             sys.exit(0)
         else:
             sys.exit(1)
@@ -463,6 +463,8 @@ def _output_status(
 def _format_status(status):
     """Format status with emoji and color."""
     status_map = {
+        "initiated": "⚪ Initiated",
+        "dispatched": "🟠 Dispatched",
         "submitted": "🟡 Submitted",
         "running": "🔵 Running",
         "completed": "✅ Completed",
