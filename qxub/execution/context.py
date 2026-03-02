@@ -16,7 +16,7 @@ import click
 
 from ..core.scheduler import qsub
 from ..history import history_manager
-from ..queue import create_queue_entry
+from ..queue import create_queue_entry, update_queue_entry
 from ..queue.db import get_db_path
 from ..resources import resource_tracker
 
@@ -214,36 +214,65 @@ def execute_unified(
             logging.debug("Failed to log execution history: %s", e)
         return
 
-    # Submit job
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    # ------------------------------------------------------------------
+    # Pre-qsub: create queue entry with virtual ID (status = initiated)
+    # ------------------------------------------------------------------
+    cmd_str = " ".join(command)
+    tags = ctx_obj.get("tags") or []
+    exec_context_info = {
+        "type": execution_context.context_type,
+        "value": (
+            execution_context.context_value
+            if not isinstance(execution_context.context_value, list)
+            else " ".join(execution_context.context_value)
+        ),
+    }
 
-    # Register the job in the queue DB (for tracking; virtual ID not emitted yet —
-    # Phase 3 pending-dispatch will be the first time callers see a virtual ID)
+    virtual_id = None
     try:
-        cmd_str = " ".join(command)
-        tags = ctx_obj.get("tags") or []
-        exec_context_info = {
-            "type": execution_context.context_type,
-            "value": (
-                execution_context.context_value
-                if not isinstance(execution_context.context_value, list)
-                else " ".join(execution_context.context_value)
-            ),
-        }
-        create_queue_entry(
-            pbs_job_id=job_id,
+        virtual_id = create_queue_entry(
             command=cmd_str,
+            pbs_job_id=None,
             tags=tags,
             working_dir=ctx_obj.get("execdir") or os.getcwd(),
             exec_context=exec_context_info,
+            joblog_path=ctx_obj.get("joblog"),
+            queue_name=ctx_obj.get("queue"),
+            cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
         )
     except Exception as e:
         logging.debug("Failed to create queue entry: %s", e)
 
+    # ------------------------------------------------------------------
+    # Submit job to PBS
+    # ------------------------------------------------------------------
+    try:
+        job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    except Exception as qsub_exc:
+        # qsub failed — mark entry as failed and re-raise
+        if virtual_id:
+            try:
+                update_queue_entry(virtual_id, status="failed")
+            except Exception:
+                pass
+        raise qsub_exc
+
+    # ------------------------------------------------------------------
+    # Post-qsub: fill in real PBS job ID (status → dispatched)
+    # ------------------------------------------------------------------
+    if virtual_id:
+        try:
+            update_queue_entry(
+                virtual_id,
+                pbs_job_id=job_id,
+                status="dispatched",
+                joblog_path=ctx_obj.get("joblog"),
+            )
+        except Exception as e:
+            logging.debug("Failed to update queue entry: %s", e)
+
     # Log job submission for status and resource tracking (do this before terse return)
     try:
-        cmd_str = " ".join(command)
-        tags = ctx_obj.get("tags") or []
         resource_tracker.log_job_submitted(
             job_id=job_id,
             command=cmd_str,

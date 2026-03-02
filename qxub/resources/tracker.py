@@ -402,6 +402,7 @@ class ResourceTracker:
             values.append(job_id)  # For WHERE clause
 
             with sqlite3.connect(self.db_path) as conn:
+                # Legacy table
                 sql = f"UPDATE job_resources SET {', '.join(set_clauses)} WHERE job_id = ?"
                 result = conn.execute(sql, values)
 
@@ -409,7 +410,13 @@ class ResourceTracker:
                     logging.debug(
                         "No existing record found to update for job %s", job_id
                     )
-                    return False
+
+                # Unified queue table — same columns, different WHERE
+                queue_values = values[:-1] + [job_id]
+                queue_sql = (
+                    f"UPDATE queue SET {', '.join(set_clauses)} WHERE pbs_job_id = ?"
+                )
+                conn.execute(queue_sql, queue_values)
 
                 conn.commit()
 
@@ -630,7 +637,12 @@ class ResourceTracker:
         queue: Optional[str] = None,
         cpus_requested: Optional[int] = None,
     ) -> bool:
-        """Log initial job submission."""
+        """Log initial job submission.
+
+        Writes to the legacy ``job_resources`` table **and** updates the
+        unified ``queue`` row (looked up by ``pbs_job_id``) so that both
+        tables stay in sync during the transition period.
+        """
         try:
             now = datetime.now().isoformat()
             clean_command = self._clean_command(command)
@@ -644,6 +656,7 @@ class ResourceTracker:
                     username = ""
 
             with sqlite3.connect(self.db_path) as conn:
+                # Legacy table
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
@@ -664,6 +677,21 @@ class ResourceTracker:
                         cpus_requested,
                     ),
                 )
+
+                # Unified queue table — update the row that was created
+                # by create_queue_entry() before qsub.
+                conn.execute(
+                    """
+                    UPDATE queue
+                    SET status='submitted', last_status_update=?,
+                        username=?, joblog_path=COALESCE(joblog_path, ?),
+                        queue_name=COALESCE(queue_name, ?),
+                        cpus_requested=COALESCE(cpus_requested, ?)
+                    WHERE pbs_job_id=?
+                    """,
+                    (now, username, joblog_path, queue, cpus_requested, job_id),
+                )
+
                 conn.commit()
 
             logging.debug(
@@ -678,12 +706,15 @@ class ResourceTracker:
             return False
 
     def update_job_status(self, job_id: str, status: str) -> bool:
-        """Update job status (submitted -> running -> completed/failed/cancelled)."""
+        """Update job status (submitted -> running -> completed/failed/cancelled).
+
+        Writes to both ``job_resources`` (legacy) and unified ``queue`` table.
+        """
         try:
             now = datetime.now().isoformat()
 
             with sqlite3.connect(self.db_path) as conn:
-                # Update status and timestamp
+                # Legacy table
                 conn.execute(
                     "UPDATE job_resources SET status=?, last_status_update=? WHERE job_id=?",
                     (status, now, job_id),
@@ -698,6 +729,22 @@ class ResourceTracker:
                 elif status in ("completed", "failed"):
                     conn.execute(
                         "UPDATE job_resources SET completed_at=? WHERE job_id=?",
+                        (now, job_id),
+                    )
+
+                # Unified queue table
+                conn.execute(
+                    "UPDATE queue SET status=?, last_status_update=? WHERE pbs_job_id=?",
+                    (status, now, job_id),
+                )
+                if status == "running":
+                    conn.execute(
+                        "UPDATE queue SET started_at=? WHERE pbs_job_id=?",
+                        (now, job_id),
+                    )
+                elif status in ("completed", "failed"):
+                    conn.execute(
+                        "UPDATE queue SET completed_at=? WHERE pbs_job_id=?",
                         (now, job_id),
                     )
 
@@ -732,11 +779,14 @@ class ResourceTracker:
         only appends the resource section to the joblog AFTER the script exits.
         The joblog_path is stored so that ``backfill_resources()`` can pick it
         up the next time ``qxub resources list`` is run.
+
+        Writes to both ``job_resources`` (legacy) and unified ``queue`` table.
         """
         now = datetime.now().isoformat()
         status = "completed" if exit_code == 0 else "failed"
         try:
             with sqlite3.connect(self.db_path) as conn:
+                # Legacy table
                 conn.execute(
                     """UPDATE job_resources
                        SET status=?, exit_code=?, completed_at=?, last_status_update=?,
@@ -744,6 +794,16 @@ class ResourceTracker:
                        WHERE job_id=?""",
                     (status, exit_code, now, now, joblog_path, job_id),
                 )
+
+                # Unified queue table
+                conn.execute(
+                    """UPDATE queue
+                       SET status=?, exit_code=?, completed_at=?, last_status_update=?,
+                           joblog_path=COALESCE(joblog_path, ?)
+                       WHERE pbs_job_id=?""",
+                    (status, exit_code, now, now, joblog_path, job_id),
+                )
+
                 conn.commit()
             logging.debug(
                 "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
@@ -908,6 +968,9 @@ class ResourceTracker:
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job.
 
+        Checks the unified ``queue`` table first (by ``pbs_job_id``), then
+        falls back to the legacy ``job_resources`` table.
+
         Returns ``None`` when the job is genuinely not in the database.
         Raises :class:`DatabaseError` on transient sqlite failures so the
         caller can distinguish "not found" from "DB unreachable".
@@ -920,15 +983,29 @@ class ResourceTracker:
             try:
                 with sqlite3.connect(self.db_path, timeout=_SQLITE_TIMEOUT) as conn:
                     conn.row_factory = sqlite3.Row
-                    cursor = conn.execute(
+
+                    # Try unified queue table first (new jobs)
+                    row = conn.execute(
+                        """
+                        SELECT pbs_job_id AS job_id, status, command,
+                               submitted_at, started_at, completed_at,
+                               last_status_update, exit_code, joblog_path
+                        FROM queue WHERE pbs_job_id=?
+                        """,
+                        (job_id,),
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+
+                    # Fall back to legacy job_resources table
+                    row = conn.execute(
                         """
                         SELECT job_id, status, command, submitted_at, started_at,
                                completed_at, last_status_update, exit_code, joblog_path
                         FROM job_resources WHERE job_id=?
                         """,
                         (job_id,),
-                    )
-                    row = cursor.fetchone()
+                    ).fetchone()
                     return dict(row) if row else None
             except Exception as e:  # pylint: disable=broad-except
                 last_exc = e
