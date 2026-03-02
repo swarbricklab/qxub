@@ -77,6 +77,7 @@ def get_connection(db_path: Optional[Path] = None):
     conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size=0")
     conn.row_factory = sqlite3.Row
 
     try:
