@@ -196,6 +196,20 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
                 self.coordinator.signal_spinner_cleared()
 
 
+class QsubError(Exception):
+    """Raised when a ``qsub`` submission fails.
+
+    Attributes:
+        exit_code:  The process exit code returned by the ``qsub`` command.
+        stderr:     The stderr output captured from the ``qsub`` process.
+    """
+
+    def __init__(self, message: str, exit_code: int = 1, stderr: str = ""):
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.stderr = stderr
+
+
 def qsub(cmd, quiet=False):
     """
     Submits a job via qsub based on the given command (cmd)
@@ -206,11 +220,13 @@ def qsub(cmd, quiet=False):
 
     Returns:
         The job id for the submitted job
+
+    Raises:
+        QsubError: If the qsub command fails or the command is not a qsub command.
     """
     # Make sure that this is a qsub cmd -- don't pass on random commands!
     if not cmd[:4] == "qsub":
-        click.echo("Expected qsub comment. Exiting")
-        sys.exit(1)
+        raise QsubError("Expected qsub command, got something else", exit_code=1)
 
     # Submit job directly without spinner (spinner is handled in monitor)
     # pylint: disable=W1510
@@ -219,13 +235,13 @@ def qsub(cmd, quiet=False):
     )
     if result.returncode != 0:
         logging.debug("Job submission failed")
-        click.echo(result.stderr)
-
         # Map PBS validation errors to exit code 2 for consistency
-        if result.returncode == 166:  # PBS validation error
-            sys.exit(2)
-        else:
-            sys.exit(result.returncode)
+        exit_code = 2 if result.returncode == 166 else result.returncode
+        raise QsubError(
+            f"qsub failed (exit {exit_code}): {result.stderr.strip()}",
+            exit_code=exit_code,
+            stderr=result.stderr,
+        )
     else:
         logging.debug("Job submitted successfully")
         return result.stdout.rstrip("\n")

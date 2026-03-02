@@ -22,6 +22,9 @@ Architecture:
 - Platform-aware execution routing (local vs remote)
 """
 
+# Re-export QsubError so callers can catch it
+from ..core.scheduler import QsubError
+
 # Unified execution context system
 from .context import (
     ExecutionContext,
@@ -57,6 +60,9 @@ from .mode import (
     validate_remote_config,
 )
 
+# Programmatic submission API
+from .submit import SubmitResult, submit_job
+
 # Public API exports
 __all__ = [
     # Core execution functions
@@ -82,6 +88,10 @@ __all__ = [
     "get_execution_mode",
     "get_remote_config",
     "validate_remote_config",
+    # Programmatic submission API
+    "submit_job",
+    "SubmitResult",
+    "QsubError",
 ]
 
 

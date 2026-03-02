@@ -14,7 +14,7 @@ from typing import List, Optional, Union
 
 import click
 
-from ..core.scheduler import qsub
+from ..core.scheduler import QsubError, qsub
 from ..history import history_manager
 from ..queue import create_queue_entry, update_queue_entry
 from ..queue.db import get_db_path
@@ -248,14 +248,26 @@ def execute_unified(
     # ------------------------------------------------------------------
     try:
         job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
-    except Exception as qsub_exc:
+    except QsubError as qsub_exc:
         # qsub failed — mark entry as failed and re-raise
         if virtual_id:
             try:
                 update_queue_entry(virtual_id, status="failed")
             except Exception:
                 pass
-        raise qsub_exc
+        # In CLI mode, display the error and exit with the PBS exit code
+        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc))
+        import sys as _sys
+
+        _sys.exit(qsub_exc.exit_code)
+    except Exception as exc:
+        # Unexpected error — mark entry as failed and re-raise
+        if virtual_id:
+            try:
+                update_queue_entry(virtual_id, status="failed")
+            except Exception:
+                pass
+        raise exc
 
     # ------------------------------------------------------------------
     # Post-qsub: fill in real PBS job ID (status → dispatched)
