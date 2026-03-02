@@ -20,7 +20,13 @@ try:
 except ImportError:
     pass
 
-__version__ = "3.5.0.dev2"
+__version__ = "3.5.0.dev3"
+
+# Library-standard NullHandler: prevents "No handler found" warnings and
+# avoids triggering basicConfig() when qxub is used as a library.
+import logging
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 # Import main CLI
 from . import cli as cli_module
@@ -29,11 +35,8 @@ qxub = cli_module.qxub
 
 # Import remote execution components (v3.3+)
 try:
-    from .remote import (  # noqa: F401
-        PlatformRemoteExecutor,
-        RemoteExecutionError,
-        build_remote_command,
-    )
+    from .remote import PlatformRemoteExecutor  # noqa: F401
+    from .remote import RemoteExecutionError, build_remote_command
 
     __all__ = [
         "qxub",
@@ -57,19 +60,14 @@ from .core import scheduler  # noqa: F401,E402
 try:
     # Import key resource utilities for backwards compatibility
     # Import key config components for backwards compatibility
-    from .config import (  # noqa: F401
-        ConfigManager,
-        ShortcutManager,
-        config_manager,
-        get_config,
-        set_config,
-    )
+    from .config import ShortcutManager  # noqa: F401
+    from .config import ConfigManager, config_manager, get_config, set_config
 
     # Import key history components for backwards compatibility
     from .history import HistoryManager, history_logger  # noqa: F401
-    from .resources import (  # noqa: F401
+    from .resources import ResourceTracker  # noqa: F401
+    from .resources import (
         ResourceMapper,
-        ResourceTracker,
         format_memory_size,
         format_walltime,
         parse_memory_size,

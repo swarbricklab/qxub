@@ -7,6 +7,8 @@ and blocks until all jobs are complete.
 """
 
 import logging
+
+logger = logging.getLogger(__name__)
 import signal
 import sys
 import threading
@@ -83,7 +85,7 @@ class MultiJobMonitor:
 
     def _signal_handler(self, signum, frame):
         """Handle SIGINT (Ctrl+C) gracefully."""
-        logging.info("Interrupt received, shutting down monitor...")
+        logger.info("Interrupt received, shutting down monitor...")
         self.shutdown_requested.set()
 
     def _strip_suffix(self, job_id: str) -> str:
@@ -121,7 +123,7 @@ class MultiJobMonitor:
             return status, job_name, exit_code
 
         except Exception as e:
-            logging.debug(f"Failed to check status for job {job_id}: {e}")
+            logger.debug(f"Failed to check status for job {job_id}: {e}")
             return "Q", None, None  # Assume queued if we can't check
 
     def _get_status_emoji(self, status: str, exit_code: Optional[int] = None) -> str:
@@ -253,7 +255,7 @@ class MultiJobMonitor:
             click.echo("No job IDs to monitor.", err=True)
             return 1
 
-        logging.info(f"Monitoring {len(self.job_ids)} jobs...")
+        logger.info(f"Monitoring {len(self.job_ids)} jobs...")
 
         # Initial status check
         self._update_all_statuses()

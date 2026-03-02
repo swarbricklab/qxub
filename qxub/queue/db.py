@@ -13,6 +13,8 @@ concurrent access from multiple workflow nodes.
 import base64
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 import sqlite3
 import uuid
@@ -262,13 +264,13 @@ def _migrate_queue_schema(conn) -> None:
         for col_name, col_type in _QUEUE_NEW_COLUMNS:
             if col_name not in existing:
                 conn.execute(f"ALTER TABLE queue ADD COLUMN {col_name} {col_type}")
-                logging.debug("queue: added column %s %s", col_name, col_type)
+                logger.debug("queue: added column %s %s", col_name, col_type)
 
         # Backfill: change old default status 'dispatched' to keep working
         # (new default is 'initiated' but existing rows already have a status)
         conn.commit()
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("Queue schema migration failed (may be normal): %s", exc)
+        logger.debug("Queue schema migration failed (may be normal): %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +382,7 @@ def create_queue_entry(
                     (pbs_job_id, entry_id, user, now, json.dumps(tags or [])),
                 )
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("Failed to create queue entry: %s", exc)
+        logger.debug("Failed to create queue entry: %s", exc)
 
     return entry_id
 
@@ -399,7 +401,7 @@ def get_queue_entry(pbs_job_id: str, db_path: Optional[Path] = None) -> Optional
             ).fetchone()
             return dict(row) if row else None
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("get_queue_entry failed for %s: %s", pbs_job_id, exc)
+        logger.debug("get_queue_entry failed for %s: %s", pbs_job_id, exc)
         return None
 
 
@@ -470,7 +472,7 @@ def update_queue_entry(
 
             return result.rowcount > 0
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("update_queue_entry failed for %s: %s", virtual_id, exc)
+        logger.debug("update_queue_entry failed for %s: %s", virtual_id, exc)
         return False
 
 
@@ -507,7 +509,7 @@ def get_entries_bulk(
             ).fetchall()
             return {row["entry_id"]: dict(row) for row in rows}
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("get_entries_bulk failed: %s", exc)
+        logger.debug("get_entries_bulk failed: %s", exc)
         return {}
 
 
@@ -534,7 +536,7 @@ def mark_running(pbs_job_id: str, db_path: Optional[Path] = None) -> None:
                 (now, now, pbs_job_id),
             )
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("mark_running failed for %s: %s", pbs_job_id, exc)
+        logger.debug("mark_running failed for %s: %s", pbs_job_id, exc)
 
 
 def mark_complete(
@@ -568,7 +570,7 @@ def mark_complete(
                 (status, now, exit_code, now, pbs_job_id),
             )
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("mark_complete failed for %s: %s", pbs_job_id, exc)
+        logger.debug("mark_complete failed for %s: %s", pbs_job_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -603,7 +605,7 @@ def resolve_virtual_id(
             ).fetchone()
             return dict(row) if row else None
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("resolve_virtual_id failed for %s: %s", virtual_id, exc)
+        logger.debug("resolve_virtual_id failed for %s: %s", virtual_id, exc)
         return None
 
 
@@ -625,5 +627,5 @@ def get_project_job_status(
             ).fetchone()
             return dict(row) if row else None
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("get_project_job_status failed for %s: %s", pbs_job_id, exc)
+        logger.debug("get_project_job_status failed for %s: %s", pbs_job_id, exc)
         return None

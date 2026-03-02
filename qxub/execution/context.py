@@ -8,6 +8,8 @@ and execute_default functions.
 
 import base64
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 from typing import List, Optional, Union
@@ -129,22 +131,22 @@ class ExecutionContext:
         """Log debug information for this execution context."""
         # Log context parameters
         for key, value in ctx_obj.items():
-            logging.debug("Context: %s = %s", key, value)
+            logger.debug("Context: %s = %s", key, value)
 
         # Log context-specific information
         if self.context_type == "conda":
-            logging.debug("Conda environment: %s", self.context_value)
+            logger.debug("Conda environment: %s", self.context_value)
         elif self.context_type == "module":
-            logging.debug("Environment modules: %s", self.context_value)
+            logger.debug("Environment modules: %s", self.context_value)
         elif self.context_type == "singularity":
-            logging.debug("Singularity container: %s", self.context_value)
+            logger.debug("Singularity container: %s", self.context_value)
         else:
-            logging.debug("Default execution context")
+            logger.debug("Default execution context")
 
-        logging.debug("Jobscript template: %s", template)
-        logging.debug("Command: %s", command)
-        logging.debug("Pre-commands: %s", pre)
-        logging.debug("Post-commands: %s", post)
+        logger.debug("Jobscript template: %s", template)
+        logger.debug("Command: %s", command)
+        logger.debug("Pre-commands: %s", pre)
+        logger.debug("Post-commands: %s", post)
 
 
 def execute_unified(
@@ -186,7 +188,7 @@ def execute_unified(
 
     # Build final submission command
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
+    logger.info("Submission command: %s", submission_command)
 
     # Progress message: Job command constructed (skip for terse mode)
     if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
@@ -211,7 +213,7 @@ def execute_unified(
                 tags=ctx_obj.get("tags") or [],
             )
         except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
+            logger.debug("Failed to log execution history: %s", e)
         return
 
     # ------------------------------------------------------------------
@@ -241,7 +243,7 @@ def execute_unified(
             cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
         )
     except Exception as e:
-        logging.debug("Failed to create queue entry: %s", e)
+        logger.debug("Failed to create queue entry: %s", e)
 
     # ------------------------------------------------------------------
     # Submit job to PBS
@@ -281,7 +283,7 @@ def execute_unified(
                 joblog_path=ctx_obj.get("joblog"),
             )
         except Exception as e:
-            logging.debug("Failed to update queue entry: %s", e)
+            logger.debug("Failed to update queue entry: %s", e)
 
     # Log job submission for status and resource tracking (do this before terse return)
     try:
@@ -294,7 +296,7 @@ def execute_unified(
             cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
         )
     except Exception as e:
-        logging.debug("Failed to log job submission: %s", e)
+        logger.debug("Failed to log job submission: %s", e)
 
     # Log execution to history system (must happen before terse mode early return)
     try:
@@ -312,13 +314,13 @@ def execute_unified(
             tags=ctx_obj.get("tags") or [],
         )
     except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
+        logger.debug("Failed to log execution history: %s", e)
 
     # Handle terse mode - emit real PBS job ID and return immediately (for pipeline use)
     # Virtual IDs will be emitted here once Phase 3 introduces pending-dispatch.
     if ctx_obj.get("terse", False):
         click.echo(job_id)
-        logging.info(
+        logger.info(
             "Terse mode: emitted job ID %s and returning immediately",
             job_id,
         )

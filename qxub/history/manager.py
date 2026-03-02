@@ -300,7 +300,7 @@ class HistoryManager:
             # Don't let history logging break the main command
             import logging
 
-            logging.debug("Failed to log execution to history: %s", str(e))
+            logger.debug("Failed to log execution to history: %s", str(e))
             return str(int(time.time() * 1000000))
 
     def update_execution_with_resources(
@@ -342,7 +342,7 @@ class HistoryManager:
         except Exception as e:
             import logging
 
-            logging.debug("Failed to update execution with resources: %s", str(e))
+            logger.debug("Failed to update execution with resources: %s", str(e))
             return False
 
     def get_recipes(self) -> Dict[str, Any]:
