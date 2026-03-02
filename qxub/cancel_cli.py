@@ -7,6 +7,8 @@ matching with automatic database status updates.
 """
 
 import logging
+
+logger = logging.getLogger(__name__)
 import re
 import subprocess
 import time
@@ -633,7 +635,7 @@ def _wait_for_deletion(job_id: str, timeout: int, quiet: bool = False) -> bool:
 
         except Exception as e:
             if not quiet:
-                logging.debug(f"Error checking job status during deletion wait: {e}")
+                logger.debug(f"Error checking job status during deletion wait: {e}")
             break
 
     return False

@@ -7,6 +7,8 @@ Uses SQLite for simple querying and analysis.
 
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 import re
 import sqlite3
@@ -64,9 +66,9 @@ def _resolve_tracker_db_path() -> Path:
 
         try:
             shutil.copy2(str(old_path), str(resolved))
-            logging.debug("Migrated resources.db → %s", resolved)
+            logger.debug("Migrated resources.db → %s", resolved)
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Could not migrate resources.db: %s", exc)
+            logger.debug("Could not migrate resources.db: %s", exc)
 
     return resolved
 
@@ -180,9 +182,7 @@ class ResourceTracker:
             columns = [row[1] for row in cursor.fetchall()]
 
             if "status" not in columns:
-                logging.debug(
-                    "Migrating database schema to add status tracking columns"
-                )
+                logger.debug("Migrating database schema to add status tracking columns")
 
                 # Add new columns
                 conn.execute(
@@ -207,29 +207,29 @@ class ResourceTracker:
                 )
 
                 conn.commit()
-                logging.debug("Database schema migration completed")
+                logger.debug("Database schema migration completed")
 
             if "tags" not in columns:
-                logging.debug("Migrating database schema to add tags column")
+                logger.debug("Migrating database schema to add tags column")
                 conn.execute(
                     "ALTER TABLE job_resources ADD COLUMN tags TEXT DEFAULT '[]'"
                 )
                 conn.commit()
-                logging.debug("Tags column migration completed")
+                logger.debug("Tags column migration completed")
 
             if "username" not in columns:
-                logging.debug("Migrating database schema to add username column")
+                logger.debug("Migrating database schema to add username column")
                 conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
                 conn.commit()
-                logging.debug("Username column migration completed")
+                logger.debug("Username column migration completed")
 
             if "joblog_path" not in columns:
-                logging.debug("Migrating database schema to add joblog_path column")
+                logger.debug("Migrating database schema to add joblog_path column")
                 conn.execute("ALTER TABLE job_resources ADD COLUMN joblog_path TEXT")
                 conn.commit()
-                logging.debug("joblog_path column migration completed")
+                logger.debug("joblog_path column migration completed")
         except Exception as e:
-            logging.debug("Database migration failed (may be normal): %s", e)
+            logger.debug("Database migration failed (may be normal): %s", e)
 
     def log_job_resources(
         self, job_id: str, resource_data: Dict[str, Any], command: Optional[str] = None
@@ -299,11 +299,11 @@ class ResourceTracker:
                 )
                 conn.commit()
 
-            logging.debug("Logged resource data for job %s", job_id)
+            logger.debug("Logged resource data for job %s", job_id)
             return True
 
         except Exception as e:
-            logging.debug("Failed to log resource data for job %s: %s", job_id, e)
+            logger.debug("Failed to log resource data for job %s: %s", job_id, e)
             return False
 
     def update_job_resources(self, job_id: str, resource_data: Dict[str, Any]) -> bool:
@@ -407,7 +407,7 @@ class ResourceTracker:
                     values.append(value)
 
             if not set_clauses:
-                logging.debug("No valid resource data to update for job %s", job_id)
+                logger.debug("No valid resource data to update for job %s", job_id)
                 return False
 
             values.append(job_id)  # For WHERE clause
@@ -418,7 +418,7 @@ class ResourceTracker:
                 result = conn.execute(sql, values)
 
                 if result.rowcount == 0:
-                    logging.debug(
+                    logger.debug(
                         "No existing record found to update for job %s", job_id
                     )
 
@@ -431,11 +431,11 @@ class ResourceTracker:
 
                 conn.commit()
 
-            logging.debug("Updated resource data for job %s", job_id)
+            logger.debug("Updated resource data for job %s", job_id)
             return True
 
         except Exception as e:
-            logging.debug("Failed to update resource data for job %s: %s", job_id, e)
+            logger.debug("Failed to update resource data for job %s: %s", job_id, e)
             return False
 
     def _clean_command(self, command: Optional[str]) -> Optional[str]:
@@ -705,7 +705,7 @@ class ResourceTracker:
 
                 conn.commit()
 
-            logging.debug(
+            logger.debug(
                 "Logged job submission for %s (user: %s, tags: %s)",
                 job_id,
                 username,
@@ -713,7 +713,7 @@ class ResourceTracker:
             )
             return True
         except Exception as e:
-            logging.debug("Failed to log job submission for %s: %s", job_id, e)
+            logger.debug("Failed to log job submission for %s: %s", job_id, e)
             return False
 
     def update_job_status(self, job_id: str, status: str) -> bool:
@@ -761,10 +761,10 @@ class ResourceTracker:
 
                 conn.commit()
 
-            logging.debug("Updated job %s status to %s", job_id, status)
+            logger.debug("Updated job %s status to %s", job_id, status)
             return True
         except Exception as e:
-            logging.debug("Failed to update job status for %s: %s", job_id, e)
+            logger.debug("Failed to update job status for %s: %s", job_id, e)
             return False
 
     def update_job_exit_code(self, job_id: str, exit_code: int) -> bool:
@@ -776,10 +776,10 @@ class ResourceTracker:
                     (exit_code, job_id),
                 )
                 conn.commit()
-            logging.debug("Updated job %s exit_code to %s", job_id, exit_code)
+            logger.debug("Updated job %s exit_code to %s", job_id, exit_code)
             return True
         except Exception as e:
-            logging.debug("Failed to update exit code for %s: %s", job_id, e)
+            logger.debug("Failed to update exit code for %s: %s", job_id, e)
             return False
 
     def finalize_job(self, job_id: str, exit_code: int, joblog_path: str) -> bool:
@@ -816,12 +816,12 @@ class ResourceTracker:
                 )
 
                 conn.commit()
-            logging.debug(
+            logger.debug(
                 "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
             )
             return True
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Failed to finalize job %s: %s", job_id, exc)
+            logger.debug("Failed to finalize job %s: %s", job_id, exc)
             return False
 
     # ------------------------------------------------------------------
@@ -918,7 +918,7 @@ class ResourceTracker:
                 ).fetchall()
             missing_ids = {row[0] for row in missing}
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("backfill phase-1 query failed: %s", exc)
+            logger.debug("backfill phase-1 query failed: %s", exc)
             missing_ids = set()
 
         if missing_ids:
@@ -937,12 +937,12 @@ class ResourceTracker:
                                 [(path, jid) for jid, path in matched.items()],
                             )
                             conn.commit()
-                        logging.debug(
+                        logger.debug(
                             "Discovered joblog paths for %d historical jobs",
                             len(matched),
                         )
                     except Exception as exc:  # pylint: disable=broad-except
-                        logging.debug("backfill path-update failed: %s", exc)
+                        logger.debug("backfill path-update failed: %s", exc)
 
         # ---- Phase 2: parse joblogs and fill resource columns ---------------
         try:
@@ -960,7 +960,7 @@ class ResourceTracker:
                     (limit,),
                 ).fetchall()
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("backfill phase-2 query failed: %s", exc)
+            logger.debug("backfill phase-2 query failed: %s", exc)
             return 0
 
         filled = 0
@@ -971,9 +971,9 @@ class ResourceTracker:
                     ok = self.update_job_resources(row["job_id"], data)
                     if ok:
                         filled += 1
-                        logging.debug("Backfilled resources for %s", row["job_id"])
+                        logger.debug("Backfilled resources for %s", row["job_id"])
             except Exception as exc:  # pylint: disable=broad-except
-                logging.debug("Backfill failed for %s: %s", row["job_id"], exc)
+                logger.debug("Backfill failed for %s: %s", row["job_id"], exc)
         return filled
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -1020,7 +1020,7 @@ class ResourceTracker:
                     return dict(row) if row else None
             except Exception as e:  # pylint: disable=broad-except
                 last_exc = e
-                logging.debug(
+                logger.debug(
                     "get_job_status attempt %d failed for %s: %s",
                     attempt + 1,
                     job_id,
@@ -1066,7 +1066,7 @@ class ResourceTracker:
                 cursor = conn.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logging.debug("Failed to get jobs by status: %s", e)
+            logger.debug("Failed to get jobs by status: %s", e)
             return []
 
     def get_status_summary(self) -> Dict[str, int]:
@@ -1083,7 +1083,7 @@ class ResourceTracker:
                 )
                 return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception as e:
-            logging.debug("Failed to get status summary: %s", e)
+            logger.debug("Failed to get status summary: %s", e)
             return {}
 
     def cleanup_old_jobs(self, days_old: int = 30) -> int:
@@ -1102,10 +1102,10 @@ class ResourceTracker:
                 deleted_count = cursor.rowcount
                 conn.commit()
 
-            logging.debug("Cleaned up %d old job records", deleted_count)
+            logger.debug("Cleaned up %d old job records", deleted_count)
             return deleted_count
         except Exception as e:
-            logging.debug("Failed to cleanup old jobs: %s", e)
+            logger.debug("Failed to cleanup old jobs: %s", e)
             return 0
 
     def export_csv(self, output_path: Path, limit: Optional[int] = None):

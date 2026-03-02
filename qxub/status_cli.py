@@ -6,6 +6,8 @@ Provides the `qxub status` command for viewing job status without qstat polling.
 
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import sys
 from datetime import datetime, timedelta
 
@@ -282,7 +284,7 @@ def check(job_id, output_format, snakemake):
         # Transient DB failure — for snakemake mode, report "running" so the
         # workflow engine retries instead of aborting.  For other formats,
         # surface the error but still exit 0 to avoid false-positive failures.
-        logging.debug("Database error during status check: %s", exc)
+        logger.debug("Database error during status check: %s", exc)
         if output_format == "snakemake":
             print("running")
             return

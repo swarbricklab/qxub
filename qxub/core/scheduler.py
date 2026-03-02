@@ -5,6 +5,8 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
 import logging
+
+logger = logging.getLogger(__name__)
 import shlex
 import subprocess
 import sys
@@ -234,7 +236,7 @@ def qsub(cmd, quiet=False):
         shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     if result.returncode != 0:
-        logging.debug("Job submission failed")
+        logger.debug("Job submission failed")
         # Map PBS validation errors to exit code 2 for consistency
         exit_code = 2 if result.returncode == 166 else result.returncode
         raise QsubError(
@@ -243,7 +245,7 @@ def qsub(cmd, quiet=False):
             stderr=result.stderr,
         )
     else:
-        logging.debug("Job submitted successfully")
+        logger.debug("Job submitted successfully")
         return result.stdout.rstrip("\n")
 
 
@@ -258,7 +260,7 @@ def qdel(job_id, quiet=False):
     Returns:
         bool: True if deletion was successful, False otherwise
     """
-    logging.debug("Deleting job %s", job_id)
+    logger.debug("Deleting job %s", job_id)
 
     try:
         # pylint: disable=W1510
@@ -268,17 +270,17 @@ def qdel(job_id, quiet=False):
         if result.returncode == 0:
             if not quiet:
                 click.echo(f"🗑️  Job {job_id} deleted successfully")
-            logging.info("Job %s deleted successfully", job_id)
+            logger.info("Job %s deleted successfully", job_id)
             return True
 
         if not quiet:
             click.echo(f"Failed to delete job {job_id}: {result.stderr.strip()}")
-        logging.warning("Failed to delete job %s: %s", job_id, result.stderr.strip())
+        logger.warning("Failed to delete job %s: %s", job_id, result.stderr.strip())
         return False
     except Exception as e:  # pylint: disable=broad-except
         if not quiet:
             click.echo(f"Error deleting job {job_id}: {e}")
-        logging.error("Error deleting job %s: %s", job_id, e)
+        logger.error("Error deleting job %s: %s", job_id, e)
         return False
 
 
@@ -348,9 +350,7 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
                 else:
                     return "F", exit_code  # Failed with non-zero exit
         except (ValueError, IOError) as e:
-            logging.warning(
-                f"Could not read exit code from {final_exit_code_file}: {e}"
-            )
+            logger.warning(f"Could not read exit code from {final_exit_code_file}: {e}")
             return "C", None  # Assume completed if file exists but unreadable
 
     # Check for PBS job log with exit status (appears after job ends).
@@ -361,7 +361,7 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     #    PBS still writes the resource-usage block, so we can detect completion.
     exit_code = _check_pbs_job_log_for_exit(job_id, log_dir)
     if exit_code is not None:
-        logging.debug(f"Found PBS exit status {exit_code} for job {job_id} in log file")
+        logger.debug(f"Found PBS exit status {exit_code} for job {job_id} in log file")
         return ("C" if exit_code == 0 else "F"), exit_code
 
     # Check if job has started (and PBS log not yet written — still running)
@@ -441,11 +441,11 @@ def _check_pbs_job_log_for_exit(job_id, log_dir):
                     return int(exit_match.group(1))
 
             except (IOError, OSError) as e:
-                logging.debug(f"Could not read log file {log_file}: {e}")
+                logger.debug(f"Could not read log file {log_file}: {e}")
                 continue
 
     except Exception as e:
-        logging.debug(f"Error searching log files in {log_dir}: {e}")
+        logger.debug(f"Error searching log files in {log_dir}: {e}")
 
     return None
 
@@ -468,7 +468,7 @@ def get_job_resource_data(job_id):
         - timing: Dict of job timing information
         - metadata: Dict of job metadata (name, owner, etc.)
     """
-    logging.debug("Getting resource data for job %s", job_id)
+    logger.debug("Getting resource data for job %s", job_id)
 
     # Use standard qstat -fx format for full resource information
     qstat_result = subprocess.run(
@@ -480,12 +480,12 @@ def get_job_resource_data(job_id):
     )
 
     if qstat_result.returncode != 0:
-        logging.debug("qstat failed for job %s: %s", job_id, qstat_result.stderr)
+        logger.debug("qstat failed for job %s: %s", job_id, qstat_result.stderr)
         return None
 
     output = qstat_result.stdout.strip()
     if not output:
-        logging.debug("Empty qstat output for job %s", job_id)
+        logger.debug("Empty qstat output for job %s", job_id)
         return None
 
     return parse_qstat_fx_output(output)
@@ -529,7 +529,7 @@ def parse_qstat_fx_output(qstat_output):
             try:
                 data["exit_status"] = int(value)
             except ValueError:
-                logging.warning("Could not parse exit status: %s", value)
+                logger.warning("Could not parse exit status: %s", value)
 
         elif key.startswith("Resource_List."):
             # Requested resources
@@ -633,7 +633,7 @@ def _enhance_resource_data(data):
             efficiency["memory_requested_human"] = bytes_to_human(mem_requested_bytes)
             efficiency["memory_used_human"] = bytes_to_human(mem_used_bytes)
         except Exception as e:
-            logging.warning("Could not calculate memory efficiency: %s", e)
+            logger.warning("Could not calculate memory efficiency: %s", e)
 
     # Time efficiency
     if "walltime" in requested and "walltime" in used:
@@ -644,7 +644,7 @@ def _enhance_resource_data(data):
                 time_used_seconds, time_requested_seconds
             )
         except Exception as e:
-            logging.warning("Could not calculate time efficiency: %s", e)
+            logger.warning("Could not calculate time efficiency: %s", e)
 
     # CPU efficiency (from cpupercent if available)
     if "cpupercent" in used:
@@ -664,7 +664,7 @@ def _enhance_resource_data(data):
             efficiency["jobfs_requested_human"] = bytes_to_human(jobfs_requested_bytes)
             efficiency["jobfs_used_human"] = bytes_to_human(jobfs_used_bytes)
         except Exception as e:
-            logging.warning("Could not calculate jobfs efficiency: %s", e)
+            logger.warning("Could not calculate jobfs efficiency: %s", e)
 
     data["efficiency"] = efficiency
 
@@ -755,7 +755,7 @@ def collect_job_resources_after_completion(job_id, out_file):
         # Derive joblog path from out_file path
         joblog_path = str(out_file).replace(".out", ".log")
 
-        logging.debug("Waiting for PBS to finalize joblog for job %s", job_id)
+        logger.debug("Waiting for PBS to finalize joblog for job %s", job_id)
 
         # Wait 60 seconds for PBS to write final resource information to joblog
         time.sleep(60)
@@ -765,7 +765,7 @@ def collect_job_resources_after_completion(job_id, out_file):
         retry_delay = 60  # Wait 60 seconds between retries
 
         for attempt in range(max_retries):
-            logging.debug(
+            logger.debug(
                 "Attempting to collect resource usage from joblog for job %s "
                 "(attempt %d/%d)",
                 job_id,
@@ -785,35 +785,35 @@ def collect_job_resources_after_completion(job_id, out_file):
                         job_id, resource_data
                     )
                     if success:
-                        logging.debug(
+                        logger.debug(
                             f"Successfully updated resource data for job {job_id}"
                         )
                         return
 
-                    logging.debug(f"Failed to update resource data for job {job_id}")
+                    logger.debug(f"Failed to update resource data for job {job_id}")
                 else:
-                    logging.debug(
+                    logger.debug(
                         f"Could not parse resource data from joblog: {joblog_path}"
                     )
 
             except Exception as e:
-                logging.debug(
+                logger.debug(
                     f"Error collecting resources for job {job_id} (attempt {attempt + 1}): {e}"
                 )
 
             # If not the last attempt, wait before retrying
             if attempt < max_retries - 1:
-                logging.debug(
+                logger.debug(
                     f"Retrying resource collection in {retry_delay} seconds..."
                 )
                 time.sleep(retry_delay)
 
-        logging.debug(
+        logger.debug(
             f"Failed to collect resource data for job {job_id} after {max_retries} attempts"
         )
 
     except Exception as e:
-        logging.debug("Resource collection failed for job %s: %s", job_id, e)
+        logger.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
 def start_background_resource_collection(
@@ -845,7 +845,7 @@ def start_background_resource_collection(
             with open(log_file, "a") as f:
                 f.write(f"[{timestamp}] {message}\n")
         except Exception as e:
-            logging.debug(f"Error writing to resource collection log: {e}")
+            logger.debug(f"Error writing to resource collection log: {e}")
 
     def collect_resources_background():
         """Actual resource collection logic."""
@@ -919,7 +919,7 @@ def start_background_resource_collection(
     try:
         pid = os.fork()
     except OSError as e:
-        logging.warning(f"Failed to fork for background resource collection: {e}")
+        logger.warning(f"Failed to fork for background resource collection: {e}")
         # Fall back to no collection rather than failing the whole job
         return None
 
@@ -1015,7 +1015,7 @@ def monitor_job_single_thread(
             # Check if job finished without running (rare but possible)
             if final_exit_code_file.exists():
                 spinner.clear()  # Clear spinner before showing message
-                logging.info("Job %s completed before starting", job_id)
+                logger.info("Job %s completed before starting", job_id)
                 exit_status = read_exit_status_from_file(final_exit_code_file)
 
                 # Completion message
@@ -1050,7 +1050,7 @@ def monitor_job_single_thread(
     if walltime_str:
         try:
             walltime_sec = max(0, time_to_seconds(walltime_str) + walltime_offset_sec)
-            logging.debug("Monitoring with walltime gate: %s s", walltime_sec)
+            logger.debug("Monitoring with walltime gate: %s s", walltime_sec)
         except Exception:
             pass  # Unknown format — fall back to immediate 60 s polling
 
@@ -1103,7 +1103,7 @@ def read_exit_status_from_file(exit_code_file):
             first_line = content.split("\n")[0]
             return int(first_line)
     except (OSError, IOError, ValueError) as e:
-        logging.warning(f"Could not read exit status from {exit_code_file}: {e}")
+        logger.warning(f"Could not read exit status from {exit_code_file}: {e}")
         return 1  # Default to failure
 
 
@@ -1254,7 +1254,7 @@ def stream_job_output_with_status_files(
                                     print(line.rstrip(), file=sys.stderr, flush=True)
                         except (OSError, IOError):
                             pass
-                    logging.debug(
+                    logger.debug(
                         "Job %s terminated by PBS (exit %s), detected via job log",
                         job_id,
                         pbs_exit,

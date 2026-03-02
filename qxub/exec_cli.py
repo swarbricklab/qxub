@@ -522,7 +522,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         if value is not None:
             import logging
 
-            logging.warning(
+            logger.warning(
                 f"Config key '{key}' at root level is deprecated. "
                 f"Please move to 'defaults.{key}' in your config file."
             )

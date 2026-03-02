@@ -23,6 +23,8 @@ Usage::
 
 import base64
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -270,7 +272,7 @@ def submit_job(
     # Build qsub command
     # ------------------------------------------------------------------
     submission_command = f"qsub -v {submission_vars} {qsub_options} {template}"
-    logging.info("Programmatic submission command: %s", submission_command)
+    logger.info("Programmatic submission command: %s", submission_command)
 
     # ------------------------------------------------------------------
     # Pre-qsub: create queue entry (status = initiated)
@@ -300,7 +302,7 @@ def submit_job(
             cpus_requested=ncpus if ncpus else None,
         )
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("Failed to create queue entry: %s", exc)
+        logger.debug("Failed to create queue entry: %s", exc)
 
     # ------------------------------------------------------------------
     # Submit to PBS (raises QsubError on failure — no sys.exit)
@@ -327,7 +329,7 @@ def submit_job(
                 joblog_path=processed_params.get("joblog"),
             )
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Failed to update queue entry: %s", exc)
+            logger.debug("Failed to update queue entry: %s", exc)
 
     # ------------------------------------------------------------------
     # Resource tracker + history logging
@@ -343,7 +345,7 @@ def submit_job(
             cpus_requested=ncpus_req if ncpus_req else None,
         )
     except Exception as exc:  # pylint: disable=broad-except
-        logging.debug("Failed to log job submission: %s", exc)
+        logger.debug("Failed to log job submission: %s", exc)
 
     # ------------------------------------------------------------------
     # Return structured result
