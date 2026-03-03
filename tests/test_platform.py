@@ -15,7 +15,7 @@ import yaml
 # Add qxub to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from qxub.platform import (
+from qxub.platforms import (
     Platform,
     PlatformLoader,
     Queue,
@@ -289,7 +289,7 @@ def test_high_level_function():
         platform_file = create_test_platform_file(temp_path)
 
         # Mock the global platform loader to use our test directory
-        import qxub.platform as platform_module
+        import qxub.platforms as platform_module
 
         original_loader = platform_module._platform_loader
         platform_module._platform_loader = PlatformLoader(search_paths=[temp_path])
