@@ -55,7 +55,7 @@ class TestPreMigrationBaseline:
         """Verify all current imports work."""
         import_tests = [
             "from qxub.config_manager import config_manager",
-            "from qxub.platform import get_platform",
+            "from qxub.platforms import get_platform",
             "from qxub.core.scheduler import qsub, qdel",
             "from qxub.resources import parse_memory_size",
             "from qxub.execution_context import execute_unified",

@@ -297,7 +297,7 @@ def validate_config() -> List[str]:
     # Check default platform is available
     default_platform = config.get_default_platform()
     if default_platform:
-        from .platform import get_platform
+        from .platforms import get_platform
 
         platform = get_platform(default_platform)
         if not platform:

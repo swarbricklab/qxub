@@ -145,7 +145,7 @@ def select_auto_queue(params):
         from pathlib import Path
 
         from ..resources import parse_walltime  # noqa: F811
-        from .platform import PlatformLoader
+        from .platforms import PlatformLoader
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
@@ -283,7 +283,7 @@ def adjust_resources_for_queue(params):
 
     # User didn't explicitly set CPUs - check if we need to adjust for queue limits
     try:
-        from qxub.platform import get_current_platform
+        from qxub.platforms import get_current_platform
 
         # Get the current platform
         platform = get_current_platform()

@@ -112,7 +112,7 @@ def _get_internet_queue() -> Optional[str]:
     internet_connectivity=True (which implies platform-wide access).
     """
     try:
-        from .platform import get_current_platform
+        from .platforms import get_current_platform
 
         platform = get_current_platform()
         if platform:

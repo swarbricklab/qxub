@@ -30,7 +30,7 @@ class TestImportCompatibility:
     def test_platform_imports(self):
         """Test platform imports work."""
         # Current imports that should always work
-        from qxub.platform import get_platform, list_platforms
+        from qxub.platforms import get_platform, list_platforms
 
         assert callable(get_platform)
         assert callable(list_platforms)
@@ -104,7 +104,7 @@ class TestCircularDependencies:
         # These imports should not cause circular import errors
         import qxub.config_manager
         import qxub.execution
-        import qxub.platform
+        import qxub.platforms
         import qxub.resource_utils
         import qxub.scheduler
 
