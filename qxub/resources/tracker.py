@@ -113,9 +113,9 @@ class ResourceTracker:
     def _init_database(self):
         """Initialize SQLite database with resource tracking table."""
         with self._connect() as conn:
-            # WAL mode allows concurrent readers even during writes,
-            # eliminating most lock-contention issues.
-            conn.execute("PRAGMA journal_mode=WAL")
+            # DELETE mode avoids -shm sidecar which is always mmap'd.
+            # WAL's -shm causes SIGBUS on shared filesystems (Lustre/GPFS).
+            conn.execute("PRAGMA journal_mode=DELETE")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS job_resources (
@@ -1129,5 +1129,23 @@ class ResourceTracker:
                     writer.writerow(dict(zip(columns, row)))
 
 
-# Global instance
-resource_tracker = ResourceTracker()
+# Lazy global instance — avoids running _init_database() at import time,
+# which would fail fatally if the DB is corrupted or on a broken filesystem.
+_resource_tracker = None
+
+
+def _get_resource_tracker():
+    global _resource_tracker  # noqa: PLW0603
+    if _resource_tracker is None:
+        _resource_tracker = ResourceTracker()
+    return _resource_tracker
+
+
+class _LazyResourceTracker:
+    """Proxy that defers ResourceTracker construction until first use."""
+
+    def __getattr__(self, name):
+        return getattr(_get_resource_tracker(), name)
+
+
+resource_tracker = _LazyResourceTracker()
