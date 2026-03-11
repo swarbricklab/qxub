@@ -118,7 +118,30 @@ class ExecutionContext:
         db_path = str(get_db_path())
         submission_vars += f",QXUB_SHARED_DB={db_path}"
 
+        # Check if Slack/Discord notifications are configured
+        if ctx_obj.get("notify") and self._has_push_notifications(ctx_obj):
+            submission_vars += ",qxub_notify=true"
+            # Pass output directory for notification context
+            out_dir = str(Path(ctx_obj.get("out", "")).parent)
+            submission_vars += f',qxub_notify_outdir="{out_dir}"'
+
         return submission_vars
+
+    def _has_push_notifications(self, ctx_obj: dict) -> bool:
+        """Check if Slack/Discord notifications are configured."""
+        try:
+            from ..config import manager as config_mod
+
+            config_manager = config_mod.config_manager
+            slack_webhook = config_manager.get_config_value(
+                "notifications.slack.webhook_url"
+            )
+            discord_webhook = config_manager.get_config_value(
+                "notifications.discord.webhook_url"
+            )
+            return bool(slack_webhook or discord_webhook)
+        except Exception:
+            return False
 
     def log_debug_info(
         self,

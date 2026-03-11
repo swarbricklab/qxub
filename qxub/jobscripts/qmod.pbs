@@ -90,6 +90,18 @@ error_handler() {
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     update_job_status "failed" "$exit_code"
+
+    # Queue Slack/Discord notification if enabled
+    if [ "$qxub_notify" = "true" ]; then
+        echo "📬 Queueing failure notification..."
+        qxub notify queue \
+            --job-id "${PBS_JOBID:-unknown}" \
+            --exit-code "$exit_code" \
+            --job-name "${PBS_JOBNAME:-unknown}" \
+            --output-dir "${qxub_notify_outdir:-$PWD}" \
+            2>/dev/null || true
+    fi
+
     exit $exit_code
 }
 
@@ -217,4 +229,16 @@ if [ -n "$modules" ]; then
 fi
 
 update_job_status "completed" "0"
+
+# Queue Slack/Discord notification if enabled
+if [ "$qxub_notify" = "true" ]; then
+    echo "📬 Queueing notification job..."
+    qxub notify queue \
+        --job-id "${PBS_JOBID:-unknown}" \
+        --exit-code 0 \
+        --job-name "${PBS_JOBNAME:-unknown}" \
+        --output-dir "${qxub_notify_outdir:-$PWD}" \
+        2>/dev/null || echo "⚠️  Failed to queue notification (non-fatal)"
+fi
+
 echo "🎉 Job completed successfully!"

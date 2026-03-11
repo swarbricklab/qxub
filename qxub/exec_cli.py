@@ -645,6 +645,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "verbose": verbose,
         "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
         "internet": options.get("internet", False),
+        "notify": options.get("notify", False),  # Slack/Discord notifications
     }
 
     # Resolve and merge tags from --tag (multiple) and --tags (comma-separated string)
