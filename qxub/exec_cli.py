@@ -126,6 +126,18 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
 )
+@click.option(
+    "--notify",
+    is_flag=True,
+    default=False,
+    help="Enable PBS email notification using configured email address.",
+)
+@click.option(
+    "--no-notify",
+    is_flag=True,
+    default=False,
+    help="Disable PBS email notification (overrides config).",
+)
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
 @click.option(
     "--tag",
@@ -604,6 +616,14 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         or any(r.startswith("ncpus=") for r in (options["resources"] or []))
     )
 
+    # Resolve email from --notify/--no-notify/--email options
+    # Priority: --no-notify > --email > config default
+    # --notify is just a clarity flag (notifications use config by default)
+    resolved_email = options["email"]  # May be None, let config supply default
+    if options.get("no_notify"):
+        # Explicitly disable notifications
+        resolved_email = "__DISABLED__"  # Sentinel to suppress config default
+
     # Extract PBS-specific options for processing
     params = {
         "resources": tuple(all_resources),  # Use merged resources
@@ -616,7 +636,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "joblog": None,  # Will be set by config system
         "execdir": options["execdir"],
         "create_execdir": options["create_execdir"],
-        "email": options["email"],
+        "email": resolved_email,
         "email_opts": options["email_opts"],
         "array": options["array"],
         "dry": options["dry"],

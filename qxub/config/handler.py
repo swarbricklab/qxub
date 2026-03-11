@@ -71,6 +71,15 @@ def apply_config_defaults(params, config_manager):
     if not params["resources"]:  # Empty tuple means no resources provided
         params["resources"] = defaults.get("resources", [])
 
+    # Email notification defaults
+    if params.get("email") == "__DISABLED__":
+        # --no-notify was specified, suppress notifications
+        params["email"] = None
+    elif params.get("email") is None:
+        params["email"] = defaults.get("email")
+    if params.get("email_opts") is None:
+        params["email_opts"] = defaults.get("email_opts", "ae")  # abort + end
+
     return params
 
 
@@ -254,6 +263,13 @@ def build_qsub_options(params):
     if params.get("resources"):
         options += " ".join([f"-l {resource}" for resource in params["resources"]])
     options += f" -o {params['joblog']}"
+
+    # Email notifications via PBS -M and -m
+    if params.get("email"):
+        options += f" -M {params['email']}"
+        email_opts = params.get("email_opts", "ae")  # default: abort + end
+        options += f" -m {email_opts}"
+
     return options
 
 
