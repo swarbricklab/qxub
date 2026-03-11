@@ -95,7 +95,7 @@ error_handler() {
     # Queue Slack/Discord notification if enabled
     if [ "$qxub_notify" = "true" ]; then
         echo "📬 Queueing failure notification..."
-        qxub notify queue \
+        qxub exec --internet --terse --default -- qxub notify send \
             --job-id "${PBS_JOBID:-unknown}" \
             --exit-code "$exit_code" \
             --job-name "${PBS_JOBNAME:-unknown}" \
@@ -227,7 +227,7 @@ update_job_status "completed" "0"
 # Queue Slack/Discord notification if enabled
 if [ "$qxub_notify" = "true" ]; then
     echo "📬 Queueing notification job..."
-    qxub notify queue \
+    qxub exec --internet --terse --default -- qxub notify send \
         --job-id "${PBS_JOBID:-unknown}" \
         --exit-code 0 \
         --job-name "${PBS_JOBNAME:-unknown}" \

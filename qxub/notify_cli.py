@@ -5,20 +5,14 @@ Provides the `qxub notify` command for sending notifications via Slack,
 Discord, or other channels when jobs complete.
 
 Architecture:
-- Job script calls `qxub notify --job-id X --exit-code N` at completion
-- This submits a tiny job to a data-mover queue (has internet access)
-- The data-mover job calls `qxub notify --send ...` to actually send
-
-This two-stage approach is needed because compute nodes typically lack
-internet access on HPC systems.
+- Job script calls: qxub exec --internet --terse --default -- qxub notify send ...
+- The notification runs on an internet-capable queue (e.g., copyq)
+- This approach reuses qxub exec's queue selection instead of duplicating logic
 """
 
-import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -29,86 +23,6 @@ logger = logging.getLogger(__name__)
 def notify_cli():
     """Send job completion notifications (Slack, Discord, etc.)."""
     pass
-
-
-@notify_cli.command(name="queue")
-@click.option("--job-id", required=True, help="PBS job ID of the completed job")
-@click.option("--exit-code", type=int, required=True, help="Exit code of the job")
-@click.option("--job-name", default=None, help="Job name (for notification message)")
-@click.option(
-    "--output-dir",
-    default=None,
-    help="Directory containing job output files (for including tail in notification)",
-)
-@click.option(
-    "--dry-run", is_flag=True, help="Show what would be done without submitting"
-)
-def queue_notification(job_id, exit_code, job_name, output_dir, dry_run):
-    """Queue a notification job on a data-mover node with internet access.
-
-    This is called from job scripts at completion. It submits a small job
-    to an internet-capable queue that will send the actual notification.
-    """
-    from .config import manager as config_mod
-    from .execution import submit_job
-
-    config_manager = config_mod.config_manager
-
-    # Check if notifications are configured
-    slack_webhook = config_manager.get_config_value("notifications.slack.webhook_url")
-    slack_user_id = config_manager.get_config_value("notifications.slack.user_id")
-    discord_webhook = config_manager.get_config_value(
-        "notifications.discord.webhook_url"
-    )
-
-    if not any([slack_webhook, slack_user_id, discord_webhook]):
-        logger.debug("No notification channels configured, skipping")
-        return
-
-    # Build the notification command
-    notify_cmd = [
-        "qxub",
-        "notify",
-        "send",
-        "--job-id",
-        job_id,
-        "--exit-code",
-        str(exit_code),
-    ]
-
-    if job_name:
-        notify_cmd.extend(["--job-name", job_name])
-
-    if output_dir:
-        notify_cmd.extend(["--output-dir", output_dir])
-
-    # Get project from config for the notification job
-    project = config_manager.get_config_value("defaults.project") or os.getenv(
-        "PROJECT"
-    )
-
-    # Get the internet-capable queue (default: copyq for NCI Gadi)
-    notify_queue = config_manager.get_config_value("notifications.queue") or "copyq"
-
-    if dry_run:
-        click.echo(f"Would submit notification job: {' '.join(notify_cmd)}")
-        click.echo(f"  Project: {project}")
-        click.echo(f"  Queue: {notify_queue}")
-        return
-
-    try:
-        # Submit a tiny job to send the notification on internet-capable queue
-        result = submit_job(
-            command=tuple(notify_cmd),
-            resources={"walltime": "00:05:00", "mem": "1GB", "ncpus": 1},
-            name=f"notify-{job_id.split('.')[0]}",
-            project=project,
-            queue=notify_queue,
-        )
-        logger.info("Queued notification job %s for job %s", result.job_id, job_id)
-    except Exception as e:
-        # Don't fail the main job if notification fails
-        logger.warning("Failed to queue notification job: %s", e)
 
 
 @notify_cli.command(name="send")
