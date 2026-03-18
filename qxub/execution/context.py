@@ -74,8 +74,18 @@ class ExecutionContext:
         pre: str = None,
         post: str = None,
         bind: str = None,
+        user_vars: tuple = None,
     ) -> str:
-        """Build the submission variables string for qsub."""
+        """Build the submission variables string for qsub.
+
+        Args:
+            command: Command tuple to execute
+            ctx_obj: Click context object with job options
+            pre: Pre-command to run before main command
+            post: Post-command to run after main command
+            bind: Singularity bind mounts
+            user_vars: User-defined environment variables (KEY=VALUE tuples)
+        """
         cmd_str = " ".join(command)
         cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 
@@ -113,6 +123,13 @@ class ExecutionContext:
         if post:
             post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
             submission_vars += f',post_cmd_b64="{post_b64}"'
+
+        # Add user-defined environment variables if provided
+        if user_vars:
+            # Join KEY=VALUE pairs with semicolons and base64 encode to avoid shell escaping issues
+            vars_str = ";".join(user_vars)
+            vars_b64 = base64.b64encode(vars_str.encode("utf-8")).decode("ascii")
+            submission_vars += f',user_vars_b64="{vars_b64}"'
 
         # Pass the resolved DB path so job scripts can write status to the right DB
         db_path = str(get_db_path())
@@ -180,6 +197,7 @@ def execute_unified(
     pre: str = None,
     post: str = None,
     bind: str = None,
+    user_vars: tuple = None,
 ) -> None:
     """Unified execution function for all execution contexts.
 
@@ -191,6 +209,7 @@ def execute_unified(
         pre: Pre-execution command
         post: Post-execution command
         bind: Singularity bind mounts (only used for singularity context)
+        user_vars: User-defined environment variables (KEY=VALUE tuples)
     """
     # Validate execution context
     execution_context.validate()
@@ -206,7 +225,7 @@ def execute_unified(
 
     # Build submission variables
     submission_vars = execution_context.build_submission_vars(
-        command, ctx_obj, pre, post, bind
+        command, ctx_obj, pre, post, bind, user_vars
     )
 
     # Build final submission command

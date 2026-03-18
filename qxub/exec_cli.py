@@ -175,6 +175,18 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--template", help="Custom job script template file")
 @click.option("--pre", help="Command to run before the main command")
 @click.option("--post", help="Command to run after the main command")
+@click.option(
+    "--var",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Environment variable to set in the job (can be used multiple times)",
+)
+@click.option(
+    "--vars",
+    default=None,
+    metavar="VAR_STRING",
+    help='Comma-separated environment variables, e.g. --vars "FOO=bar,BAZ=qux"',
+)
 @click.option("--cmd", help="Command to execute (alternative to positional arguments)")
 @click.option("--shortcut", help="Use a predefined shortcut for execution settings")
 @click.option("--alias", help="Use a predefined alias for execution settings")
@@ -888,6 +900,11 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         if verbose >= 1:
             click.echo(f"📍 Executing on platform: {platform_name} (local)", err=True)
 
+    # Resolve and merge user environment variables from --var (multiple) and --vars (comma-separated)
+    resolved_vars = list(options.get("var") or [])
+    vars_str = options.get("vars") or ""
+    resolved_vars += [v.strip() for v in vars_str.split(",") if v.strip()]
+
     # Execute the job using unified execution (local path)
     execute_unified(
         ctx,
@@ -897,4 +914,5 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         pre=options["pre"],
         post=options["post"],
         bind=options["bind"],
+        user_vars=tuple(resolved_vars) if resolved_vars else None,
     )

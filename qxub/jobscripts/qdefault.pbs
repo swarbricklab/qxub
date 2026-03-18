@@ -20,6 +20,10 @@ fi
 if [ -n "$post_cmd_b64" ]; then
     post_cmd=$(echo "$post_cmd_b64" | base64 -d)
 fi
+# Decode user-defined environment variables
+if [ -n "$user_vars_b64" ]; then
+    user_vars=$(echo "$user_vars_b64" | base64 -d)
+fi
 
 echo "💻 Command: $cmd"
 if [ -n "$pre_cmd" ]; then
@@ -135,6 +139,18 @@ fi
 
 # Change to execution directory
 cd "$cwd" || { echo "❌ ERROR: Failed to change to directory $cwd"; exit 1; }
+
+# Export user-defined environment variables
+if [ -n "$user_vars" ]; then
+    echo "🔧 Setting user-defined environment variables:"
+    IFS=';' read -ra VARS <<< "$user_vars"
+    for var_def in "${VARS[@]}"; do
+        if [ -n "$var_def" ]; then
+            echo "   export $var_def"
+            export "$var_def"
+        fi
+    done
+fi
 
 # Set output redirection for quiet mode
 if [ "$quiet" = "true" ]; then
