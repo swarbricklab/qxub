@@ -73,9 +73,11 @@ def list(limit, tag, user, since, before, queue_name, status, output_csv):
     try:
         filled = resource_tracker.backfill_resources()
         if filled:
-            import logging as _logging
+            import logging
 
-            _logging.debug("Backfilled resources for %d job(s)", filled)
+            logging.getLogger(__name__).debug(
+                "Backfilled resources for %d job(s)", filled
+            )
     except Exception:  # pylint: disable=broad-except
         pass
 

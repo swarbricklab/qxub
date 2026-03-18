@@ -7,6 +7,8 @@ that was previously duplicated across multiple execution functions.
 
 import base64
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 import re
 import sys
@@ -86,7 +88,7 @@ def _apply_variable_expansion(cmd_str: str) -> str:
         if value is not None:
             return value
         else:
-            logging.warning(
+            logger.warning(
                 f"Submission variable ${{{var_name}}} not found in environment"
             )
             return match.group(0)  # Keep original ${var}
@@ -262,12 +264,12 @@ def submit_and_monitor_job(
 
     # Log parameters and context
     for key, value in ctx_obj.items():
-        logging.debug("Context: %s = %s", key, value)
-    logging.debug("Template: %s", template)
-    logging.debug("Command: %s", command)
-    logging.debug("Context vars: %s", context_vars)
-    logging.debug("Pre-commands: %s", pre)
-    logging.debug("Post-commands: %s", post)
+        logger.debug("Context: %s = %s", key, value)
+    logger.debug("Template: %s", template)
+    logger.debug("Command: %s", command)
+    logger.debug("Context vars: %s", context_vars)
+    logger.debug("Pre-commands: %s", pre)
+    logger.debug("Post-commands: %s", post)
 
     # Build submission variables
     submission_vars = build_submission_variables(
@@ -283,7 +285,7 @@ def submit_and_monitor_job(
 
     # Construct qsub command
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
+    logger.info("Submission command: %s", submission_command)
 
     # Progress message: Job command constructed (skip for terse mode)
     if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
@@ -319,7 +321,7 @@ def submit_and_monitor_job(
         try:
             history_manager.log_execution(ctx, success=True)
         except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
+            logger.debug("Failed to log execution history: %s", e)
         return
 
     # Submit job
@@ -328,7 +330,7 @@ def submit_and_monitor_job(
     # Handle terse mode - emit only job ID and return immediately
     if ctx_obj.get("terse", False):
         click.echo(job_id)
-        logging.info("Terse mode: emitted job ID %s and exiting", job_id)
+        logger.info("Terse mode: emitted job ID %s and exiting", job_id)
         return
 
     # Display job ID to user (unless in quiet mode)
@@ -340,11 +342,11 @@ def submit_and_monitor_job(
     try:
         history_manager.log_execution(ctx, success=True, job_id=job_id)
     except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
+        logger.debug("Failed to log execution history: %s", e)
 
     # Exit if in quiet mode
     if ctx_obj["quiet"]:
-        logging.info("Exiting in quiet mode")
+        logger.info("Exiting in quiet mode")
         return
 
     # Prepare output files

@@ -126,6 +126,18 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--email-opts", help="PBS email options (e.g., 'abe') (default: configured)"
 )
+@click.option(
+    "--notify",
+    is_flag=True,
+    default=False,
+    help="Enable PBS email notification using configured email address.",
+)
+@click.option(
+    "--no-notify",
+    is_flag=True,
+    default=False,
+    help="Disable PBS email notification (overrides config).",
+)
 @click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
 @click.option(
     "--tag",
@@ -163,6 +175,18 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option("--template", help="Custom job script template file")
 @click.option("--pre", help="Command to run before the main command")
 @click.option("--post", help="Command to run after the main command")
+@click.option(
+    "--var",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Environment variable to set in the job (can be used multiple times)",
+)
+@click.option(
+    "--vars",
+    default=None,
+    metavar="VAR_STRING",
+    help='Comma-separated environment variables, e.g. --vars "FOO=bar,BAZ=qux"',
+)
 @click.option("--cmd", help="Command to execute (alternative to positional arguments)")
 @click.option("--shortcut", help="Use a predefined shortcut for execution settings")
 @click.option("--alias", help="Use a predefined alias for execution settings")
@@ -522,7 +546,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         if value is not None:
             import logging
 
-            logging.warning(
+            logger.warning(
                 f"Config key '{key}' at root level is deprecated. "
                 f"Please move to 'defaults.{key}' in your config file."
             )
@@ -604,6 +628,14 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         or any(r.startswith("ncpus=") for r in (options["resources"] or []))
     )
 
+    # Resolve email from --notify/--no-notify/--email options
+    # Priority: --no-notify > --email > config default
+    # --notify is just a clarity flag (notifications use config by default)
+    resolved_email = options["email"]  # May be None, let config supply default
+    if options.get("no_notify"):
+        # Explicitly disable notifications
+        resolved_email = "__DISABLED__"  # Sentinel to suppress config default
+
     # Extract PBS-specific options for processing
     params = {
         "resources": tuple(all_resources),  # Use merged resources
@@ -616,7 +648,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "joblog": None,  # Will be set by config system
         "execdir": options["execdir"],
         "create_execdir": options["create_execdir"],
-        "email": options["email"],
+        "email": resolved_email,
         "email_opts": options["email_opts"],
         "array": options["array"],
         "dry": options["dry"],
@@ -625,6 +657,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "verbose": verbose,
         "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
         "internet": options.get("internet", False),
+        "notify": options.get("notify", False),  # Slack/Discord notifications
     }
 
     # Resolve and merge tags from --tag (multiple) and --tags (comma-separated string)
@@ -867,6 +900,11 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         if verbose >= 1:
             click.echo(f"📍 Executing on platform: {platform_name} (local)", err=True)
 
+    # Resolve and merge user environment variables from --var (multiple) and --vars (comma-separated)
+    resolved_vars = list(options.get("var") or [])
+    vars_str = options.get("vars") or ""
+    resolved_vars += [v.strip() for v in vars_str.split(",") if v.strip()]
+
     # Execute the job using unified execution (local path)
     execute_unified(
         ctx,
@@ -876,4 +914,5 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         pre=options["pre"],
         post=options["post"],
         bind=options["bind"],
+        user_vars=tuple(resolved_vars) if resolved_vars else None,
     )

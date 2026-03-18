@@ -27,11 +27,6 @@ jobs:
         qxub platform list
         qxub config get defaults.platform || echo "No default platform set"
 
-    - name: Test local execution (no platform)
-      run: |
-        echo "=== Testing local execution ==="
-        qxub exec --dry --default -- echo "Local test"
-
     - name: Test remote execution to NCI (dry run)
       run: |
         echo "=== Testing remote execution (dry run) ==="

@@ -5,6 +5,9 @@ Provides the `qxub status` command for viewing job status without qstat polling.
 """
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 import sys
 from datetime import datetime, timedelta
 
@@ -15,6 +18,7 @@ from rich.table import Table
 from .core.scheduler import job_status_from_files
 from .queue import is_virtual_id, resolve_virtual_id
 from .resources import resource_tracker
+from .resources.tracker import DatabaseError
 
 console = Console()
 
@@ -242,7 +246,7 @@ def check(job_id, output_format, snakemake):
 
         virtual_status = entry.get("status", "unknown")
 
-        if virtual_status == "pending":
+        if virtual_status in ("initiated", "pending"):
             # Still waiting to be dispatched to PBS
             _output_status("running", None, job_id, output_format)
             return
@@ -274,9 +278,33 @@ def check(job_id, output_format, snakemake):
         job_id = f"{job_id}.gadi-pbs"
 
     # Get job status from database
-    job_info = resource_tracker.get_job_status(job_id)
+    try:
+        job_info = resource_tracker.get_job_status(job_id)
+    except DatabaseError as exc:
+        # Transient DB failure — for snakemake mode, report "running" so the
+        # workflow engine retries instead of aborting.  For other formats,
+        # surface the error but still exit 0 to avoid false-positive failures.
+        logger.debug("Database error during status check: %s", exc)
+        if output_format == "snakemake":
+            print("running")
+            return
+        if output_format == "json":
+            print(
+                json.dumps(
+                    {"error": "database temporarily unavailable", "job_id": job_id}
+                )
+            )
+        else:
+            sys.stderr.write(f"qxub: database temporarily unavailable for {job_id}\n")
+        sys.exit(1)
 
     if not job_info:
+        # Job genuinely not found — for snakemake mode, assume it is still
+        # queued/pending (recently submitted jobs may not have been committed
+        # to the DB yet).  This avoids Snakemake aborting the entire workflow.
+        if output_format == "snakemake":
+            print("running")
+            return
         if output_format == "json":
             print(json.dumps({"error": "Job not found", "job_id": job_id}))
         else:
@@ -411,7 +439,7 @@ def _output_status(
     if output_format == "snakemake":
         if status == "completed":
             print("success" if (exit_code is None or exit_code == 0) else "failed")
-        elif status in ("submitted", "running"):
+        elif status in ("initiated", "dispatched", "submitted", "running"):
             print("running")
         else:
             print("failed")
@@ -428,7 +456,7 @@ def _output_status(
     elif output_format == "exitcode":
         if status == "completed":
             sys.exit(2 if (exit_code is None or exit_code == 0) else 1)
-        elif status in ("submitted", "running"):
+        elif status in ("initiated", "dispatched", "submitted", "running"):
             sys.exit(0)
         else:
             sys.exit(1)
@@ -437,6 +465,8 @@ def _output_status(
 def _format_status(status):
     """Format status with emoji and color."""
     status_map = {
+        "initiated": "⚪ Initiated",
+        "dispatched": "🟠 Dispatched",
         "submitted": "🟡 Submitted",
         "running": "🔵 Running",
         "completed": "✅ Completed",

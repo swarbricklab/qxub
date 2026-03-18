@@ -8,15 +8,17 @@ and execute_default functions.
 
 import base64
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 from typing import List, Optional, Union
 
 import click
 
-from ..core.scheduler import qsub
+from ..core.scheduler import QsubError, qsub
 from ..history import history_manager
-from ..queue import create_queue_entry
+from ..queue import create_queue_entry, update_queue_entry
 from ..queue.db import get_db_path
 from ..resources import resource_tracker
 
@@ -72,8 +74,18 @@ class ExecutionContext:
         pre: str = None,
         post: str = None,
         bind: str = None,
+        user_vars: tuple = None,
     ) -> str:
-        """Build the submission variables string for qsub."""
+        """Build the submission variables string for qsub.
+
+        Args:
+            command: Command tuple to execute
+            ctx_obj: Click context object with job options
+            pre: Pre-command to run before main command
+            post: Post-command to run after main command
+            bind: Singularity bind mounts
+            user_vars: User-defined environment variables (KEY=VALUE tuples)
+        """
         cmd_str = " ".join(command)
         cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 
@@ -112,11 +124,41 @@ class ExecutionContext:
             post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
             submission_vars += f',post_cmd_b64="{post_b64}"'
 
+        # Add user-defined environment variables if provided
+        if user_vars:
+            # Join KEY=VALUE pairs with semicolons and base64 encode to avoid shell escaping issues
+            vars_str = ";".join(user_vars)
+            vars_b64 = base64.b64encode(vars_str.encode("utf-8")).decode("ascii")
+            submission_vars += f',user_vars_b64="{vars_b64}"'
+
         # Pass the resolved DB path so job scripts can write status to the right DB
         db_path = str(get_db_path())
         submission_vars += f",QXUB_SHARED_DB={db_path}"
 
+        # Check if Slack/Discord notifications are configured
+        if ctx_obj.get("notify") and self._has_push_notifications(ctx_obj):
+            submission_vars += ",qxub_notify=true"
+            # Pass output directory for notification context
+            out_dir = str(Path(ctx_obj.get("out", "")).parent)
+            submission_vars += f',qxub_notify_outdir="{out_dir}"'
+
         return submission_vars
+
+    def _has_push_notifications(self, ctx_obj: dict) -> bool:
+        """Check if Slack/Discord notifications are configured."""
+        try:
+            from ..config import manager as config_mod
+
+            config_manager = config_mod.config_manager
+            slack_webhook = config_manager.get_config_value(
+                "notifications.slack.webhook_url"
+            )
+            discord_webhook = config_manager.get_config_value(
+                "notifications.discord.webhook_url"
+            )
+            return bool(slack_webhook or discord_webhook)
+        except Exception:
+            return False
 
     def log_debug_info(
         self,
@@ -129,22 +171,22 @@ class ExecutionContext:
         """Log debug information for this execution context."""
         # Log context parameters
         for key, value in ctx_obj.items():
-            logging.debug("Context: %s = %s", key, value)
+            logger.debug("Context: %s = %s", key, value)
 
         # Log context-specific information
         if self.context_type == "conda":
-            logging.debug("Conda environment: %s", self.context_value)
+            logger.debug("Conda environment: %s", self.context_value)
         elif self.context_type == "module":
-            logging.debug("Environment modules: %s", self.context_value)
+            logger.debug("Environment modules: %s", self.context_value)
         elif self.context_type == "singularity":
-            logging.debug("Singularity container: %s", self.context_value)
+            logger.debug("Singularity container: %s", self.context_value)
         else:
-            logging.debug("Default execution context")
+            logger.debug("Default execution context")
 
-        logging.debug("Jobscript template: %s", template)
-        logging.debug("Command: %s", command)
-        logging.debug("Pre-commands: %s", pre)
-        logging.debug("Post-commands: %s", post)
+        logger.debug("Jobscript template: %s", template)
+        logger.debug("Command: %s", command)
+        logger.debug("Pre-commands: %s", pre)
+        logger.debug("Post-commands: %s", post)
 
 
 def execute_unified(
@@ -155,6 +197,7 @@ def execute_unified(
     pre: str = None,
     post: str = None,
     bind: str = None,
+    user_vars: tuple = None,
 ) -> None:
     """Unified execution function for all execution contexts.
 
@@ -166,6 +209,7 @@ def execute_unified(
         pre: Pre-execution command
         post: Post-execution command
         bind: Singularity bind mounts (only used for singularity context)
+        user_vars: User-defined environment variables (KEY=VALUE tuples)
     """
     # Validate execution context
     execution_context.validate()
@@ -181,12 +225,12 @@ def execute_unified(
 
     # Build submission variables
     submission_vars = execution_context.build_submission_vars(
-        command, ctx_obj, pre, post, bind
+        command, ctx_obj, pre, post, bind, user_vars
     )
 
     # Build final submission command
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
-    logging.info("Submission command: %s", submission_command)
+    logger.info("Submission command: %s", submission_command)
 
     # Progress message: Job command constructed (skip for terse mode)
     if not ctx_obj["quiet"] and not ctx_obj.get("terse", False):
@@ -211,39 +255,80 @@ def execute_unified(
                 tags=ctx_obj.get("tags") or [],
             )
         except Exception as e:
-            logging.debug("Failed to log execution history: %s", e)
+            logger.debug("Failed to log execution history: %s", e)
         return
 
-    # Submit job
-    job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    # ------------------------------------------------------------------
+    # Pre-qsub: create queue entry with virtual ID (status = initiated)
+    # ------------------------------------------------------------------
+    cmd_str = " ".join(command)
+    tags = ctx_obj.get("tags") or []
+    exec_context_info = {
+        "type": execution_context.context_type,
+        "value": (
+            execution_context.context_value
+            if not isinstance(execution_context.context_value, list)
+            else " ".join(execution_context.context_value)
+        ),
+    }
 
-    # Register the job in the queue DB (for tracking; virtual ID not emitted yet —
-    # Phase 3 pending-dispatch will be the first time callers see a virtual ID)
+    virtual_id = None
     try:
-        cmd_str = " ".join(command)
-        tags = ctx_obj.get("tags") or []
-        exec_context_info = {
-            "type": execution_context.context_type,
-            "value": (
-                execution_context.context_value
-                if not isinstance(execution_context.context_value, list)
-                else " ".join(execution_context.context_value)
-            ),
-        }
-        create_queue_entry(
-            pbs_job_id=job_id,
+        virtual_id = create_queue_entry(
             command=cmd_str,
+            pbs_job_id=None,
             tags=tags,
             working_dir=ctx_obj.get("execdir") or os.getcwd(),
             exec_context=exec_context_info,
+            joblog_path=ctx_obj.get("joblog"),
+            queue_name=ctx_obj.get("queue"),
+            cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
         )
     except Exception as e:
-        logging.debug("Failed to create queue entry: %s", e)
+        logger.debug("Failed to create queue entry: %s", e)
+
+    # ------------------------------------------------------------------
+    # Submit job to PBS
+    # ------------------------------------------------------------------
+    try:
+        job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
+    except QsubError as qsub_exc:
+        # qsub failed — mark entry as failed and re-raise
+        if virtual_id:
+            try:
+                update_queue_entry(virtual_id, status="failed")
+            except Exception:
+                pass
+        # In CLI mode, display the error and exit with the PBS exit code
+        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc))
+        import sys as _sys
+
+        _sys.exit(qsub_exc.exit_code)
+    except Exception as exc:
+        # Unexpected error — mark entry as failed and re-raise
+        if virtual_id:
+            try:
+                update_queue_entry(virtual_id, status="failed")
+            except Exception:
+                pass
+        raise exc
+
+    # ------------------------------------------------------------------
+    # Post-qsub: fill in real PBS job ID (status → dispatched)
+    # ------------------------------------------------------------------
+    if virtual_id:
+        try:
+            update_queue_entry(
+                virtual_id,
+                pbs_job_id=job_id,
+                status="dispatched",
+                joblog_path=ctx_obj.get("joblog"),
+            )
+        except Exception as e:
+            logger.debug("Failed to update queue entry: %s", e)
 
     # Log job submission for status and resource tracking (do this before terse return)
     try:
-        cmd_str = " ".join(command)
-        tags = ctx_obj.get("tags") or []
         resource_tracker.log_job_submitted(
             job_id=job_id,
             command=cmd_str,
@@ -253,7 +338,7 @@ def execute_unified(
             cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
         )
     except Exception as e:
-        logging.debug("Failed to log job submission: %s", e)
+        logger.debug("Failed to log job submission: %s", e)
 
     # Log execution to history system (must happen before terse mode early return)
     try:
@@ -271,13 +356,13 @@ def execute_unified(
             tags=ctx_obj.get("tags") or [],
         )
     except Exception as e:
-        logging.debug("Failed to log execution history: %s", e)
+        logger.debug("Failed to log execution history: %s", e)
 
     # Handle terse mode - emit real PBS job ID and return immediately (for pipeline use)
     # Virtual IDs will be emitted here once Phase 3 introduces pending-dispatch.
     if ctx_obj.get("terse", False):
         click.echo(job_id)
-        logging.info(
+        logger.info(
             "Terse mode: emitted job ID %s and returning immediately",
             job_id,
         )

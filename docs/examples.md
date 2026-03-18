@@ -131,6 +131,29 @@ qxub config list
 qxub config reset
 ```
 
+## Environment Variables
+
+Pass custom environment variables to your job using `--var` or `--vars`:
+
+```bash
+# Single variable
+qxub exec --var "MY_VAR=value" --env base -- echo '$MY_VAR'
+
+# Multiple variables with --var (repeatable)
+qxub exec --var "FOO=bar" --var "BAZ=qux" --default -- 'echo $FOO $BAZ'
+
+# Comma-separated list with --vars
+qxub exec --vars "FOO=bar,BAZ=qux" --env base -- python script.py
+
+# Both options together
+qxub exec --var "DEBUG=1" --vars "INPUT=/data,OUTPUT=/results" --env pytorch -- python train.py
+
+# Variables with spaces (quoted values)
+qxub exec --var "GREETING=hello world" --env myenv -- 'echo $GREETING'
+```
+
+Variables are exported before your command runs, making them available to your script and any subprocesses.
+
 ## Basic Execution
 
 ```bash

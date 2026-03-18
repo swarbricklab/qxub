@@ -7,9 +7,12 @@ Uses SQLite for simple querying and analysis.
 
 import json
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 import re
 import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -63,11 +66,26 @@ def _resolve_tracker_db_path() -> Path:
 
         try:
             shutil.copy2(str(old_path), str(resolved))
-            logging.debug("Migrated resources.db → %s", resolved)
+            logger.debug("Migrated resources.db → %s", resolved)
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Could not migrate resources.db: %s", exc)
+            logger.debug("Could not migrate resources.db: %s", exc)
 
     return resolved
+
+
+# Default timeout (seconds) for all sqlite connections.  The shared DB on
+# /g/data can experience lock contention when many concurrent qxtat check
+# processes race on the same file.  30 s is generous enough to ride out
+# filesystem latency spikes on Gadi /scratch.
+_SQLITE_TIMEOUT = 30
+
+
+class DatabaseError(Exception):
+    """Raised when a sqlite query fails due to a transient or I/O error.
+
+    Distinct from a *missing row* (which returns ``None``).  Callers can
+    catch this to distinguish "DB unreachable" from "job not found".
+    """
 
 
 class ResourceTracker:
@@ -81,9 +99,23 @@ class ResourceTracker:
         self.db_path = Path(db_path)
         self._init_database()
 
+    def _connect(self, timeout: float = _SQLITE_TIMEOUT):
+        """Return a new SQLite connection with mmap disabled.
+
+        Disabling mmap (``PRAGMA mmap_size=0``) prevents SIGBUS crashes
+        on shared/network filesystems (Lustre, GPFS) where concurrent
+        writers can corrupt memory-mapped pages.
+        """
+        conn = sqlite3.connect(self.db_path, timeout=timeout)
+        conn.execute("PRAGMA mmap_size=0")
+        return conn
+
     def _init_database(self):
         """Initialize SQLite database with resource tracking table."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
+            # DELETE mode avoids -shm sidecar which is always mmap'd.
+            # WAL's -shm causes SIGBUS on shared filesystems (Lustre/GPFS).
+            conn.execute("PRAGMA journal_mode=DELETE")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS job_resources (
@@ -150,9 +182,7 @@ class ResourceTracker:
             columns = [row[1] for row in cursor.fetchall()]
 
             if "status" not in columns:
-                logging.debug(
-                    "Migrating database schema to add status tracking columns"
-                )
+                logger.debug("Migrating database schema to add status tracking columns")
 
                 # Add new columns
                 conn.execute(
@@ -177,29 +207,29 @@ class ResourceTracker:
                 )
 
                 conn.commit()
-                logging.debug("Database schema migration completed")
+                logger.debug("Database schema migration completed")
 
             if "tags" not in columns:
-                logging.debug("Migrating database schema to add tags column")
+                logger.debug("Migrating database schema to add tags column")
                 conn.execute(
                     "ALTER TABLE job_resources ADD COLUMN tags TEXT DEFAULT '[]'"
                 )
                 conn.commit()
-                logging.debug("Tags column migration completed")
+                logger.debug("Tags column migration completed")
 
             if "username" not in columns:
-                logging.debug("Migrating database schema to add username column")
+                logger.debug("Migrating database schema to add username column")
                 conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
                 conn.commit()
-                logging.debug("Username column migration completed")
+                logger.debug("Username column migration completed")
 
             if "joblog_path" not in columns:
-                logging.debug("Migrating database schema to add joblog_path column")
+                logger.debug("Migrating database schema to add joblog_path column")
                 conn.execute("ALTER TABLE job_resources ADD COLUMN joblog_path TEXT")
                 conn.commit()
-                logging.debug("joblog_path column migration completed")
+                logger.debug("joblog_path column migration completed")
         except Exception as e:
-            logging.debug("Database migration failed (may be normal): %s", e)
+            logger.debug("Database migration failed (may be normal): %s", e)
 
     def log_job_resources(
         self, job_id: str, resource_data: Dict[str, Any], command: Optional[str] = None
@@ -259,7 +289,7 @@ class ResourceTracker:
             }
 
             # Insert into database
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 placeholders = ", ".join(["?" for _ in record])
                 columns = ", ".join(record.keys())
 
@@ -269,11 +299,11 @@ class ResourceTracker:
                 )
                 conn.commit()
 
-            logging.debug("Logged resource data for job %s", job_id)
+            logger.debug("Logged resource data for job %s", job_id)
             return True
 
         except Exception as e:
-            logging.debug("Failed to log resource data for job %s: %s", job_id, e)
+            logger.debug("Failed to log resource data for job %s: %s", job_id, e)
             return False
 
     def update_job_resources(self, job_id: str, resource_data: Dict[str, Any]) -> bool:
@@ -377,28 +407,35 @@ class ResourceTracker:
                     values.append(value)
 
             if not set_clauses:
-                logging.debug("No valid resource data to update for job %s", job_id)
+                logger.debug("No valid resource data to update for job %s", job_id)
                 return False
 
             values.append(job_id)  # For WHERE clause
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
+                # Legacy table
                 sql = f"UPDATE job_resources SET {', '.join(set_clauses)} WHERE job_id = ?"
                 result = conn.execute(sql, values)
 
                 if result.rowcount == 0:
-                    logging.debug(
+                    logger.debug(
                         "No existing record found to update for job %s", job_id
                     )
-                    return False
+
+                # Unified queue table — same columns, different WHERE
+                queue_values = values[:-1] + [job_id]
+                queue_sql = (
+                    f"UPDATE queue SET {', '.join(set_clauses)} WHERE pbs_job_id = ?"
+                )
+                conn.execute(queue_sql, queue_values)
 
                 conn.commit()
 
-            logging.debug("Updated resource data for job %s", job_id)
+            logger.debug("Updated resource data for job %s", job_id)
             return True
 
         except Exception as e:
-            logging.debug("Failed to update resource data for job %s: %s", job_id, e)
+            logger.debug("Failed to update resource data for job %s: %s", job_id, e)
             return False
 
     def _clean_command(self, command: Optional[str]) -> Optional[str]:
@@ -509,14 +546,14 @@ class ResourceTracker:
         """
         params.append(limit)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
 
     def get_efficiency_stats(self) -> Dict[str, Any]:
         """Get overall efficiency statistics."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """
                 SELECT
@@ -551,7 +588,7 @@ class ResourceTracker:
         self, efficiency_threshold: float = 50.0, limit: int = 10
     ) -> List[Dict[str, Any]]:
         """Get jobs with low resource efficiency."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
@@ -576,7 +613,7 @@ class ResourceTracker:
 
     def get_resource_trends(self, days: int = 30) -> Dict[str, Any]:
         """Get resource usage trends over time."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             cursor = conn.execute(
                 """
                 SELECT
@@ -611,7 +648,12 @@ class ResourceTracker:
         queue: Optional[str] = None,
         cpus_requested: Optional[int] = None,
     ) -> bool:
-        """Log initial job submission."""
+        """Log initial job submission.
+
+        Writes to the legacy ``job_resources`` table **and** updates the
+        unified ``queue`` row (looked up by ``pbs_job_id``) so that both
+        tables stay in sync during the transition period.
+        """
         try:
             now = datetime.now().isoformat()
             clean_command = self._clean_command(command)
@@ -624,7 +666,8 @@ class ResourceTracker:
                 except Exception:
                     username = ""
 
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
+                # Legacy table
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO job_resources
@@ -645,9 +688,24 @@ class ResourceTracker:
                         cpus_requested,
                     ),
                 )
+
+                # Unified queue table — update the row that was created
+                # by create_queue_entry() before qsub.
+                conn.execute(
+                    """
+                    UPDATE queue
+                    SET status='submitted', last_status_update=?,
+                        username=?, joblog_path=COALESCE(joblog_path, ?),
+                        queue_name=COALESCE(queue_name, ?),
+                        cpus_requested=COALESCE(cpus_requested, ?)
+                    WHERE pbs_job_id=?
+                    """,
+                    (now, username, joblog_path, queue, cpus_requested, job_id),
+                )
+
                 conn.commit()
 
-            logging.debug(
+            logger.debug(
                 "Logged job submission for %s (user: %s, tags: %s)",
                 job_id,
                 username,
@@ -655,16 +713,19 @@ class ResourceTracker:
             )
             return True
         except Exception as e:
-            logging.debug("Failed to log job submission for %s: %s", job_id, e)
+            logger.debug("Failed to log job submission for %s: %s", job_id, e)
             return False
 
     def update_job_status(self, job_id: str, status: str) -> bool:
-        """Update job status (submitted -> running -> completed/failed/cancelled)."""
+        """Update job status (submitted -> running -> completed/failed/cancelled).
+
+        Writes to both ``job_resources`` (legacy) and unified ``queue`` table.
+        """
         try:
             now = datetime.now().isoformat()
 
-            with sqlite3.connect(self.db_path) as conn:
-                # Update status and timestamp
+            with self._connect() as conn:
+                # Legacy table
                 conn.execute(
                     "UPDATE job_resources SET status=?, last_status_update=? WHERE job_id=?",
                     (status, now, job_id),
@@ -682,27 +743,43 @@ class ResourceTracker:
                         (now, job_id),
                     )
 
+                # Unified queue table
+                conn.execute(
+                    "UPDATE queue SET status=?, last_status_update=? WHERE pbs_job_id=?",
+                    (status, now, job_id),
+                )
+                if status == "running":
+                    conn.execute(
+                        "UPDATE queue SET started_at=? WHERE pbs_job_id=?",
+                        (now, job_id),
+                    )
+                elif status in ("completed", "failed"):
+                    conn.execute(
+                        "UPDATE queue SET completed_at=? WHERE pbs_job_id=?",
+                        (now, job_id),
+                    )
+
                 conn.commit()
 
-            logging.debug("Updated job %s status to %s", job_id, status)
+            logger.debug("Updated job %s status to %s", job_id, status)
             return True
         except Exception as e:
-            logging.debug("Failed to update job status for %s: %s", job_id, e)
+            logger.debug("Failed to update job status for %s: %s", job_id, e)
             return False
 
     def update_job_exit_code(self, job_id: str, exit_code: int) -> bool:
         """Update the exit code for a job."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     "UPDATE job_resources SET exit_code=? WHERE job_id=?",
                     (exit_code, job_id),
                 )
                 conn.commit()
-            logging.debug("Updated job %s exit_code to %s", job_id, exit_code)
+            logger.debug("Updated job %s exit_code to %s", job_id, exit_code)
             return True
         except Exception as e:
-            logging.debug("Failed to update exit code for %s: %s", job_id, e)
+            logger.debug("Failed to update exit code for %s: %s", job_id, e)
             return False
 
     def finalize_job(self, job_id: str, exit_code: int, joblog_path: str) -> bool:
@@ -713,11 +790,14 @@ class ResourceTracker:
         only appends the resource section to the joblog AFTER the script exits.
         The joblog_path is stored so that ``backfill_resources()`` can pick it
         up the next time ``qxub resources list`` is run.
+
+        Writes to both ``job_resources`` (legacy) and unified ``queue`` table.
         """
         now = datetime.now().isoformat()
         status = "completed" if exit_code == 0 else "failed"
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
+                # Legacy table
                 conn.execute(
                     """UPDATE job_resources
                        SET status=?, exit_code=?, completed_at=?, last_status_update=?,
@@ -725,13 +805,23 @@ class ResourceTracker:
                        WHERE job_id=?""",
                     (status, exit_code, now, now, joblog_path, job_id),
                 )
+
+                # Unified queue table
+                conn.execute(
+                    """UPDATE queue
+                       SET status=?, exit_code=?, completed_at=?, last_status_update=?,
+                           joblog_path=COALESCE(joblog_path, ?)
+                       WHERE pbs_job_id=?""",
+                    (status, exit_code, now, now, joblog_path, job_id),
+                )
+
                 conn.commit()
-            logging.debug(
+            logger.debug(
                 "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
             )
             return True
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("Failed to finalize job %s: %s", job_id, exc)
+            logger.debug("Failed to finalize job %s: %s", job_id, exc)
             return False
 
     # ------------------------------------------------------------------
@@ -773,7 +863,7 @@ class ResourceTracker:
     def _resolve_log_dirs(self) -> List[str]:
         """Return candidate log directories derived from already-stored paths."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 rows = conn.execute(
                     "SELECT DISTINCT joblog_path FROM job_resources"
                     " WHERE joblog_path IS NOT NULL LIMIT 20"
@@ -813,7 +903,7 @@ class ResourceTracker:
 
         # ---- Phase 1: discover joblog paths for jobs that lack them ----------
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 missing = conn.execute(
                     """
                     SELECT job_id FROM job_resources
@@ -828,7 +918,7 @@ class ResourceTracker:
                 ).fetchall()
             missing_ids = {row[0] for row in missing}
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("backfill phase-1 query failed: %s", exc)
+            logger.debug("backfill phase-1 query failed: %s", exc)
             missing_ids = set()
 
         if missing_ids:
@@ -840,23 +930,23 @@ class ResourceTracker:
                 }
                 if matched:
                     try:
-                        with sqlite3.connect(self.db_path) as conn:
+                        with self._connect() as conn:
                             conn.executemany(
                                 "UPDATE job_resources SET joblog_path=?"
                                 " WHERE job_id=? AND joblog_path IS NULL",
                                 [(path, jid) for jid, path in matched.items()],
                             )
                             conn.commit()
-                        logging.debug(
+                        logger.debug(
                             "Discovered joblog paths for %d historical jobs",
                             len(matched),
                         )
                     except Exception as exc:  # pylint: disable=broad-except
-                        logging.debug("backfill path-update failed: %s", exc)
+                        logger.debug("backfill path-update failed: %s", exc)
 
         # ---- Phase 2: parse joblogs and fill resource columns ---------------
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     """
@@ -870,7 +960,7 @@ class ResourceTracker:
                     (limit,),
                 ).fetchall()
         except Exception as exc:  # pylint: disable=broad-except
-            logging.debug("backfill phase-2 query failed: %s", exc)
+            logger.debug("backfill phase-2 query failed: %s", exc)
             return 0
 
         filled = 0
@@ -881,36 +971,75 @@ class ResourceTracker:
                     ok = self.update_job_resources(row["job_id"], data)
                     if ok:
                         filled += 1
-                        logging.debug("Backfilled resources for %s", row["job_id"])
+                        logger.debug("Backfilled resources for %s", row["job_id"])
             except Exception as exc:  # pylint: disable=broad-except
-                logging.debug("Backfill failed for %s: %s", row["job_id"], exc)
+                logger.debug("Backfill failed for %s: %s", row["job_id"], exc)
         return filled
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get current status of a specific job."""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute(
-                    """
-                    SELECT job_id, status, command, submitted_at, started_at,
-                           completed_at, last_status_update, exit_code, joblog_path
-                    FROM job_resources WHERE job_id=?
-                    """,
-                    (job_id,),
+        """Get current status of a specific job.
+
+        Checks the unified ``queue`` table first (by ``pbs_job_id``), then
+        falls back to the legacy ``job_resources`` table.
+
+        Returns ``None`` when the job is genuinely not in the database.
+        Raises :class:`DatabaseError` on transient sqlite failures so the
+        caller can distinguish "not found" from "DB unreachable".
+
+        Retries up to 3 times with exponential backoff to tolerate
+        filesystem latency spikes and lock contention.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                with self._connect() as conn:
+                    conn.row_factory = sqlite3.Row
+
+                    # Try unified queue table first (new jobs)
+                    row = conn.execute(
+                        """
+                        SELECT pbs_job_id AS job_id, status, command,
+                               submitted_at, started_at, completed_at,
+                               last_status_update, exit_code, joblog_path
+                        FROM queue WHERE pbs_job_id=?
+                        """,
+                        (job_id,),
+                    ).fetchone()
+                    if row:
+                        return dict(row)
+
+                    # Fall back to legacy job_resources table
+                    row = conn.execute(
+                        """
+                        SELECT job_id, status, command, submitted_at, started_at,
+                               completed_at, last_status_update, exit_code, joblog_path
+                        FROM job_resources WHERE job_id=?
+                        """,
+                        (job_id,),
+                    ).fetchone()
+                    return dict(row) if row else None
+            except Exception as e:  # pylint: disable=broad-except
+                last_exc = e
+                logger.debug(
+                    "get_job_status attempt %d failed for %s: %s",
+                    attempt + 1,
+                    job_id,
+                    e,
                 )
-                row = cursor.fetchone()
-                return dict(row) if row else None
-        except Exception as e:
-            logging.debug("Failed to get job status for %s: %s", job_id, e)
-            return None
+                if attempt < 2:
+                    time.sleep(0.5 * (2**attempt))  # 0.5 s, 1 s
+
+        # All retries exhausted — raise so the caller knows the DB failed.
+        raise DatabaseError(
+            f"Failed to query job status for {job_id} after 3 attempts: {last_exc}"
+        ) from last_exc
 
     def get_jobs_by_status(
         self, status: str = None, limit: int = None
     ) -> List[Dict[str, Any]]:
         """Get jobs filtered by status."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
 
                 if status:
@@ -937,13 +1066,13 @@ class ResourceTracker:
                 cursor = conn.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logging.debug("Failed to get jobs by status: %s", e)
+            logger.debug("Failed to get jobs by status: %s", e)
             return []
 
     def get_status_summary(self) -> Dict[str, int]:
         """Get counts of jobs by status."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     SELECT status, COUNT(*) as count
@@ -954,13 +1083,13 @@ class ResourceTracker:
                 )
                 return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception as e:
-            logging.debug("Failed to get status summary: %s", e)
+            logger.debug("Failed to get status summary: %s", e)
             return {}
 
     def cleanup_old_jobs(self, days_old: int = 30) -> int:
         """Remove job records older than specified days. Returns count of deleted jobs."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     DELETE FROM job_resources
@@ -973,17 +1102,17 @@ class ResourceTracker:
                 deleted_count = cursor.rowcount
                 conn.commit()
 
-            logging.debug("Cleaned up %d old job records", deleted_count)
+            logger.debug("Cleaned up %d old job records", deleted_count)
             return deleted_count
         except Exception as e:
-            logging.debug("Failed to cleanup old jobs: %s", e)
+            logger.debug("Failed to cleanup old jobs: %s", e)
             return 0
 
     def export_csv(self, output_path: Path, limit: Optional[int] = None):
         """Export resource data to CSV."""
         import csv
 
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             query = "SELECT * FROM job_resources ORDER BY timestamp DESC"
             if limit:
                 query += f" LIMIT {limit}"
@@ -1000,5 +1129,23 @@ class ResourceTracker:
                     writer.writerow(dict(zip(columns, row)))
 
 
-# Global instance
-resource_tracker = ResourceTracker()
+# Lazy global instance — avoids running _init_database() at import time,
+# which would fail fatally if the DB is corrupted or on a broken filesystem.
+_resource_tracker = None
+
+
+def _get_resource_tracker():
+    global _resource_tracker  # noqa: PLW0603
+    if _resource_tracker is None:
+        _resource_tracker = ResourceTracker()
+    return _resource_tracker
+
+
+class _LazyResourceTracker:
+    """Proxy that defers ResourceTracker construction until first use."""
+
+    def __getattr__(self, name):
+        return getattr(_get_resource_tracker(), name)
+
+
+resource_tracker = _LazyResourceTracker()

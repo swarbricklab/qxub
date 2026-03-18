@@ -74,6 +74,8 @@ qxub exec --shortcut python -- script.py
 | `--runtime` / `--time` | Walltime limit (workflow-friendly, default: configured) | `--runtime 2h30m` or `--time 1h` |
 | `--disk` / `--jobfs` | Local disk requirement (workflow-friendly, default: configured) | `--disk 100GB` or `--jobfs 50GB` |
 | `--volumes` / `--storage` | NCI storage volumes to mount (default: configured) | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
+| `--var` | Set environment variable in job (repeatable) | `--var FOO=bar --var BAZ=qux` |
+| `--vars` | Set multiple env vars (comma-separated) | `--vars "FOO=bar,BAZ=qux"` |
 | `--queue` | PBS queue (use `auto` for cost optimization!) | `--queue auto` |
 | `--name` | Job name | `--name myjob` |
 | `--project` | PBS project | `--project a56` |

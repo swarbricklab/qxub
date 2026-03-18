@@ -9,7 +9,7 @@ import sys
 
 import click
 
-from .platform import (
+from .platforms import (
     get_current_platform,
     get_platform,
     list_platforms,

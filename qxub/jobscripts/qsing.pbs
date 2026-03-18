@@ -65,6 +65,10 @@ fi
 if [ -n "$post_cmd_b64" ]; then
     post_cmd=$(echo "$post_cmd_b64" | base64 -d)
 fi
+# Decode user-defined environment variables
+if [ -n "$user_vars_b64" ]; then
+    user_vars=$(echo "$user_vars_b64" | base64 -d)
+fi
 
 echo "💻 Container command: $cmd"
 if [ -n "$pre_cmd" ]; then
@@ -91,6 +95,18 @@ error_handler() {
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     update_job_status "failed" "$exit_code"
+
+    # Queue Slack/Discord notification if enabled
+    if [ "$qxub_notify" = "true" ]; then
+        echo "📬 Queueing failure notification..."
+        qxub exec --internet --terse --default -- qxub notify send \
+            --job-id "${PBS_JOBID:-unknown}" \
+            --exit-code "$exit_code" \
+            --job-name "${PBS_JOBNAME:-unknown}" \
+            --output-dir "${qxub_notify_outdir:-$PWD}" \
+            2>/dev/null || true
+    fi
+
     exit $exit_code
 }
 
@@ -110,6 +126,18 @@ fi
 # Switch work directory
 echo "📂 Changing to working directory: $cwd"
 cd $cwd
+
+# Export user-defined environment variables
+if [ -n "$user_vars" ]; then
+    echo "🔧 Setting user-defined environment variables:"
+    IFS=';' read -ra VARS <<< "$user_vars"
+    for var_def in "${VARS[@]}"; do
+        if [ -n "$var_def" ]; then
+            echo "   export $var_def"
+            export "$var_def"
+        fi
+    done
+fi
 
 # Ensure output directories exist and files are accessible (only if not in quiet mode)
 if [ "$quiet" != "true" ]; then
@@ -211,4 +239,16 @@ else
 fi
 
 update_job_status "completed" "0"
+
+# Queue Slack/Discord notification if enabled
+if [ "$qxub_notify" = "true" ]; then
+    echo "📬 Queueing notification job..."
+    qxub exec --internet --terse --default -- qxub notify send \
+        --job-id "${PBS_JOBID:-unknown}" \
+        --exit-code 0 \
+        --job-name "${PBS_JOBNAME:-unknown}" \
+        --output-dir "${qxub_notify_outdir:-$PWD}" \
+        2>/dev/null || echo "⚠️  Failed to queue notification (non-fatal)"
+fi
+
 echo "🎉 Job completed successfully!"

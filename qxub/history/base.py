@@ -177,7 +177,7 @@ class CommandHistoryLogger:
             # Just log the error and continue
             import logging
 
-            logging.debug("Failed to log command to history: %s", str(e))
+            logger.debug("Failed to log command to history: %s", str(e))
 
     def get_recent_commands(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent commands from history."""

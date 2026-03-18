@@ -21,7 +21,8 @@ from .exec_cli import exec_cli
 from .history_cli import history
 from .interactive_cli import interactive_cli
 from .monitor_cli import monitor_cli
-from .platform import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
+from .notify_cli import notify_cli
+from .platforms import estimate_cmd, platform_cli, select_queue_cmd, validate_cmd
 from .replay_cli import replay_cli
 from .resources_cli import resources
 from .status_cli import status_cli
@@ -74,6 +75,7 @@ qxub.add_command(alias_cli)  # Deprecated - use qxub exec --alias instead
 qxub.add_command(cancel_cli)
 qxub.add_command(history)
 qxub.add_command(monitor_cli)
+qxub.add_command(notify_cli)
 qxub.add_command(resources)
 qxub.add_command(status_cli)
 qxub.add_command(platform_cli)

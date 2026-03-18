@@ -1,6 +1,8 @@
 """Configuration handling logic extracted from CLI for better separation of concerns."""
 
 import logging
+
+logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 
@@ -68,6 +70,15 @@ def apply_config_defaults(params, config_manager):
         params["project"] = defaults.get("project", os.getenv("PROJECT"))
     if not params["resources"]:  # Empty tuple means no resources provided
         params["resources"] = defaults.get("resources", [])
+
+    # Email notification defaults
+    if params.get("email") == "__DISABLED__":
+        # --no-notify was specified, suppress notifications
+        params["email"] = None
+    elif params.get("email") is None:
+        params["email"] = defaults.get("email")
+    if params.get("email_opts") is None:
+        params["email_opts"] = defaults.get("email_opts", "ae")  # abort + end
 
     return params
 
@@ -143,7 +154,7 @@ def select_auto_queue(params):
         from pathlib import Path
 
         from ..resources import parse_walltime  # noqa: F811
-        from .platform import PlatformLoader
+        from .platforms import PlatformLoader
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
@@ -156,7 +167,7 @@ def select_auto_queue(params):
         platform_names = loader.list_platforms()
 
         if not platform_names:
-            logging.warning(
+            logger.warning(
                 "No platforms available for auto queue selection, using 'normal'"
             )
             params["queue"] = "normal"
@@ -222,25 +233,25 @@ def select_auto_queue(params):
                             best_cost = cost
                             best_queue = selected_queue
             except Exception as e:
-                logging.debug(
+                logger.debug(
                     f"Failed to select queue from platform {platform.name}: {e}"
                 )
                 continue
 
         if best_queue:
             params["queue"] = best_queue
-            logging.info("Auto-selected queue: %s", best_queue)
+            logger.info("Auto-selected queue: %s", best_queue)
         else:
-            logging.warning("No suitable queue found for requirements, using 'normal'")
+            logger.warning("No suitable queue found for requirements, using 'normal'")
             params["queue"] = "normal"
 
     except ImportError:
-        logging.warning(
+        logger.warning(
             "Platform system not available for auto queue selection, using 'normal'"
         )
         params["queue"] = "normal"
     except Exception as e:
-        logging.warning("Auto queue selection failed: %s, using 'normal'", e)
+        logger.warning("Auto queue selection failed: %s, using 'normal'", e)
         params["queue"] = "normal"
 
     return params
@@ -252,6 +263,13 @@ def build_qsub_options(params):
     if params.get("resources"):
         options += " ".join([f"-l {resource}" for resource in params["resources"]])
     options += f" -o {params['joblog']}"
+
+    # Email notifications via PBS -M and -m
+    if params.get("email"):
+        options += f" -M {params['email']}"
+        email_opts = params.get("email_opts", "ae")  # default: abort + end
+        options += f" -m {email_opts}"
+
     return options
 
 
@@ -281,7 +299,7 @@ def adjust_resources_for_queue(params):
 
     # User didn't explicitly set CPUs - check if we need to adjust for queue limits
     try:
-        from qxub.platform import get_current_platform
+        from qxub.platforms import get_current_platform
 
         # Get the current platform
         platform = get_current_platform()
@@ -297,7 +315,7 @@ def adjust_resources_for_queue(params):
 
                 if current_ncpus and current_ncpus > queue.limits.max_cpus:
                     # Default CPU count exceeds queue limit - adjust it gracefully
-                    logging.info(
+                    logger.info(
                         f"Automatically adjusting ncpus from {current_ncpus} to {queue.limits.max_cpus} "
                         f"for queue '{queue_name}' (default exceeds queue maximum)"
                     )
@@ -314,7 +332,7 @@ def adjust_resources_for_queue(params):
 
     except Exception as e:
         # Platform system not available or other error - don't adjust
-        logging.debug(f"Could not adjust resources for queue: {e}")
+        logger.debug(f"Could not adjust resources for queue: {e}")
 
     return params
 
@@ -333,6 +351,6 @@ def process_job_options(params, config_manager):
     # Build qsub options
     options = build_qsub_options(params)
 
-    logging.info("Options: %s", options)
+    logger.info("Options: %s", options)
 
     return params, options
