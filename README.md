@@ -43,6 +43,10 @@ qxub exec --resources mem=16GB,ncpus=8,walltime=2:00:00 --env myenv -- python sc
 qxub exec --queue auto --mem 1200GB --env myenv -- python big_job.py    # → megamem (58% cheaper!)
 qxub exec --queue auto --cpus 5000 --env myenv -- python parallel.py    # → normalsr
 
+# GPU jobs - queue and CPUs are set automatically
+qxub exec --gpus 1 --env pytorch -- python train.py                     # → gpuvolta, 12 CPUs
+qxub exec --gpus 4 --gpu-type a100 --env pytorch -- python train.py     # → dgxa100, 64 CPUs
+
 # Preview without running
 qxub exec --dry --env myenv -- python script.py
 
@@ -73,6 +77,8 @@ qxub exec --shortcut python -- script.py
 | `--cpus` / `--threads` | CPU cores/threads (workflow-friendly, default: configured) | `--cpus 8` or `--threads 4` |
 | `--runtime` / `--time` | Walltime limit (workflow-friendly, default: configured) | `--runtime 2h30m` or `--time 1h` |
 | `--disk` / `--jobfs` | Local disk requirement (workflow-friendly, default: configured) | `--disk 100GB` or `--jobfs 50GB` |
+| `--gpus` | Number of GPUs (auto-selects queue and CPUs) | `--gpus 1` or `--gpus 4` |
+| `--gpu-type` | GPU type: v100 (default) or a100 | `--gpu-type a100` |
 | `--volumes` / `--storage` | NCI storage volumes to mount (default: configured) | `--volumes gdata/a56` or `--storage gdata/a56+scratch/a56` |
 | `--var` | Set environment variable in job (repeatable) | `--var FOO=bar --var BAZ=qux` |
 | `--vars` | Set multiple env vars (comma-separated) | `--vars "FOO=bar,BAZ=qux"` |
