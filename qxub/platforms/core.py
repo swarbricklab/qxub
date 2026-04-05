@@ -96,6 +96,8 @@ class Queue:
     internet_connectivity: bool = False
     constraints: List[str] = field(default_factory=list)
     auto_min_cpus: Optional[int] = None
+    gpu_type: Optional[str] = None
+    cpus_per_gpu: Optional[int] = None
 
     def get_max_walltime(self, core_count: int) -> Optional[str]:
         """Get maximum walltime for given core count."""
@@ -421,6 +423,8 @@ class PlatformLoader:
             internet_connectivity=data.get("internet_connectivity", False),
             constraints=data.get("constraints", []),
             auto_min_cpus=data.get("auto_min_cpus"),
+            gpu_type=data.get("gpu_type"),
+            cpus_per_gpu=data.get("cpus_per_gpu"),
         )
 
     def get_platform(self, name: str) -> Optional[Platform]:

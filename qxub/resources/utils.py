@@ -208,6 +208,15 @@ def evaluate_condition(condition: str, resources: dict) -> bool:
         # Get resource value
         if variable == "gpu_requested":
             resource_value = resources.get("gpus", 0)
+        elif variable == "gpu_type":
+            # String comparison for GPU type (e.g., "gpu_type == a100")
+            resource_value = resources.get("gpu_type", "")
+            if operator in ("==", "="):
+                return resource_value == value_str.lower()
+            elif operator == "!=":
+                return resource_value != value_str.lower()
+            else:
+                return False
         elif variable == "cpus":
             resource_value = resources.get("cpus", 1)
         elif variable == "memory":

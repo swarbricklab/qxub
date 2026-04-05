@@ -102,6 +102,10 @@ class ResourceMapper:
         """Add CPU/cores specification."""
         self.pbs_resources.append(f"ncpus={cpus}")
 
+    def add_gpus(self, gpus: int) -> None:
+        """Add GPU count specification."""
+        self.pbs_resources.append(f"ngpus={gpus}")
+
     def add_disk(self, disk: Union[str, int], unit: str = "MB") -> None:
         """Add disk/jobfs specification."""
         if isinstance(disk, int):

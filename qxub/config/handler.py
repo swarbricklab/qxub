@@ -153,8 +153,8 @@ def select_auto_queue(params):
     try:
         from pathlib import Path
 
+        from ..platforms.core import PlatformLoader
         from ..resources import parse_walltime  # noqa: F811
-        from .platforms import PlatformLoader
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
@@ -199,6 +199,10 @@ def select_auto_queue(params):
         # Add internet connectivity requirement if specified
         if params.get("internet"):
             requirements["internet"] = True
+
+        # Add GPU type for queue selection if specified
+        if params.get("gpu_type"):
+            requirements["gpu_type"] = params["gpu_type"].lower()
 
         # Try to find best queue from any platform
         best_queue = None
