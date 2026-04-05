@@ -277,6 +277,70 @@ def build_qsub_options(params):
     return options
 
 
+def adjust_cpus_for_gpus(params):
+    """Auto-set ncpus based on cpus_per_gpu when GPUs are requested without explicit CPUs."""
+    if params.get("cpus_explicit"):
+        return params
+
+    queue_name = params.get("queue")
+    if not queue_name or queue_name == "auto":
+        return params
+
+    # Find how many GPUs were requested
+    ngpus = 0
+    resources = list(params.get("resources") or [])
+    for r in resources:
+        if r.startswith("ngpus="):
+            ngpus = int(r.split("=", 1)[1])
+            break
+
+    if ngpus <= 0:
+        return params
+
+    try:
+        from pathlib import Path
+
+        from ..platforms.core import PlatformLoader
+
+        platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
+        if platform_paths_env:
+            search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
+            loader = PlatformLoader(search_paths=search_paths)
+        else:
+            loader = PlatformLoader()
+
+        for platform_name in loader.list_platforms():
+            platform = loader.get_platform(platform_name)
+            if not platform:
+                continue
+            queue = platform.get_queue(queue_name)
+            if queue and queue.cpus_per_gpu:
+                required_cpus = ngpus * queue.cpus_per_gpu
+                # Replace or inject ncpus in resources
+                has_ncpus = any(r.startswith("ncpus=") for r in resources)
+                if has_ncpus:
+                    resources = [
+                        f"ncpus={required_cpus}" if r.startswith("ncpus=") else r
+                        for r in resources
+                    ]
+                else:
+                    resources.append(f"ncpus={required_cpus}")
+                params["resources"] = resources
+                logger.info(
+                    "Auto-set ncpus=%d for %d GPU(s) on queue '%s' "
+                    "(%d cpus_per_gpu)",
+                    required_cpus,
+                    ngpus,
+                    queue_name,
+                    queue.cpus_per_gpu,
+                )
+                break
+    except Exception as e:
+        logger.debug("Could not adjust CPUs for GPU queue: %s", e)
+
+    return params
+
+
 def adjust_resources_for_queue(params):
     """Adjust resources to respect queue limits for explicitly specified queues.
 
@@ -348,6 +412,9 @@ def process_job_options(params, config_manager):
 
     # Handle auto queue selection
     params = select_auto_queue(params)
+
+    # Auto-set CPUs based on GPU queue's cpus_per_gpu
+    params = adjust_cpus_for_gpus(params)
 
     # Adjust resources for explicitly specified queues
     params = adjust_resources_for_queue(params)
