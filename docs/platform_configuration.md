@@ -27,9 +27,12 @@ qxub --queue auto -l mem=300GB --env myenv -- python memory_job.py
 qxub --queue auto -l mem=1200GB --env myenv -- python huge_job.py
 # → Selects 'megamem' queue (1.25 SU/CPU·hr) - 58% cheaper than hugemem!
 
-# GPU jobs
-qxub --queue auto -l ngpus=1 -l ncpus=12 --env pytorch -- python train.py
-# → Selects 'gpuvolta' queue
+# GPU jobs — queue and CPUs set automatically
+qxub exec --gpus 1 --env pytorch -- python train.py
+# → Selects 'gpuvolta' queue, ncpus=12
+
+qxub exec --gpus 4 --gpu-type a100 --env pytorch -- python train.py
+# → Selects 'dgxa100' queue, ncpus=64
 
 # Large-scale jobs
 qxub --queue auto -l ncpus=5000 --env myenv -- python parallel_job.py
@@ -52,8 +55,10 @@ qxub automatically chooses the most cost-effective queue based on your requireme
 - **≤48 CPUs**: `normal` (2.0 SU/CPU·hr) - Default queue
 - **≤3200 CPUs**: `normalsl` (1.5 SU/CPU·hr) - Balanced option
 
-### Special Cases
-- **GPU required**: `gpuvolta` (3.0 SU/CPU·hr) - GPU compute
+### GPU Selection
+- **`--gpus N`**: Selects `gpuvolta` (V100, 3.0 SU/CPU·hr, 12 CPUs/GPU)
+- **`--gpus N --gpu-type a100`**: Selects `dgxa100` (A100, 4.5 SU/CPU·hr, 16 CPUs/GPU)
+- CPUs are auto-calculated: `ncpus = gpus × cpus_per_gpu`
 
 ## Cost Savings Example
 
@@ -85,7 +90,8 @@ Some queues have minimum requirements enforced by PBS:
 | `hugemembw` | High-memory | 1.25 | 1,020GB | 140 | Cost-effective high memory |
 | `hugemem` | High-memory | 3.0 | 1,470GB | 192 | High memory |
 | `megamem` | Mega-memory | 1.25 | 2,990GB | 96 | Extreme memory (best value) |
-| `gpuvolta` | GPU | 3.0 | 382GB | 960 | GPU compute |
+| `gpuvolta` | GPU (V100) | 3.0 | 382GB | 48 | V100 GPU compute (4 GPUs/node, 12 CPUs/GPU) |
+| `dgxa100` | GPU (A100) | 4.5 | 2,000GB | 128 | A100 GPU compute (8 GPUs/node, 16 CPUs/GPU) |
 | `copyq` | Data | 2.0 | 190GB | 1 | Data operations |
 
 ````
