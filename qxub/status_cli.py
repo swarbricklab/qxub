@@ -203,7 +203,13 @@ def cleanup(days, dry_run):
     is_flag=True,
     help="Force snakemake output format (alias for --format=snakemake)",
 )
-def check(job_id, output_format, snakemake):
+@click.option(
+    "--log-dir",
+    "log_dir",
+    default=None,
+    help="Directory containing PBS job log files (avoids path guessing)",
+)
+def check(job_id, output_format, snakemake, log_dir):
     """Check job status for workflow engine integration.
 
     Returns machine-readable status information suitable for workflow engines
@@ -292,7 +298,7 @@ def check(job_id, output_format, snakemake):
         # defaulting to "running".  This prevents Snakemake from hanging
         # when the DB is locked but the job has already written exit status
         # files to disk.
-        file_status, file_exit_code = job_status_from_files(job_id)
+        file_status, file_exit_code = job_status_from_files(job_id, log_dir=log_dir)
         if file_status in ("C", "F"):
             status = "completed" if file_status == "C" else "failed"
             _output_status(status, file_exit_code, job_id, output_format)
@@ -308,11 +314,12 @@ def check(job_id, output_format, snakemake):
     # long-running qxub process watching them (e.g. --terse Snakemake profiles)
     # without spamming the scheduler with qstat calls.
     if status in ("submitted", "running"):
+        # If --log-dir was passed, use it as the primary search location.
+        # This eliminates path-guessing entirely for Snakemake profiles.
+        if log_dir:
+            file_status, file_exit_code = job_status_from_files(job_id, log_dir=log_dir)
         # If the DB has a known joblog path, check it directly.
-        # This handles jobs submitted with --log-dir (relative or absolute path)
-        # that the directory scan in job_status_from_files cannot locate.
-        joblog_path = job_info.get("joblog_path")
-        if joblog_path:
+        elif joblog_path := job_info.get("joblog_path"):
             import os as _os
 
             from .core.scheduler import read_exit_from_joblog_file
