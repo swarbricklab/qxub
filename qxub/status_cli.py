@@ -203,7 +203,13 @@ def cleanup(days, dry_run):
     is_flag=True,
     help="Force snakemake output format (alias for --format=snakemake)",
 )
-def check(job_id, output_format, snakemake):
+@click.option(
+    "--log-dir",
+    "log_dir",
+    default=None,
+    help="Directory containing PBS job log files (avoids path guessing)",
+)
+def check(job_id, output_format, snakemake, log_dir):
     """Check job status for workflow engine integration.
 
     Returns machine-readable status information suitable for workflow engines
@@ -271,142 +277,86 @@ def check(job_id, output_format, snakemake):
         job_id = pbs_job_id
 
     # -----------------------------------------------------------------------
-    # Standard PBS job ID lookup
+    # Standard PBS job ID lookup — files-first to minimise DB pressure
     # -----------------------------------------------------------------------
     # Add .gadi-pbs suffix if not present
     if not job_id.endswith(".gadi-pbs"):
         job_id = f"{job_id}.gadi-pbs"
 
-    # Get job status from database
-    try:
-        job_info = resource_tracker.get_job_status(job_id)
-    except DatabaseError as exc:
-        # Transient DB failure — fall through to file-based check below
-        # instead of returning "running" (which would cause Snakemake to hang
-        # indefinitely for jobs that have already finished).
-        logger.debug("Database error during status check: %s", exc)
-        job_info = None
+    # -------------------------------------------------------------------
+    # 1. Check status files on disk FIRST (no DB, no locking)
+    # -------------------------------------------------------------------
+    file_status, file_exit_code = job_status_from_files(job_id, log_dir=log_dir)
 
-    if not job_info:
-        # DB unavailable or job not found — check file-based status before
-        # defaulting to "running".  This prevents Snakemake from hanging
-        # when the DB is locked but the job has already written exit status
-        # files to disk.
-        file_status, file_exit_code = job_status_from_files(job_id)
-        if file_status in ("C", "F"):
-            status = "completed" if file_status == "C" else "failed"
-            _output_status(status, file_exit_code, job_id, output_format)
-            return
-        # Genuinely unknown — report "running" so Snakemake retries
+    if file_status in ("C", "F"):
+        # Job has finished — persist to DB (best-effort) then report.
+        status = "completed" if file_status == "C" else "failed"
+        _persist_completion(job_id, status, file_exit_code)
+        _output_status(status, file_exit_code, job_id, output_format)
+        return
+
+    if file_status == "R":
+        # Job is still running according to status files — no DB needed.
         _output_status("running", None, job_id, output_format)
         return
 
-    status = job_info.get("status", "unknown")
+    # -------------------------------------------------------------------
+    # 2. No conclusive file evidence (status == "Q" / unknown).
+    #    Fall back to the DB for jobs that haven't written files yet
+    #    (e.g. just submitted, or pre-file-status era).
+    # -------------------------------------------------------------------
+    try:
+        job_info = resource_tracker.get_job_status(job_id)
+    except DatabaseError as exc:
+        logger.debug("Database error during status check: %s", exc)
+        job_info = None
 
-    # When the database shows an active state, check the file-based status
-    # written by the jobscript. This handles jobs that finished without a
-    # long-running qxub process watching them (e.g. --terse Snakemake profiles)
-    # without spamming the scheduler with qstat calls.
-    if status in ("submitted", "running"):
-        # If the DB has a known joblog path, check it directly.
-        # This handles jobs submitted with --log-dir (relative or absolute path)
-        # that the directory scan in job_status_from_files cannot locate.
-        joblog_path = job_info.get("joblog_path")
-        if joblog_path:
-            import os as _os
+    if job_info:
+        db_status = job_info.get("status", "unknown")
+        if db_status in ("completed", "failed"):
+            _output_status(db_status, job_info.get("exit_code"), job_id, output_format)
+            return
+        # DB says submitted/running but no files yet — still in flight.
+        if db_status in ("submitted", "running"):
+            _output_status("running", None, job_id, output_format)
+            return
 
-            from .core.scheduler import read_exit_from_joblog_file
+    # Genuinely unknown — report "running" so Snakemake retries.
+    _output_status("running", None, job_id, output_format)
 
-            # Resolve relative joblog paths using the working_dir from the
-            # queue table (the CWD at submission time). New jobs store
-            # absolute paths, but older DB entries may still have relative ones.
-            if not _os.path.isabs(joblog_path):
-                try:
-                    from .queue.db import get_queue_entry
 
-                    queue_entry = get_queue_entry(job_id)
-                    working_dir = (queue_entry or {}).get("working_dir")
-                    if working_dir:
-                        joblog_path = _os.path.join(working_dir, joblog_path)
-                except Exception:
-                    pass  # Fall through to directory-scan fallback
+def _persist_completion(job_id: str, status: str, exit_code) -> None:
+    """Best-effort DB update after file-based completion detection.
 
-            direct_exit = read_exit_from_joblog_file(joblog_path)
-            if direct_exit is not None:
-                file_status = "C" if direct_exit == 0 else "F"
-                file_exit_code = direct_exit
-            else:
-                file_status, file_exit_code = job_status_from_files(job_id)
-        else:
-            file_status, file_exit_code = job_status_from_files(job_id)
-        if file_status in ("C", "F"):
-            # Job has finished according to status files - override DB status
-            status = "completed" if file_status == "C" else "failed"
-            if file_exit_code is not None:
-                job_info = dict(job_info)
-                job_info["exit_code"] = file_exit_code
-            # Persist the resolved status so subsequent calls skip the file check
-            resource_tracker.update_job_status(job_id, status)
-            if file_exit_code is not None:
-                resource_tracker.update_job_exit_code(job_id, file_exit_code)
+    Persists the resolved status and exit code so that subsequent calls
+    (and other tools like ``qxub status list``) see the final state.
+    Also backfills resource efficiency data from the PBS joblog.
 
-            # Backfill resource efficiency from the PBS joblog stored on disk.
-            # This populates mem/time/cpu columns for terse/Snakemake-submitted
-            # jobs that were never monitored by a long-running qxub process.
-            try:
-                import os as _os
+    All DB operations are wrapped in try/except — a locked or unavailable
+    database must never prevent the caller from reporting the correct status.
+    """
+    try:
+        resource_tracker.update_job_status(job_id, status)
+        if exit_code is not None:
+            resource_tracker.update_job_exit_code(job_id, exit_code)
+    except Exception:
+        pass  # Non-fatal: files are the source of truth
 
-                from .history import history_manager
-                from .resources import parse_joblog_resources
+    # Backfill resource efficiency from the PBS joblog stored on disk.
+    try:
+        import os as _os
 
-                files = history_manager.get_execution_file_paths(job_id)
-                joblog = (files or {}).get("joblog")
-                if joblog and _os.path.exists(joblog):
-                    resource_data = parse_joblog_resources(joblog)
-                    if resource_data:
-                        resource_tracker.update_job_resources(job_id, resource_data)
-            except Exception:
-                pass  # Non-fatal: resource data remains empty until next check
+        from .history import history_manager
+        from .resources import parse_joblog_resources
 
-    # Map internal status to workflow engine formats
-    if output_format == "snakemake":
-        if status == "completed":
-            # If exit code is available, use it; otherwise assume success for completed jobs
-            exit_code = job_info.get("exit_code")
-            if exit_code is None or exit_code == 0:
-                print("success")
-            else:
-                print("failed")
-        elif status in ["submitted", "running"]:
-            print("running")
-        else:  # failed, unknown, etc.
-            print("failed")
-
-    elif output_format == "json":
-        result = {
-            "status": status,
-            "job_id": job_id,
-            "timestamp": datetime.now().isoformat(),
-            "exit_code": job_info.get("exit_code"),
-            "submitted_at": job_info.get("submitted_at"),
-            "started_at": job_info.get("started_at"),
-            "completed_at": job_info.get("completed_at"),
-        }
-        print(json.dumps(result))
-
-    elif output_format == "exitcode":
-        # Exit code based format (Nextflow style)
-        if status == "completed":
-            # If exit code is available, use it; otherwise assume success for completed jobs
-            exit_code = job_info.get("exit_code")
-            if exit_code is None or exit_code == 0:
-                sys.exit(2)  # completed successfully
-            else:
-                sys.exit(1)  # failed
-        elif status in ["submitted", "running"]:
-            sys.exit(0)  # running
-        else:  # failed, unknown, etc.
-            sys.exit(1)  # failed
+        files = history_manager.get_execution_file_paths(job_id)
+        joblog = (files or {}).get("joblog")
+        if joblog and _os.path.exists(joblog):
+            resource_data = parse_joblog_resources(joblog)
+            if resource_data:
+                resource_tracker.update_job_resources(job_id, resource_data)
+    except Exception:
+        pass  # Non-fatal: resource data remains empty until next check
 
 
 def _maybe_dispatch_pending() -> None:
