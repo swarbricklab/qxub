@@ -22,6 +22,55 @@ from .resources.tracker import DatabaseError
 
 console = Console()
 
+# ---------------------------------------------------------------------------
+# Audit log for status checks — helps diagnose Snakemake hang issues.
+# Writes to ~/.local/share/qxub/status_check.log (append-only, one line per
+# check attempt).  The file is cheap to write and invaluable when debugging
+# "why did Snakemake hang?" after the fact.
+# ---------------------------------------------------------------------------
+_status_check_logger = None
+
+
+def _get_status_check_logger():
+    """Lazily initialise a dedicated file logger for status-check auditing."""
+    global _status_check_logger
+    if _status_check_logger is not None:
+        return _status_check_logger
+
+    import os
+    from pathlib import Path
+
+    log_dir = (
+        Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "qxub"
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "status_check.log"
+
+    handler = logging.FileHandler(str(log_file), mode="a", encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    )
+    _status_check_logger = logging.getLogger("qxub.status_check_audit")
+    _status_check_logger.setLevel(logging.DEBUG)
+    _status_check_logger.addHandler(handler)
+    _status_check_logger.propagate = False
+    return _status_check_logger
+
+
+def _log_status_check(job_id, event, *, result=None, exit_code=None, detail=None):
+    """Append a single audit line for a status-check event."""
+    try:
+        parts = [f"job={job_id}", f"event={event}"]
+        if result is not None:
+            parts.append(f"result={result}")
+        if exit_code is not None:
+            parts.append(f"exit_code={exit_code}")
+        if detail is not None:
+            parts.append(f"detail={detail}")
+        _get_status_check_logger().info("  ".join(parts))
+    except Exception:
+        pass  # Never let audit logging break the actual status check
+
 
 @click.group(invoke_without_command=True, name="status")
 @click.pass_context
@@ -281,37 +330,83 @@ def check(job_id, output_format, snakemake):
     try:
         job_info = resource_tracker.get_job_status(job_id)
     except DatabaseError as exc:
-        # Transient DB failure — for snakemake mode, report "running" so the
-        # workflow engine retries instead of aborting.  For other formats,
-        # surface the error but still exit 0 to avoid false-positive failures.
+        # Transient DB failure — fall through to file-based check below
+        # instead of returning "running" (which would cause Snakemake to hang
+        # indefinitely for jobs that have already finished).
         logger.debug("Database error during status check: %s", exc)
-        if output_format == "snakemake":
-            print("running")
-            return
-        if output_format == "json":
-            print(
-                json.dumps(
-                    {"error": "database temporarily unavailable", "job_id": job_id}
-                )
-            )
-        else:
-            sys.stderr.write(f"qxub: database temporarily unavailable for {job_id}\n")
-        sys.exit(1)
+        _log_status_check(job_id, "db_error", detail=str(exc))
+        job_info = None
 
     if not job_info:
-        # Job genuinely not found — for snakemake mode, assume it is still
-        # queued/pending (recently submitted jobs may not have been committed
-        # to the DB yet).  This avoids Snakemake aborting the entire workflow.
-        if output_format == "snakemake":
-            print("running")
+        # DB unavailable or job not found — try multiple file-based strategies
+        # before defaulting to "running".
+
+        # Strategy 1: Try history manager (YAML, not SQLite) for joblog path
+        file_status, file_exit_code = None, None
+        try:
+            from .history import history_manager
+
+            files = history_manager.get_execution_file_paths(job_id)
+            joblog = (files or {}).get("joblog")
+            if joblog:
+                import os as _os
+
+                from .core.scheduler import read_exit_from_joblog_file
+
+                _log_status_check(job_id, "trying_history_joblog", detail=str(joblog))
+                if _os.path.exists(joblog):
+                    direct_exit = read_exit_from_joblog_file(joblog)
+                    if direct_exit is not None:
+                        file_status = "C" if direct_exit == 0 else "F"
+                        file_exit_code = direct_exit
+                        _log_status_check(
+                            job_id,
+                            "resolved_via_history_joblog",
+                            result=file_status,
+                            exit_code=file_exit_code,
+                            detail=str(joblog),
+                        )
+                else:
+                    _log_status_check(
+                        job_id,
+                        "history_joblog_missing",
+                        detail=str(joblog),
+                    )
+        except Exception as e:
+            logger.debug("History manager lookup failed for %s: %s", job_id, e)
+
+        # Strategy 2: Default status dir (final_exit_code_* and .log scan)
+        if file_status is None:
+            from .core.scheduler import get_default_status_dir
+
+            default_dir = get_default_status_dir()
+            _log_status_check(
+                job_id,
+                "trying_default_status_dir",
+                detail=str(default_dir),
+            )
+            file_status, file_exit_code = job_status_from_files(job_id)
+            if file_status in ("C", "F"):
+                _log_status_check(
+                    job_id,
+                    "resolved_via_default_dir",
+                    result=file_status,
+                    exit_code=file_exit_code,
+                    detail=str(default_dir),
+                )
+
+        if file_status in ("C", "F"):
+            status = "completed" if file_status == "C" else "failed"
+            _output_status(status, file_exit_code, job_id, output_format)
             return
-        if output_format == "json":
-            print(json.dumps({"error": "Job not found", "job_id": job_id}))
-        else:
-            sys.stderr.write(f"qxub: Job ID {job_id} not found in database\n")
-        sys.exit(1)
+
+        # Genuinely unknown — report "running" so Snakemake retries
+        _log_status_check(job_id, "unresolved", result="running")
+        _output_status("running", None, job_id, output_format)
+        return
 
     status = job_info.get("status", "unknown")
+    _log_status_check(job_id, "db_status", result=status)
 
     # When the database shows an active state, check the file-based status
     # written by the jobscript. This handles jobs that finished without a
@@ -341,10 +436,18 @@ def check(job_id, output_format, snakemake):
                 except Exception:
                     pass  # Fall through to directory-scan fallback
 
+            _log_status_check(job_id, "trying_db_joblog", detail=str(joblog_path))
             direct_exit = read_exit_from_joblog_file(joblog_path)
             if direct_exit is not None:
                 file_status = "C" if direct_exit == 0 else "F"
                 file_exit_code = direct_exit
+                _log_status_check(
+                    job_id,
+                    "resolved_via_db_joblog",
+                    result=file_status,
+                    exit_code=file_exit_code,
+                    detail=str(joblog_path),
+                )
             else:
                 file_status, file_exit_code = job_status_from_files(job_id)
         else:
