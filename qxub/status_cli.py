@@ -43,8 +43,14 @@ def _get_status_check_logger():
     return _logger
 
 
+# Module-level toggle; set to True when --audit is passed.
+_audit_enabled = False
+
+
 def _log_status_check(job_id, result, source, detail=""):
     """Append a one-line audit record for a qxtat check invocation."""
+    if not _audit_enabled:
+        return
     try:
         audit = _get_status_check_logger()
         msg = f"job={job_id}  result={result}  source={source}"
@@ -241,7 +247,13 @@ def cleanup(days, dry_run):
     default=None,
     help="Directory containing PBS job log files (avoids path guessing)",
 )
-def check(job_id, output_format, snakemake, log_dir):
+@click.option(
+    "--audit",
+    is_flag=True,
+    default=False,
+    help="Log each status-check decision to ~/.local/share/qxub/status_check.log",
+)
+def check(job_id, output_format, snakemake, log_dir, audit):
     """Check job status for workflow engine integration.
 
     Returns machine-readable status information suitable for workflow engines
@@ -262,6 +274,9 @@ def check(job_id, output_format, snakemake, log_dir):
     """
     if snakemake:
         output_format = "snakemake"
+
+    global _audit_enabled  # noqa: PLW0603
+    _audit_enabled = audit
 
     # -----------------------------------------------------------------------
     # Dispatch-on-status-check hook (Phase 3 will fill this in; no-op now)
