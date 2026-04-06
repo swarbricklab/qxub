@@ -6,10 +6,12 @@ Provides the `qxub status` command for viewing job status without qstat polling.
 
 import json
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import click
 from rich.console import Console
@@ -21,6 +23,42 @@ from .resources import resource_tracker
 from .resources.tracker import DatabaseError
 
 console = Console()
+
+
+def _get_status_check_logger():
+    """Return a logger that writes to ~/.local/share/qxub/status_check.log."""
+    _logger = logging.getLogger("qxub.status_check_audit")
+    if not _logger.handlers:
+        log_dir = (
+            Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+            / "qxub"
+        )
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_dir / "status_check.log")
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        )
+        _logger.addHandler(handler)
+        _logger.setLevel(logging.DEBUG)
+    return _logger
+
+
+# Module-level toggle; set to True when --audit is passed.
+_audit_enabled = False
+
+
+def _log_status_check(job_id, result, source, detail=""):
+    """Append a one-line audit record for a qxtat check invocation."""
+    if not _audit_enabled:
+        return
+    try:
+        audit = _get_status_check_logger()
+        msg = f"job={job_id}  result={result}  source={source}"
+        if detail:
+            msg += f"  {detail}"
+        audit.info(msg)
+    except Exception:
+        pass  # Audit logging must never break status checks
 
 
 @click.group(invoke_without_command=True, name="status")
@@ -209,7 +247,13 @@ def cleanup(days, dry_run):
     default=None,
     help="Directory containing PBS job log files (avoids path guessing)",
 )
-def check(job_id, output_format, snakemake, log_dir):
+@click.option(
+    "--audit",
+    is_flag=True,
+    default=False,
+    help="Log each status-check decision to ~/.local/share/qxub/status_check.log",
+)
+def check(job_id, output_format, snakemake, log_dir, audit):
     """Check job status for workflow engine integration.
 
     Returns machine-readable status information suitable for workflow engines
@@ -230,6 +274,9 @@ def check(job_id, output_format, snakemake, log_dir):
     """
     if snakemake:
         output_format = "snakemake"
+
+    global _audit_enabled  # noqa: PLW0603
+    _audit_enabled = audit
 
     # -----------------------------------------------------------------------
     # Dispatch-on-status-check hook (Phase 3 will fill this in; no-op now)
@@ -292,11 +339,18 @@ def check(job_id, output_format, snakemake, log_dir):
         # Job has finished — persist to DB (best-effort) then report.
         status = "completed" if file_status == "C" else "failed"
         _persist_completion(job_id, status, file_exit_code)
+        _log_status_check(
+            job_id,
+            status,
+            "files",
+            f"file_status={file_status} exit_code={file_exit_code} log_dir={log_dir}",
+        )
         _output_status(status, file_exit_code, job_id, output_format)
         return
 
     if file_status == "R":
         # Job is still running according to status files — no DB needed.
+        _log_status_check(job_id, "running", "files", f"log_dir={log_dir}")
         _output_status("running", None, job_id, output_format)
         return
 
@@ -314,14 +368,28 @@ def check(job_id, output_format, snakemake, log_dir):
     if job_info:
         db_status = job_info.get("status", "unknown")
         if db_status in ("completed", "failed"):
+            _log_status_check(
+                job_id,
+                db_status,
+                "db",
+                f"exit_code={job_info.get('exit_code')}",
+            )
             _output_status(db_status, job_info.get("exit_code"), job_id, output_format)
             return
         # DB says submitted/running but no files yet — still in flight.
         if db_status in ("submitted", "running"):
+            _log_status_check(job_id, "running", "db", f"db_status={db_status}")
             _output_status("running", None, job_id, output_format)
             return
 
     # Genuinely unknown — report "running" so Snakemake retries.
+    _log_status_check(
+        job_id,
+        "running",
+        "unknown",
+        f"file_status={file_status} job_info={'found' if job_info else 'none'}"
+        f" log_dir={log_dir}",
+    )
     _output_status("running", None, job_id, output_format)
 
 
@@ -339,8 +407,8 @@ def _persist_completion(job_id: str, status: str, exit_code) -> None:
         resource_tracker.update_job_status(job_id, status)
         if exit_code is not None:
             resource_tracker.update_job_exit_code(job_id, exit_code)
-    except Exception:
-        pass  # Non-fatal: files are the source of truth
+    except Exception as exc:
+        _log_status_check(job_id, "db-write-failed", "persist", f"error={exc}")
 
     # Backfill resource efficiency from the PBS joblog stored on disk.
     try:
