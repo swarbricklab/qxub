@@ -281,35 +281,25 @@ def check(job_id, output_format, snakemake):
     try:
         job_info = resource_tracker.get_job_status(job_id)
     except DatabaseError as exc:
-        # Transient DB failure — for snakemake mode, report "running" so the
-        # workflow engine retries instead of aborting.  For other formats,
-        # surface the error but still exit 0 to avoid false-positive failures.
+        # Transient DB failure — fall through to file-based check below
+        # instead of returning "running" (which would cause Snakemake to hang
+        # indefinitely for jobs that have already finished).
         logger.debug("Database error during status check: %s", exc)
-        if output_format == "snakemake":
-            print("running")
-            return
-        if output_format == "json":
-            print(
-                json.dumps(
-                    {"error": "database temporarily unavailable", "job_id": job_id}
-                )
-            )
-        else:
-            sys.stderr.write(f"qxub: database temporarily unavailable for {job_id}\n")
-        sys.exit(1)
+        job_info = None
 
     if not job_info:
-        # Job genuinely not found — for snakemake mode, assume it is still
-        # queued/pending (recently submitted jobs may not have been committed
-        # to the DB yet).  This avoids Snakemake aborting the entire workflow.
-        if output_format == "snakemake":
-            print("running")
+        # DB unavailable or job not found — check file-based status before
+        # defaulting to "running".  This prevents Snakemake from hanging
+        # when the DB is locked but the job has already written exit status
+        # files to disk.
+        file_status, file_exit_code = job_status_from_files(job_id)
+        if file_status in ("C", "F"):
+            status = "completed" if file_status == "C" else "failed"
+            _output_status(status, file_exit_code, job_id, output_format)
             return
-        if output_format == "json":
-            print(json.dumps({"error": "Job not found", "job_id": job_id}))
-        else:
-            sys.stderr.write(f"qxub: Job ID {job_id} not found in database\n")
-        sys.exit(1)
+        # Genuinely unknown — report "running" so Snakemake retries
+        _output_status("running", None, job_id, output_format)
+        return
 
     status = job_info.get("status", "unknown")
 

@@ -20,7 +20,7 @@ try:
 except ImportError:
     pass
 
-__version__ = "3.5.1"
+__version__ = "3.5.2"
 
 # Library-standard NullHandler: prevents "No handler found" warnings and
 # avoids triggering basicConfig() when qxub is used as a library.
