@@ -6,6 +6,8 @@ logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 
+import click
+
 
 def _get_default_output_dir():
     """Get appropriate output directory that works across login and compute nodes."""
@@ -202,7 +204,24 @@ def select_auto_queue(params):
 
         # Add GPU type for queue selection if specified
         if params.get("gpu_type"):
-            requirements["gpu_type"] = params["gpu_type"].lower()
+            gpu_type = params["gpu_type"].lower()
+            requirements["gpu_type"] = gpu_type
+
+            # Validate gpu_type against platform definitions
+            valid_gpu_types = set()
+            for platform_name in platform_names:
+                platform = loader.get_platform(platform_name)
+                if not platform:
+                    continue
+                for q in platform.queues.values():
+                    if q.gpu_type:
+                        valid_gpu_types.add(q.gpu_type.lower())
+            if valid_gpu_types and gpu_type not in valid_gpu_types:
+                sorted_types = sorted(valid_gpu_types)
+                raise click.ClickException(
+                    f"Unknown GPU type '{gpu_type}'. "
+                    f"Available types: {', '.join(sorted_types)}"
+                )
 
         # Try to find best queue from any platform
         best_queue = None
@@ -254,6 +273,8 @@ def select_auto_queue(params):
             "Platform system not available for auto queue selection, using 'normal'"
         )
         params["queue"] = "normal"
+    except click.ClickException:
+        raise
     except Exception as e:
         logger.warning("Auto queue selection failed: %s, using 'normal'", e)
         params["queue"] = "normal"

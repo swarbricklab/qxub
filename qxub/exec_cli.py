@@ -83,8 +83,8 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option(
     "--gpu-type",
-    type=click.Choice(["v100", "a100"], case_sensitive=False),
-    help="GPU type to request (v100=gpuvolta, a100=dgxa100). Used with --gpus for queue selection.",
+    type=str,
+    help="GPU type for queue selection (e.g. v100, a100). Valid types are defined by the platform.",
 )
 @click.option(
     "--volumes",
