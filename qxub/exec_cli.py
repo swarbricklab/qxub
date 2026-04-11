@@ -52,7 +52,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option("-q", "--queue", help="PBS queue name (default: configured or normal)")
 @click.option(
-    "-N", "--name", help="PBS job name (default: configured or qx-{timestamp})"
+    "-N", "--name", help="PBS job name (default: configured or {cmd}-{date}-{time})"
 )
 # Workflow-friendly resource options
 @click.option(
@@ -638,6 +638,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
     # Extract PBS-specific options for processing
     params = {
+        "command": command,
         "resources": tuple(all_resources),  # Use merged resources
         "queue": options["queue"],
         "name": options["name"],
