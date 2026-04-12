@@ -1037,7 +1037,7 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     """
     from typing import Any, Dict
 
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Build shortcut definition
     definition: Dict[str, Any] = {}
@@ -1241,7 +1241,7 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
 )
 def list_shortcuts(show_origin: bool):
     """List all available shortcuts."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     if show_origin:
         shortcuts_data = shortcut_manager.list_shortcuts_with_origin()
@@ -1321,7 +1321,7 @@ def show(name: str):
 
     from rich.syntax import Syntax
 
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     shortcut_def = shortcut_manager.get_shortcut(name)
 
@@ -1419,7 +1419,7 @@ def show(name: str):
 @click.option("--yes", is_flag=True, help="Confirm deletion without prompting")
 def delete(name: str, user: bool, system: bool, yes: bool):
     """Delete a shortcut."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Validate mutually exclusive scope flags
     if user and system:
@@ -1472,7 +1472,7 @@ def delete(name: str, user: bool, system: bool, yes: bool):
 )
 def rename(old_name: str, new_name: str, user: bool, system: bool):
     """Rename a shortcut."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Validate mutually exclusive scope flags
     if user and system:
@@ -1544,7 +1544,7 @@ def rename(old_name: str, new_name: str, user: bool, system: bool):
 @shortcut_config.command()
 def files():
     """Show shortcuts configuration file locations."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     config_files = shortcut_manager.get_config_files()
 
@@ -1563,7 +1563,7 @@ def files():
 @shortcut_config.command()
 def refresh():
     """Refresh shortcuts cache (reload from files)."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     shortcut_manager.refresh_cache()
     shortcuts = shortcut_manager.list_shortcuts()

@@ -1041,7 +1041,7 @@ def interactive_cli(
 
     # Handle shortcut processing
     if shortcut:
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_def = shortcut_manager.get_shortcut(shortcut)
@@ -1134,7 +1134,7 @@ def interactive_cli(
 
     # Auto-detect shortcut from command (if no explicit shortcut/alias and command provided)
     elif command and not env and not mod and not mods and not sif:
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_match = shortcut_manager.find_shortcut(list(command))
