@@ -416,6 +416,28 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                 options["post"] = value
             elif key == "bind" and not options["bind"]:
                 options["bind"] = value
+            elif key == "name" and not options["name"]:
+                options["name"] = value
+            elif key == "internet" and not options.get("internet"):
+                options["internet"] = value
+            elif key == "gpus" and not options.get("gpus"):
+                options["gpus"] = value
+            elif key == "gpu_type" and not options.get("gpu_type"):
+                options["gpu_type"] = value
+            elif key == "vars" and not options.get("var") and not options.get("vars"):
+                options["var"] = tuple(value) if isinstance(value, list) else (value,)
+            elif key == "tags" and not options.get("tag") and not options.get("tags"):
+                options["tag"] = tuple(value) if isinstance(value, list) else (value,)
+            elif key == "execdir" and not options.get("execdir"):
+                options["execdir"] = value
+            elif key == "log_dir" and not options.get("log_dir"):
+                options["log_dir"] = value
+            elif key == "email" and not options.get("email"):
+                options["email"] = value
+            elif key == "email_opts" and not options.get("email_opts"):
+                options["email_opts"] = value
+            elif key == "array" and not options.get("array"):
+                options["array"] = value
 
         click.echo(f"🎯 Using shortcut '{shortcut}'")
     elif not any(
@@ -458,6 +480,44 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                         options["resources"] = (value,)
                 elif key == "project" and not options["project"]:
                     options["project"] = value
+                elif key == "template" and not options.get("template"):
+                    options["template"] = value
+                elif key == "pre" and not options.get("pre"):
+                    options["pre"] = value
+                elif key == "post" and not options.get("post"):
+                    options["post"] = value
+                elif key == "bind" and not options.get("bind"):
+                    options["bind"] = value
+                elif key == "name" and not options["name"]:
+                    options["name"] = value
+                elif key == "internet" and not options.get("internet"):
+                    options["internet"] = value
+                elif key == "gpus" and not options.get("gpus"):
+                    options["gpus"] = value
+                elif key == "gpu_type" and not options.get("gpu_type"):
+                    options["gpu_type"] = value
+                elif (
+                    key == "vars" and not options.get("var") and not options.get("vars")
+                ):
+                    options["var"] = (
+                        tuple(value) if isinstance(value, list) else (value,)
+                    )
+                elif (
+                    key == "tags" and not options.get("tag") and not options.get("tags")
+                ):
+                    options["tag"] = (
+                        tuple(value) if isinstance(value, list) else (value,)
+                    )
+                elif key == "execdir" and not options.get("execdir"):
+                    options["execdir"] = value
+                elif key == "log_dir" and not options.get("log_dir"):
+                    options["log_dir"] = value
+                elif key == "email" and not options.get("email"):
+                    options["email"] = value
+                elif key == "email_opts" and not options.get("email_opts"):
+                    options["email_opts"] = value
+                elif key == "array" and not options.get("array"):
+                    options["array"] = value
 
             # For shortcuts, keep the full original command (don't strip the prefix)
             # The shortcut defines the execution context, not the command itself

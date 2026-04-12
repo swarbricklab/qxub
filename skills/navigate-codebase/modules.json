@@ -1,0 +1,356 @@
+{
+  "commands": [
+    {
+      "command": "qxub",
+      "module": "qxub/cli.py",
+      "description": "Main CLI group – dispatches to all subcommands"
+    },
+    {
+      "command": "qxub exec",
+      "alias": "qx",
+      "module": "qxub/exec_cli.py",
+      "description": "Submit and monitor a PBS job (conda, module, singularity, or default context)"
+    },
+    {
+      "command": "qxub interactive",
+      "alias": "qxi",
+      "module": "qxub/interactive_cli.py",
+      "description": "Launch an interactive PBS session"
+    },
+    {
+      "command": "qxub config",
+      "module": "qxub/config_cli.py",
+      "description": "Configuration management (get/set, shortcuts, aliases, files, validate)"
+    },
+    {
+      "command": "qxub config shortcut set",
+      "alias": "qxet",
+      "module": "qxub/config_cli.py",
+      "description": "Create or update a reusable execution shortcut"
+    },
+    {
+      "command": "qxub config shortcut list",
+      "module": "qxub/config_cli.py",
+      "description": "List all configured shortcuts"
+    },
+    {
+      "command": "qxub config shortcut show",
+      "module": "qxub/config_cli.py",
+      "description": "Show details of a specific shortcut"
+    },
+    {
+      "command": "qxub config shortcut delete",
+      "module": "qxub/config_cli.py",
+      "description": "Delete a shortcut"
+    },
+    {
+      "command": "qxub cancel",
+      "module": "qxub/cancel_cli.py",
+      "description": "Cancel PBS jobs by ID or name pattern"
+    },
+    {
+      "command": "qxub status",
+      "alias": "qxtat",
+      "module": "qxub/status_cli.py",
+      "description": "Query and display job status"
+    },
+    {
+      "command": "qxub history",
+      "module": "qxub/history_cli.py",
+      "description": "View computational recipes and execution records"
+    },
+    {
+      "command": "qxub monitor",
+      "module": "qxub/monitor_cli.py",
+      "description": "Monitor multiple PBS jobs simultaneously"
+    },
+    {
+      "command": "qxub notify",
+      "module": "qxub/notify_cli.py",
+      "description": "Send Slack/Discord notifications on job completion"
+    },
+    {
+      "command": "qxub replay",
+      "module": "qxub/replay_cli.py",
+      "description": "Replay recorded interactive session transcripts"
+    },
+    {
+      "command": "qxub resources",
+      "module": "qxub/resources_cli.py",
+      "description": "View resource usage and efficiency statistics"
+    },
+    {
+      "command": "qxub platform",
+      "module": "qxub/platform_cli.py",
+      "description": "Platform discovery, info, and queue listing"
+    },
+    {
+      "command": "qxub select-queue",
+      "module": "qxub/platforms/cli.py",
+      "description": "Select best queue for given resources"
+    },
+    {
+      "command": "qxub validate",
+      "module": "qxub/platforms/cli.py",
+      "description": "Validate resource specifications against platform"
+    },
+    {
+      "command": "qxub estimate",
+      "module": "qxub/platforms/cli.py",
+      "description": "Estimate job cost in service units"
+    },
+    {
+      "command": "qxub alias",
+      "module": "qxub/alias_cli.py",
+      "description": "Legacy alias management (deprecated; use config alias)"
+    }
+  ],
+
+  "modules": [
+    {
+      "path": "qxub/__init__.py",
+      "description": "Package root – version, lazy CLI import, public API re-exports",
+      "exports": ["__version__", "qxub"]
+    },
+    {
+      "path": "qxub/cli.py",
+      "description": "Main Click group; registers all subcommands",
+      "exports": ["qxub"]
+    },
+    {
+      "path": "qxub/exec_cli.py",
+      "description": "Job execution command – parses ~45 options, resolves shortcuts, dispatches to execution contexts",
+      "exports": ["exec_cli"]
+    },
+    {
+      "path": "qxub/interactive_cli.py",
+      "description": "Interactive PBS session launcher with shell and env support",
+      "exports": ["interactive_cli", "qxi_main"]
+    },
+    {
+      "path": "qxub/config_cli.py",
+      "description": "Configuration management CLI – get/set/list/files/validate plus shortcut and alias subgroups",
+      "exports": ["config_cli", "shortcut_config", "set_shortcut"]
+    },
+    {
+      "path": "qxub/cancel_cli.py",
+      "description": "Cancel jobs by ID, name, or pattern with resource-tracker integration",
+      "exports": ["cancel_cli"]
+    },
+    {
+      "path": "qxub/status_cli.py",
+      "description": "Job status queries – list recent, show details, summary",
+      "exports": ["status_cli", "StatusTracker"]
+    },
+    {
+      "path": "qxub/history_cli.py",
+      "description": "History CLI – recipes, executions, latest, out, err, log",
+      "exports": ["history"]
+    },
+    {
+      "path": "qxub/monitor_cli.py",
+      "description": "Multi-job monitoring with real-time status display",
+      "exports": ["monitor_cli", "MultiJobMonitor"]
+    },
+    {
+      "path": "qxub/notify_cli.py",
+      "description": "Notification CLI – send and test Slack/Discord hooks",
+      "exports": ["notify_cli"]
+    },
+    {
+      "path": "qxub/replay_cli.py",
+      "description": "Replay interactive session recordings with timing",
+      "exports": ["replay_cli"]
+    },
+    {
+      "path": "qxub/resources_cli.py",
+      "description": "Resource-tracking CLI – list, show, CSV export, tag/date filtering",
+      "exports": ["resources"]
+    },
+    {
+      "path": "qxub/platform_cli.py",
+      "description": "Platform management CLI – list, info, queues",
+      "exports": ["platform_cli"]
+    },
+    {
+      "path": "qxub/alias_cli.py",
+      "description": "Legacy alias CLI (deprecated; code moved to config_cli)",
+      "exports": ["alias_cli"]
+    },
+    {
+      "path": "qxub/shortcut_manager.py",
+      "description": "Shortcut resolution – loads system/user shortcuts JSON, finds longest-match",
+      "exports": ["ShortcutManager"]
+    },
+    {
+      "path": "qxub/execution_context.py",
+      "description": "Legacy execution context module (functionality moved to execution/)",
+      "exports": []
+    },
+
+    {
+      "path": "qxub/config/manager.py",
+      "description": "Hierarchical config loading/merging (Override > Test > Local > Project > User > System > Defaults)",
+      "exports": ["ConfigManager"]
+    },
+    {
+      "path": "qxub/config/handler.py",
+      "description": "Job option processing – apply defaults, sanitize job name, resolve output dir",
+      "exports": ["process_job_options", "apply_config_defaults", "_default_job_name", "_sanitize_job_name"]
+    },
+    {
+      "path": "qxub/config/shortcuts.py",
+      "description": "Shortcut loading/resolution with system/user JSON files",
+      "exports": ["ShortcutManager"]
+    },
+    {
+      "path": "qxub/config/aliases.py",
+      "description": "Standalone entry-point aliases: qx_main, qxet_main, qxtat_main",
+      "exports": ["qx_main", "qxet_main", "qxtat_main"]
+    },
+
+    {
+      "path": "qxub/execution/__init__.py",
+      "description": "Execution package public API – re-exports from core, executors, context, mode, submit",
+      "exports": [
+        "submit_and_monitor_job", "validate_execution_context",
+        "build_submission_variables", "expand_submission_variables",
+        "execute_conda", "execute_module", "execute_singularity", "execute_default",
+        "ExecutionContext", "execute_unified",
+        "ExecutionMode", "get_execution_mode",
+        "submit_job", "SubmitResult", "QsubError"
+      ]
+    },
+    {
+      "path": "qxub/execution/core.py",
+      "description": "Core submission – variable expansion, smart-quote processing, submit_and_monitor_job",
+      "exports": ["submit_and_monitor_job", "expand_submission_variables", "build_submission_variables", "validate_execution_context"]
+    },
+    {
+      "path": "qxub/execution/context.py",
+      "description": "Unified ExecutionContext dataclass – validate, get template, build submission vars",
+      "exports": ["ExecutionContext", "execute_unified", "create_conda_context", "create_module_context", "create_singularity_context", "create_default_context"]
+    },
+    {
+      "path": "qxub/execution/executors.py",
+      "description": "Context-specific executors – build job scripts and submit for conda/module/singularity/default",
+      "exports": ["execute_conda", "execute_module", "execute_singularity", "execute_default"]
+    },
+    {
+      "path": "qxub/execution/mode.py",
+      "description": "Detect LOCAL vs REMOTE vs REMOTE_DELEGATED execution mode from platform config",
+      "exports": ["ExecutionMode", "get_execution_mode", "get_remote_config", "validate_remote_config"]
+    },
+    {
+      "path": "qxub/execution/submit.py",
+      "description": "Programmatic job submission API (no CLI dependency)",
+      "exports": ["submit_job", "SubmitResult"]
+    },
+
+    {
+      "path": "qxub/core/scheduler.py",
+      "description": "PBS interaction – qsub, qdel, monitor_job_single_thread, job_status_from_files, resource extraction",
+      "exports": ["qsub", "qdel", "monitor_job_single_thread", "job_status_from_files", "get_job_resource_data", "QsubError", "SimpleSpinner"]
+    },
+    {
+      "path": "qxub/core/templates.py",
+      "description": "Job script template loading – get_template, get_conda_template, etc.",
+      "exports": ["get_template", "get_conda_template", "get_module_template"]
+    },
+
+    {
+      "path": "qxub/platforms/core.py",
+      "description": "Platform abstraction – Platform, Queue, QueueLimits, QueueSelector, detect_platform",
+      "exports": ["Platform", "Queue", "QueueLimits", "QueueSelector", "detect_platform", "get_platform", "list_platforms", "select_best_queue"]
+    },
+    {
+      "path": "qxub/platforms/loader.py",
+      "description": "Load platform definitions from URL/file/search paths with caching",
+      "exports": ["PlatformLoader", "PlatformLoadError"]
+    },
+    {
+      "path": "qxub/platforms/cli.py",
+      "description": "Platform CLI subcommands – estimate_cmd, validate_cmd, select_queue_cmd",
+      "exports": ["estimate_cmd", "validate_cmd", "select_queue_cmd", "platform_cli"]
+    },
+
+    {
+      "path": "qxub/resources/parser.py",
+      "description": "Parse PBS resource formats – size_to_bytes, time_to_seconds, parse_exec_host, parse_joblog_resources",
+      "exports": ["size_to_bytes", "time_to_seconds", "parse_exec_host", "parse_exec_vnode", "parse_joblog_resources"]
+    },
+    {
+      "path": "qxub/resources/utils.py",
+      "description": "Resource utilities – parse/format memory and walltime, evaluate queue constraints",
+      "exports": ["parse_memory_size", "format_memory_size", "parse_walltime", "format_walltime"]
+    },
+    {
+      "path": "qxub/resources/mappers.py",
+      "description": "ResourceMapper – convert workflow formats to PBS (add_memory, add_runtime, add_cpus, add_jobfs, add_storage)",
+      "exports": ["ResourceMapper"]
+    },
+    {
+      "path": "qxub/resources/tracker.py",
+      "description": "SQLite-based job resource tracking and efficiency analysis",
+      "exports": ["ResourceTracker"]
+    },
+
+    {
+      "path": "qxub/queue/db.py",
+      "description": "SQLite queue DB – virtual IDs, job entries, status updates, bulk queries",
+      "exports": ["get_db_path", "init_db", "new_virtual_id", "create_queue_entry", "update_queue_entry", "resolve_virtual_id", "mark_running", "mark_complete"]
+    },
+
+    {
+      "path": "qxub/history/base.py",
+      "description": "History data structures and constants",
+      "exports": ["CommandHistoryLogger"]
+    },
+    {
+      "path": "qxub/history/manager.py",
+      "description": "Dual-log history system – recipes.yaml + executions.yaml",
+      "exports": ["HistoryManager"]
+    },
+
+    {
+      "path": "qxub/remote/platform_executor.py",
+      "description": "SSH-based remote job execution using platform config",
+      "exports": ["PlatformRemoteExecutor", "RemoteExecutionError"]
+    },
+    {
+      "path": "qxub/remote/command_builder.py",
+      "description": "Serialize qxub commands for SSH execution",
+      "exports": ["build_remote_command"]
+    },
+
+    {
+      "path": "qxub/notifications/slack.py",
+      "description": "Slack webhook notifier",
+      "exports": ["SlackNotifier"]
+    },
+    {
+      "path": "qxub/notifications/discord.py",
+      "description": "Discord webhook notifier",
+      "exports": ["DiscordNotifier"]
+    }
+  ],
+
+  "jobscript_templates": [
+    { "path": "qxub/jobscripts/qconda.pbs",  "context": "conda" },
+    { "path": "qxub/jobscripts/qmod.pbs",     "context": "module" },
+    { "path": "qxub/jobscripts/qsing.pbs",    "context": "singularity" },
+    { "path": "qxub/jobscripts/qdefault.pbs", "context": "default" }
+  ],
+
+  "platform_definitions": [
+    { "path": "qxub/platforms/gadi.yaml", "platform": "gadi" }
+  ],
+
+  "entry_points": {
+    "qxub":  "qxub.cli:qxub",
+    "qx":    "qxub.config.aliases:qx_main",
+    "qxet":  "qxub.config.aliases:qxet_main",
+    "qxtat": "qxub.config.aliases:qxtat_main",
+    "qxi":   "qxub.interactive_cli:qxi_main"
+  }
+}
