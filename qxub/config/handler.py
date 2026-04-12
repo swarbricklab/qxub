@@ -170,8 +170,8 @@ def select_auto_queue(params):
     try:
         from pathlib import Path
 
+        from ..platforms import PlatformLoader
         from ..resources import parse_walltime  # noqa: F811
-        from .platforms import PlatformLoader
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")

@@ -367,7 +367,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
     # Handle shortcut processing
     elif shortcut:
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_def = shortcut_manager.get_shortcut(shortcut)
@@ -450,7 +450,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         ]
     ):
         # No shortcut and no explicit execution context - check for command-based shortcut matching
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_match = shortcut_manager.find_shortcut(list(command))
