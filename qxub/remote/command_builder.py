@@ -99,6 +99,8 @@ def _add_cli_options(parts: List[str], options: Dict[str, Any]) -> None:
         parts.append("--quiet")
     if options.get("terse", False):
         parts.append("--terse")
+    if options.get("internet", False):
+        parts.append("--internet")
 
 
 def _add_pbs_options(parts: List[str], options: Dict[str, Any]) -> None:
@@ -143,6 +145,14 @@ def _add_workflow_options(parts: List[str], options: Dict[str, Any]) -> None:
     if options.get("volumes"):
         parts.extend(["--volumes", shlex.quote(str(options["volumes"]))])
 
+    # GPUs
+    if options.get("gpus"):
+        parts.extend(["--gpus", str(options["gpus"])])
+
+    # GPU type
+    if options.get("gpu_type"):
+        parts.extend(["--gpu-type", shlex.quote(str(options["gpu_type"]))])
+
 
 def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
     """Add job configuration options to command parts."""
@@ -183,6 +193,32 @@ def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
         parts.extend(["--pre", shlex.quote(str(options["pre"]))])
     if options.get("post"):
         parts.extend(["--post", shlex.quote(str(options["post"]))])
+
+    # Log directory override
+    if options.get("log_dir"):
+        parts.extend(["--log-dir", shlex.quote(str(options["log_dir"]))])
+
+    # Notification flags
+    if options.get("notify", False):
+        parts.append("--notify")
+    if options.get("no_notify", False):
+        parts.append("--no-notify")
+
+    # Tags (multiple --tag KEY=VALUE)
+    tag_list = options.get("tag")
+    if tag_list:
+        for tag in tag_list:
+            parts.extend(["--tag", shlex.quote(str(tag))])
+    if options.get("tags"):
+        parts.extend(["--tags", shlex.quote(str(options["tags"]))])
+
+    # Environment variables (multiple --var KEY=VALUE)
+    var_list = options.get("var")
+    if var_list:
+        for var in var_list:
+            parts.extend(["--var", shlex.quote(str(var))])
+    if options.get("vars"):
+        parts.extend(["--vars", shlex.quote(str(options["vars"]))])
 
 
 def parse_options_from_ctx(ctx_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
