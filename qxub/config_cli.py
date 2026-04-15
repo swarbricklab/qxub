@@ -960,9 +960,47 @@ def shortcut_config():
 @click.option("-q", "--queue", help="PBS queue name")
 @click.option("-N", "--name", help="PBS job name")
 @click.option("-P", "--project", help="PBS project code")
+@click.option("--gpus", type=int, help="Number of GPUs (workflow-friendly)")
+@click.option(
+    "--gpu-type", type=str, help="GPU type for queue selection (e.g. v100, a100)"
+)
 @click.option("--template", help="Job script template")
 @click.option("--pre", help="Command to run before main command")
 @click.option("--post", help="Command to run after main command")
+@click.option(
+    "--var",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Environment variable to set in the job (can be used multiple times)",
+)
+@click.option(
+    "--vars",
+    default=None,
+    metavar="VAR_STRING",
+    help='Comma-separated environment variables, e.g. --vars "FOO=bar,BAZ=qux"',
+)
+@click.option(
+    "--tag",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Tag for this shortcut (can be used multiple times)",
+)
+@click.option(
+    "--tags",
+    default=None,
+    metavar="TAG_STRING",
+    help='Comma-separated tags, e.g. --tags "workflow=brca,rule=align"',
+)
+@click.option(
+    "--internet",
+    is_flag=True,
+    help="Require internet connectivity (selects an internet-capable queue)",
+)
+@click.option("--execdir", help="Execution directory for the job")
+@click.option("--log-dir", help="Log directory for job output files")
+@click.option("--email", help="Email address for PBS notifications")
+@click.option("--email-opts", help="PBS email options (e.g., 'abe')")
+@click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
 @click.option("--cmd", help="Default command to execute (can be overridden)")
 @click.option(
     "--user", "user_config", is_flag=True, help="Set shortcut in user config (default)"
@@ -999,7 +1037,7 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     """
     from typing import Any, Dict
 
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Build shortcut definition
     definition: Dict[str, Any] = {}
@@ -1069,6 +1107,10 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     if options["resources"]:
         resources_list.append(options["resources"])
 
+    # GPU options
+    if options.get("gpus"):
+        resources_list.append(f"ngpus={options['gpus']}")
+
     # Store resources if any were provided
     if resources_list:
         definition["resources"] = resources_list
@@ -1080,6 +1122,10 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     if options["project"]:
         definition["project"] = options["project"]
 
+    # GPU type (for queue selection, separate from resource spec)
+    if options.get("gpu_type"):
+        definition["gpu_type"] = options["gpu_type"]
+
     # Job script options
     if options["template"]:
         definition["template"] = options["template"]
@@ -1087,6 +1133,42 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
         definition["pre"] = options["pre"]
     if options["post"]:
         definition["post"] = options["post"]
+
+    # Environment variables
+    env_vars = list(options.get("var") or [])
+    vars_str = options.get("vars") or ""
+    env_vars += [v.strip() for v in vars_str.split(",") if v.strip()]
+    if env_vars:
+        definition["vars"] = env_vars
+
+    # Tags
+    tags = list(options.get("tag") or [])
+    tags_str = options.get("tags") or ""
+    tags += [t.strip() for t in tags_str.split(",") if t.strip()]
+    if tags:
+        definition["tags"] = tags
+
+    # Internet requirement
+    if options.get("internet"):
+        definition["internet"] = True
+
+    # Execution directory
+    if options.get("execdir"):
+        definition["execdir"] = options["execdir"]
+
+    # Log directory
+    if options.get("log_dir"):
+        definition["log_dir"] = options["log_dir"]
+
+    # Email notifications
+    if options.get("email"):
+        definition["email"] = options["email"]
+    if options.get("email_opts"):
+        definition["email_opts"] = options["email_opts"]
+
+    # Job arrays
+    if options.get("array"):
+        definition["array"] = options["array"]
 
     # Command and metadata
     if options["cmd"]:
@@ -1153,13 +1235,13 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     click.echo(f"💡 Or explicit: qxub exec --shortcut '{command_prefix}' -- [command]")
 
 
-@shortcut_config.command()
+@shortcut_config.command(name="list")
 @click.option(
     "--show-origin", is_flag=True, help="Show origin (user/system) for each shortcut"
 )
-def list(show_origin: bool):
+def list_shortcuts(show_origin: bool):
     """List all available shortcuts."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     if show_origin:
         shortcuts_data = shortcut_manager.list_shortcuts_with_origin()
@@ -1239,7 +1321,7 @@ def show(name: str):
 
     from rich.syntax import Syntax
 
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     shortcut_def = shortcut_manager.get_shortcut(name)
 
@@ -1337,7 +1419,7 @@ def show(name: str):
 @click.option("--yes", is_flag=True, help="Confirm deletion without prompting")
 def delete(name: str, user: bool, system: bool, yes: bool):
     """Delete a shortcut."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Validate mutually exclusive scope flags
     if user and system:
@@ -1390,7 +1472,7 @@ def delete(name: str, user: bool, system: bool, yes: bool):
 )
 def rename(old_name: str, new_name: str, user: bool, system: bool):
     """Rename a shortcut."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     # Validate mutually exclusive scope flags
     if user and system:
@@ -1462,7 +1544,7 @@ def rename(old_name: str, new_name: str, user: bool, system: bool):
 @shortcut_config.command()
 def files():
     """Show shortcuts configuration file locations."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     config_files = shortcut_manager.get_config_files()
 
@@ -1481,7 +1563,7 @@ def files():
 @shortcut_config.command()
 def refresh():
     """Refresh shortcuts cache (reload from files)."""
-    from .shortcut_manager import shortcut_manager
+    from .config.shortcuts import shortcut_manager
 
     shortcut_manager.refresh_cache()
     shortcuts = shortcut_manager.list_shortcuts()

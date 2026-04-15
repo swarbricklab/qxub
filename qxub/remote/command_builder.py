@@ -8,7 +8,7 @@ CLI arguments suitable for remote execution via SSH.
 import shlex
 from typing import Any, Dict, List, Tuple
 
-from ..execution_context import ExecutionContext
+from ..execution import ExecutionContext
 
 
 def build_remote_command(

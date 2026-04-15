@@ -196,6 +196,7 @@ def submit_job(
     # Build params dict (mimics what exec_cli constructs)
     # ------------------------------------------------------------------
     params: Dict[str, Any] = {
+        "command": cmd_parts,
         "resources": tuple(pbs_resources),
         "queue": queue,
         "name": name,

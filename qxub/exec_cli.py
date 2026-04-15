@@ -52,7 +52,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 )
 @click.option("-q", "--queue", help="PBS queue name (default: configured or normal)")
 @click.option(
-    "-N", "--name", help="PBS job name (default: configured or qx-{timestamp})"
+    "-N", "--name", help="PBS job name (default: configured or {cmd}-{date}-{time})"
 )
 # Workflow-friendly resource options
 @click.option(
@@ -377,7 +377,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
     # Handle shortcut processing
     elif shortcut:
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_def = shortcut_manager.get_shortcut(shortcut)
@@ -426,6 +426,28 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                 options["post"] = value
             elif key == "bind" and not options["bind"]:
                 options["bind"] = value
+            elif key == "name" and not options["name"]:
+                options["name"] = value
+            elif key == "internet" and not options.get("internet"):
+                options["internet"] = value
+            elif key == "gpus" and not options.get("gpus"):
+                options["gpus"] = value
+            elif key == "gpu_type" and not options.get("gpu_type"):
+                options["gpu_type"] = value
+            elif key == "vars" and not options.get("var") and not options.get("vars"):
+                options["var"] = tuple(value) if isinstance(value, list) else (value,)
+            elif key == "tags" and not options.get("tag") and not options.get("tags"):
+                options["tag"] = tuple(value) if isinstance(value, list) else (value,)
+            elif key == "execdir" and not options.get("execdir"):
+                options["execdir"] = value
+            elif key == "log_dir" and not options.get("log_dir"):
+                options["log_dir"] = value
+            elif key == "email" and not options.get("email"):
+                options["email"] = value
+            elif key == "email_opts" and not options.get("email_opts"):
+                options["email_opts"] = value
+            elif key == "array" and not options.get("array"):
+                options["array"] = value
 
         click.echo(f"🎯 Using shortcut '{shortcut}'")
     elif not any(
@@ -438,7 +460,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         ]
     ):
         # No shortcut and no explicit execution context - check for command-based shortcut matching
-        from .shortcut_manager import ShortcutManager
+        from .config.shortcuts import ShortcutManager
 
         shortcut_manager = ShortcutManager()
         shortcut_match = shortcut_manager.find_shortcut(list(command))
@@ -468,6 +490,44 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                         options["resources"] = (value,)
                 elif key == "project" and not options["project"]:
                     options["project"] = value
+                elif key == "template" and not options.get("template"):
+                    options["template"] = value
+                elif key == "pre" and not options.get("pre"):
+                    options["pre"] = value
+                elif key == "post" and not options.get("post"):
+                    options["post"] = value
+                elif key == "bind" and not options.get("bind"):
+                    options["bind"] = value
+                elif key == "name" and not options["name"]:
+                    options["name"] = value
+                elif key == "internet" and not options.get("internet"):
+                    options["internet"] = value
+                elif key == "gpus" and not options.get("gpus"):
+                    options["gpus"] = value
+                elif key == "gpu_type" and not options.get("gpu_type"):
+                    options["gpu_type"] = value
+                elif (
+                    key == "vars" and not options.get("var") and not options.get("vars")
+                ):
+                    options["var"] = (
+                        tuple(value) if isinstance(value, list) else (value,)
+                    )
+                elif (
+                    key == "tags" and not options.get("tag") and not options.get("tags")
+                ):
+                    options["tag"] = (
+                        tuple(value) if isinstance(value, list) else (value,)
+                    )
+                elif key == "execdir" and not options.get("execdir"):
+                    options["execdir"] = value
+                elif key == "log_dir" and not options.get("log_dir"):
+                    options["log_dir"] = value
+                elif key == "email" and not options.get("email"):
+                    options["email"] = value
+                elif key == "email_opts" and not options.get("email_opts"):
+                    options["email_opts"] = value
+                elif key == "array" and not options.get("array"):
+                    options["array"] = value
 
             # For shortcuts, keep the full original command (don't strip the prefix)
             # The shortcut defines the execution context, not the command itself
@@ -476,35 +536,47 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         # If no shortcut found, continue with default execution
 
     # Validate execution contexts
-    execution_contexts = [
-        options["env"],
-        options["mod"] or options["mods"],
-        options["sif"],
-        options["default"],
-    ]
+    # --env and --mod/--mods can be combined (modules loaded first, then conda)
+    # --sif and --default are mutually exclusive with everything else
+    has_env = bool(options["env"])
+    has_mod = bool(options["mod"] or options["mods"])
+    has_sif = bool(options["sif"])
+    has_default = bool(options["default"])
 
-    active_contexts = sum(bool(x) for x in execution_contexts)
-    if active_contexts > 1:
+    if has_sif and (has_env or has_mod or has_default):
         raise click.ClickException(
-            "Cannot specify multiple execution contexts. "
+            "Cannot combine --sif with other execution contexts. "
+            "Use only one of: --env, --mod/--mods, --sif, --default"
+        )
+    if has_default and (has_env or has_mod or has_sif):
+        raise click.ClickException(
+            "Cannot combine --default with other execution contexts. "
             "Use only one of: --env, --mod/--mods, --sif, --default"
         )
 
-    # Determine execution context
-    if options["env"]:
-        execution_context = ExecutionContext("conda", options["env"], "conda")
-    elif options["mod"] or options["mods"]:
-        # Combine --mod and --mods options
+    # Parse modules (shared by module-only and combined contexts)
+    modules = []
+    if has_mod:
         modules = list(options["mod"]) if options["mod"] else []
         if options["mods"]:
-            # Support both comma and space separation
             import re
 
-            # Split by comma or space, filter out empty strings
             module_list = re.split(r"[,\s]+", options["mods"])
             modules.extend([m for m in module_list if m])
+
+    # Determine execution context
+    if has_env and has_mod:
+        # Combined: load modules first, then activate conda
+        execution_context = ExecutionContext(
+            "conda_module",
+            {"env": options["env"], "modules": modules},
+            "conda_module",
+        )
+    elif has_env:
+        execution_context = ExecutionContext("conda", options["env"], "conda")
+    elif has_mod:
         execution_context = ExecutionContext("module", modules, "module")
-    elif options["sif"]:
+    elif has_sif:
         execution_context = ExecutionContext(
             "singularity", options["sif"], "singularity"
         )
@@ -658,6 +730,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
     # Extract PBS-specific options for processing
     params = {
+        "command": command,
         "resources": tuple(all_resources),  # Use merged resources
         "queue": options["queue"],
         "name": options["name"],

@@ -53,6 +53,19 @@ def _sanitize_job_name(name):
     return sanitized
 
 
+def _default_job_name(command):
+    """Derive a default job name from the command: {cmd}-{date}-{time}."""
+    from datetime import datetime
+
+    cmd_word = "qx"
+    if command:
+        first = command[0] if isinstance(command, (list, tuple)) else command.split()[0]
+        cmd_word = Path(first).name or "qx"
+
+    now = datetime.now()
+    return f"{cmd_word}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+
+
 def apply_config_defaults(params, config_manager):
     """Apply configuration defaults to CLI parameters."""
     defaults = config_manager.get_defaults()
@@ -67,7 +80,11 @@ def apply_config_defaults(params, config_manager):
     if params["queue"] is None:
         params["queue"] = defaults.get("queue", "normal")
     if params["name"] is None:
-        params["name"] = defaults.get("name", "qt")
+        configured_name = defaults.get("name")
+        if configured_name:
+            params["name"] = configured_name
+        else:
+            params["name"] = _default_job_name(params.get("command"))
     if params["project"] is None:
         params["project"] = defaults.get("project", os.getenv("PROJECT"))
     if not params["resources"]:  # Empty tuple means no resources provided
@@ -155,7 +172,7 @@ def select_auto_queue(params):
     try:
         from pathlib import Path
 
-        from ..platforms.core import PlatformLoader
+        from ..platforms import CorePlatformLoader as PlatformLoader
         from ..resources import parse_walltime  # noqa: F811
 
         # Check for QXUB_PLATFORM_PATHS environment variable
