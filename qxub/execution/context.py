@@ -8,6 +8,7 @@ and execute_default functions.
 
 import base64
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 import os
@@ -100,13 +101,19 @@ class ExecutionContext:
         cmd_str = " ".join(command)
         cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 
+        # Capture submitting host's qxub version and executable path
+        from .. import __version__ as qxub_version
+
+        qxub_exe = shutil.which("qxub") or "unknown"
+        submitting_host = os.uname().nodename
+
         # Base submission variables
         out = Path(ctx_obj["out"])
         err = Path(ctx_obj["err"])
         # Default to current working directory if execdir is None
         exec_dir = ctx_obj["execdir"] or os.getcwd()
         create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir}'
+        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},qxub_version={qxub_version},qxub_path={qxub_exe},qxub_submit_host={submitting_host}'
 
         # Context-specific variables
         if self.context_type == "conda":
