@@ -77,6 +77,16 @@ def _get_shortcut_context_description(definition: dict) -> str:
     help="Local disk/jobfs requirement (workflow-friendly). Examples: '10GB', '500MB'. (default: configured). Converted to PBS format automatically.",
 )
 @click.option(
+    "--gpus",
+    type=int,
+    help="Number of GPUs (workflow-friendly). Triggers automatic GPU queue selection. Converted to PBS ngpus automatically.",
+)
+@click.option(
+    "--gpu-type",
+    type=str,
+    help="GPU type for queue selection (e.g. v100, a100). Valid types are defined by the platform.",
+)
+@click.option(
     "--volumes",
     "--storage",
     help="Storage volumes to mount (NCI format). Examples: 'gdata/a56', 'gdata/a56+gdata/px14'. (default: configured). Converted to PBS storage= automatically.",
@@ -594,6 +604,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "mem": "mem",
         "jobfs": "disk",
         "storage": "volumes",
+        "ngpus": "gpus",
     }
 
     # Check which resources are already specified (considering aliases)
@@ -664,6 +675,12 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
             if "volumes" not in specified_resources
             else None
         ),
+        "gpus": options.get("gpus")
+        or (
+            get_workflow_resource_config("gpus")
+            if "gpus" not in specified_resources
+            else None
+        ),
     }
 
     # Only create mapper if we have any resource values to process
@@ -686,6 +703,9 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
         if resource_values["volumes"]:
             mapper.add_storage(resource_values["volumes"])
+
+        if resource_values["gpus"]:
+            mapper.add_gpus(resource_values["gpus"])
 
         workflow_resources.extend(mapper.get_pbs_resources())
 
@@ -731,6 +751,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         "cpus_explicit": cpus_explicit,  # Track for graceful adjustment
         "internet": options.get("internet", False),
         "notify": options.get("notify", False),  # Slack/Discord notifications
+        "gpu_type": options.get("gpu_type"),  # GPU type for queue selection
     }
 
     # Resolve and merge tags from --tag (multiple) and --tags (comma-separated string)
@@ -742,6 +763,11 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     # If internet connectivity is required and no queue was explicitly requested,
     # trigger auto-selection so an internet-capable queue is chosen.
     if options.get("internet") and not options.get("queue"):
+        params["queue"] = "auto"
+
+    # If GPUs are requested and no queue was explicitly specified,
+    # trigger auto-selection so a GPU-capable queue is chosen.
+    if options.get("gpus") and not options.get("queue"):
         params["queue"] = "auto"
 
     # Process configuration using the existing config system

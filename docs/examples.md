@@ -92,8 +92,15 @@ qxub exec --mem 4GB --cpus 2 --time 30m --env base -- python quick_analysis.py
 qxub exec --mem 64GB --cpus 16 --time 4h --disk 200GB --volumes gdata/a56 --env pytorch -- python training.py
 qxub exec --mem 1TB --cpus 48 --time 12h --volumes gdata/a56+scratch/a56 --env bioinformatics -- ./genome_assembly.sh
 
-# GPU jobs with workflow-friendly resources
-qxub exec --mem 32GB --cpus 12 --time 8h --volumes gdata/a56+gdata/px14 --resources ngpus=1 --env pytorch -- python train_model.py
+# GPU jobs — queue and CPUs are set automatically from the platform definition
+qxub exec --gpus 1 --mem 32GB --time 8h --env pytorch -- python train_model.py
+# → gpuvolta queue, ncpus=12 (12 cpus_per_gpu × 1 GPU)
+
+qxub exec --gpus 4 --gpu-type a100 --mem 128GB --time 24h --env pytorch -- python large_training.py
+# → dgxa100 queue, ncpus=64 (16 cpus_per_gpu × 4 GPUs)
+
+# Override auto-calculated CPUs if needed
+qxub exec --gpus 1 --cpus 24 --mem 32GB --env pytorch -- python train_model.py
 
 # Perfect for Snakemake and other workflow engines
 snakemake --cluster "qxub exec --mem {resources.mem_gb}GB --cpus {threads} --time {resources.runtime}h --volumes {resources.storage} --"
