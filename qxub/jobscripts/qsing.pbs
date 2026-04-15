@@ -13,6 +13,7 @@ echo "⚙️  Singularity options: $sing_options"
 echo "🔖 qxub version: ${qxub_version:-unknown}"
 echo "📦 qxub path: ${qxub_path:-unknown}"
 echo "🖥️  Submitted from: ${qxub_submit_host:-unknown}"
+echo "🏠 Hostname: $(hostname)"
 
 # Create status directory for monitoring
 STATUS_DIR="${out%/*}/status"
