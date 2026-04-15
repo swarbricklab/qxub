@@ -526,35 +526,47 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         # If no shortcut found, continue with default execution
 
     # Validate execution contexts
-    execution_contexts = [
-        options["env"],
-        options["mod"] or options["mods"],
-        options["sif"],
-        options["default"],
-    ]
+    # --env and --mod/--mods can be combined (modules loaded first, then conda)
+    # --sif and --default are mutually exclusive with everything else
+    has_env = bool(options["env"])
+    has_mod = bool(options["mod"] or options["mods"])
+    has_sif = bool(options["sif"])
+    has_default = bool(options["default"])
 
-    active_contexts = sum(bool(x) for x in execution_contexts)
-    if active_contexts > 1:
+    if has_sif and (has_env or has_mod or has_default):
         raise click.ClickException(
-            "Cannot specify multiple execution contexts. "
+            "Cannot combine --sif with other execution contexts. "
+            "Use only one of: --env, --mod/--mods, --sif, --default"
+        )
+    if has_default and (has_env or has_mod or has_sif):
+        raise click.ClickException(
+            "Cannot combine --default with other execution contexts. "
             "Use only one of: --env, --mod/--mods, --sif, --default"
         )
 
-    # Determine execution context
-    if options["env"]:
-        execution_context = ExecutionContext("conda", options["env"], "conda")
-    elif options["mod"] or options["mods"]:
-        # Combine --mod and --mods options
+    # Parse modules (shared by module-only and combined contexts)
+    modules = []
+    if has_mod:
         modules = list(options["mod"]) if options["mod"] else []
         if options["mods"]:
-            # Support both comma and space separation
             import re
 
-            # Split by comma or space, filter out empty strings
             module_list = re.split(r"[,\s]+", options["mods"])
             modules.extend([m for m in module_list if m])
+
+    # Determine execution context
+    if has_env and has_mod:
+        # Combined: load modules first, then activate conda
+        execution_context = ExecutionContext(
+            "conda_module",
+            {"env": options["env"], "modules": modules},
+            "conda_module",
+        )
+    elif has_env:
+        execution_context = ExecutionContext("conda", options["env"], "conda")
+    elif has_mod:
         execution_context = ExecutionContext("module", modules, "module")
-    elif options["sif"]:
+    elif has_sif:
         execution_context = ExecutionContext(
             "singularity", options["sif"], "singularity"
         )
