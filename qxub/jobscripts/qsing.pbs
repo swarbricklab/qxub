@@ -10,6 +10,9 @@
 echo "📁 Execution directory: $cwd"
 echo "📦 Singularity container: $sif_file"
 echo "⚙️  Singularity options: $sing_options"
+echo "🔖 qxub version: ${qxub_version:-unknown}"
+echo "📦 qxub path: ${qxub_path:-unknown}"
+echo "🖥️  Submitted from: ${qxub_submit_host:-unknown}"
 
 # Create status directory for monitoring
 STATUS_DIR="${out%/*}/status"

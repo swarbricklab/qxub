@@ -10,6 +10,9 @@
 echo "📁 Execution directory: $cwd"
 echo "📦 Modules to load: $mods"
 echo "🐍 Conda environment: $env"
+echo "🔖 qxub version: ${qxub_version:-unknown}"
+echo "📦 qxub path: ${qxub_path:-unknown}"
+echo "🖥️  Submitted from: ${qxub_submit_host:-unknown}"
 
 # Decode base64 encoded commands
 if [ -n "$cmd_b64" ]; then
