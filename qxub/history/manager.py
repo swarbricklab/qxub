@@ -449,8 +449,11 @@ class HistoryManager:
     def get_execution_by_job_id(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get execution record by PBS job ID.
 
+        Supports both full IDs (e.g., "153392916.gadi-pbs") and partial numeric
+        IDs (e.g., "153392916"). Partial IDs match the portion before the first dot.
+
         Args:
-            job_id: PBS job ID (e.g., "153392916.gadi-pbs")
+            job_id: PBS job ID, full or numeric-only prefix.
 
         Returns:
             Execution record dictionary with 'timestamp' field added, or None if not found.
@@ -464,10 +467,10 @@ class HistoryManager:
             if not config or "executions" not in config:
                 return None
 
-            # Search through executions for matching job_id
+            # Search through executions for matching job_id (exact or numeric prefix)
             for timestamp, execution in config.executions.items():
-                if execution.get("execution", {}).get("job_id") == job_id:
-                    # Add timestamp to the record
+                stored_id = execution.get("execution", {}).get("job_id") or ""
+                if stored_id == job_id or stored_id.split(".")[0] == job_id:
                     execution_copy = dict(execution)
                     execution_copy["timestamp"] = timestamp
                     return execution_copy
