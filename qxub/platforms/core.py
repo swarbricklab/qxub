@@ -39,6 +39,7 @@ class QueueLimits:
     min_cpus: Optional[int] = None
     max_memory: Optional[str] = None
     max_local_storage: Optional[str] = None
+    min_local_storage: Optional[str] = None
     max_gpus: Optional[int] = None
     min_gpus: Optional[int] = None
     min_memory: Optional[str] = None  # Trigger threshold for auto-selection
@@ -396,6 +397,7 @@ class PlatformLoader:
             min_cpus=limits_data.get("min_cpus"),
             max_memory=limits_data.get("max_memory"),
             max_local_storage=limits_data.get("max_local_storage"),
+            min_local_storage=limits_data.get("min_local_storage"),
             max_gpus=limits_data.get("max_gpus"),
             min_gpus=limits_data.get("min_gpus"),
             min_memory=limits_data.get("min_memory"),
