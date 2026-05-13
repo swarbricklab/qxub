@@ -7,13 +7,73 @@ approach with SSH hostname delegation to ~/.ssh/config.
 """
 
 import logging
+import os
+import random
+import re
 import select
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# PBS job IDs look like "12345678.gadi-pbs" or just "12345678". If we ever see
+# one in the remote stdout we know the submission succeeded and any retry
+# would risk a duplicate submission.
+_PBS_JOB_ID_RE = re.compile(r"\b(\d{4,})\.[A-Za-z][\w-]*\b")
+
+# SSH transport-level failure: the ssh client itself returns 255 for things
+# like "Connection closed by <host>", auth failure, network reset, etc. The
+# remote command is guaranteed not to have started in this case (or to have
+# been killed before completing), so retrying is generally safe — *unless*
+# we already saw a PBS job id in stdout, in which case the job was submitted.
+_SSH_TRANSPORT_EXIT = 255
+
+
+# Defaults for SSH robustness and retry behaviour. All can be overridden via
+# environment variables so CI runners can tune behaviour without code changes.
+_DEFAULT_CONNECT_TIMEOUT = 10  # seconds, per SSH ConnectTimeout / probe timeout
+_DEFAULT_MAX_RETRIES = 3  # total connection probe attempts
+_DEFAULT_RETRY_DELAY = 5.0  # seconds, base for exponential backoff
+_DEFAULT_RETRY_MAX_DELAY = 60.0  # seconds, cap on backoff sleep
+_DEFAULT_SERVER_ALIVE_INTERVAL = 15  # seconds between SSH keepalive probes
+_DEFAULT_SERVER_ALIVE_COUNT_MAX = 4  # missed keepalives before SSH disconnects
+
+# Watchdog for the *real* remote command. Some CI runs see the SSH session go
+# completely silent mid-stream even with ServerAlive* set (the remote qxub or
+# its conda init can wedge). If no output arrives on stdout/stderr for
+# IDLE_TIMEOUT seconds we kill SSH and retry up to EXEC_MAX_RETRIES times.
+# Set QXUB_REMOTE_IDLE_TIMEOUT=0 to disable the watchdog entirely.
+_DEFAULT_IDLE_TIMEOUT = 600  # seconds of silence before treating as hung
+_DEFAULT_EXEC_MAX_RETRIES = 2  # extra attempts after the first try (total 3)
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from an env var, falling back to default."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        return value if value >= 0 else default
+    except ValueError:
+        logger.warning("Invalid value for %s=%r, using default %s", name, raw, default)
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a non-negative float from an env var, falling back to default."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+        return value if value >= 0 else default
+    except ValueError:
+        logger.warning("Invalid value for %s=%r, using default %s", name, raw, default)
+        return default
 
 
 class RemoteExecutionError(Exception):
@@ -139,23 +199,115 @@ class PlatformRemoteExecutor:
         elif verbose >= 1:
             print(f"🌐 Executing on {self.platform_name} via SSH", file=sys.stderr)
 
-        try:
-            if stream_output:
-                return self._execute_with_streaming(ssh_command)
-            else:
-                result = subprocess.run(ssh_command, capture_output=True, text=True)
-                if result.stdout:
-                    print(result.stdout, end="")
-                if result.stderr:
-                    print(result.stderr, end="", file=sys.stderr)
-                return result.returncode
+        idle_timeout = _env_int("QXUB_REMOTE_IDLE_TIMEOUT", _DEFAULT_IDLE_TIMEOUT)
+        max_retries = _env_int(
+            "QXUB_REMOTE_EXEC_MAX_RETRIES", _DEFAULT_EXEC_MAX_RETRIES
+        )
+        base_delay = _env_float("QXUB_REMOTE_RETRY_DELAY", _DEFAULT_RETRY_DELAY)
+        max_delay = _env_float("QXUB_REMOTE_RETRY_MAX_DELAY", _DEFAULT_RETRY_MAX_DELAY)
 
-        except FileNotFoundError:
-            raise RemoteExecutionError(
-                "SSH command not found. Please install OpenSSH client."
+        total_attempts = max_retries + 1
+        last_exit = 1
+
+        for attempt in range(1, total_attempts + 1):
+            try:
+                if stream_output:
+                    exit_code, hung, captured_stdout = self._execute_with_streaming(
+                        ssh_command, idle_timeout=idle_timeout
+                    )
+                else:
+                    # Non-streaming path: rely on subprocess timeout = idle_timeout
+                    # acting as a wall-clock cap. Treat timeout as a hang.
+                    hung = False
+                    captured_stdout = ""
+                    try:
+                        result = subprocess.run(
+                            ssh_command,
+                            capture_output=True,
+                            text=True,
+                            timeout=idle_timeout if idle_timeout > 0 else None,
+                        )
+                        if result.stdout:
+                            print(result.stdout, end="")
+                            captured_stdout = result.stdout
+                        if result.stderr:
+                            print(result.stderr, end="", file=sys.stderr)
+                        exit_code = result.returncode
+                    except subprocess.TimeoutExpired:
+                        hung = True
+                        exit_code = 124  # conventional timeout exit code
+
+            except FileNotFoundError:
+                raise RemoteExecutionError(
+                    "SSH command not found. Please install OpenSSH client."
+                )
+            except subprocess.SubprocessError as e:
+                raise RemoteExecutionError(f"SSH execution failed: {e}")
+
+            last_exit = exit_code
+
+            # Did the remote get far enough to submit a PBS job?
+            job_id_match = _PBS_JOB_ID_RE.search(captured_stdout or "")
+            submitted_job_id = job_id_match.group(0) if job_id_match else None
+
+            # Success path: exit 0 and not hung.
+            if not hung and exit_code == 0:
+                return exit_code
+
+            # Classify the failure.
+            ssh_transport_failure = not hung and exit_code == _SSH_TRANSPORT_EXIT
+            retryable = hung or ssh_transport_failure
+
+            if not retryable:
+                # Real remote failure (non-zero exit from the user command).
+                # Don't retry — the user's command itself failed.
+                return exit_code
+
+            # If a job was already submitted, retrying would duplicate it.
+            if submitted_job_id is not None:
+                print(
+                    f"⚠️  SSH connection to {self.hostname} dropped "
+                    f"(exit {exit_code})"
+                    + (f" after {idle_timeout}s of silence" if hung else "")
+                    + f", but PBS job {submitted_job_id} was already "
+                    f"submitted. NOT retrying to avoid duplicate "
+                    f"submission. Check job status with: "
+                    f"`ssh {self.hostname} qstat {submitted_job_id}`",
+                    file=sys.stderr,
+                )
+                return exit_code
+
+            # No job submitted — safe to retry.
+            if attempt >= total_attempts:
+                reason = (
+                    f"no output for {idle_timeout}s"
+                    if hung
+                    else f"SSH transport failure (exit {exit_code})"
+                )
+                print(
+                    f"❌ Remote command on {self.hostname} failed: {reason}. "
+                    f"Giving up after {attempt} attempt(s).",
+                    file=sys.stderr,
+                )
+                return exit_code
+
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            # Small jitter to avoid thundering-herd on shared CI runners.
+            delay += random.uniform(0, min(1.0, delay * 0.1))
+            reason = (
+                f"produced no output for {idle_timeout}s (assuming hang)"
+                if hung
+                else f"SSH dropped the connection (exit {exit_code})"
             )
-        except subprocess.SubprocessError as e:
-            raise RemoteExecutionError(f"SSH execution failed: {e}")
+            print(
+                f"⚠️  Remote command on {self.hostname} {reason}. "
+                f"No PBS job id seen in output, so retrying is safe. "
+                f"Retrying ({attempt}/{max_retries}) in {delay:.1f}s.",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+
+        return last_exit
 
     def _build_ssh_command(self, remote_command: str) -> list:
         """
@@ -176,11 +328,30 @@ class PlatformRemoteExecutor:
         if self._should_allocate_tty():
             ssh_cmd.append("-t")
 
-        # Connection options - minimal, let ~/.ssh/config control the rest
+        # Connection options - minimal, let ~/.ssh/config control the rest.
+        # The robustness options below mitigate silent network drops that have
+        # been observed when running from CI runners against NCI: ConnectTimeout
+        # bounds dial time, and the ServerAlive* pair causes SSH to give up
+        # rather than hang indefinitely if the connection stalls mid-command.
+        connect_timeout = _env_int(
+            "QXUB_REMOTE_CONNECT_TIMEOUT", _DEFAULT_CONNECT_TIMEOUT
+        )
+        alive_interval = _env_int(
+            "QXUB_REMOTE_SERVER_ALIVE_INTERVAL", _DEFAULT_SERVER_ALIVE_INTERVAL
+        )
+        alive_count = _env_int(
+            "QXUB_REMOTE_SERVER_ALIVE_COUNT_MAX", _DEFAULT_SERVER_ALIVE_COUNT_MAX
+        )
         ssh_cmd.extend(
             [
                 "-o",
                 "BatchMode=yes",  # Don't prompt for passwords
+                "-o",
+                f"ConnectTimeout={connect_timeout}",
+                "-o",
+                f"ServerAliveInterval={alive_interval}",
+                "-o",
+                f"ServerAliveCountMax={alive_count}",
             ]
         )
 
@@ -249,16 +420,27 @@ class PlatformRemoteExecutor:
         # TODO: Consider making this configurable if interactive features are needed
         return False
 
-    def _execute_with_streaming(self, ssh_command: list) -> int:
+    def _execute_with_streaming(
+        self, ssh_command: list, idle_timeout: int = 0
+    ) -> tuple[int, bool, str]:
         """
-        Execute SSH command with real-time output streaming.
+        Execute SSH command with real-time output streaming and idle watchdog.
 
         Args:
             ssh_command: SSH command as list of arguments
+            idle_timeout: Seconds of no stdout/stderr output before the remote
+                command is considered hung and the SSH process is terminated.
+                Set to 0 to disable the watchdog.
 
         Returns:
-            Exit code from SSH process
+            Tuple of (exit_code, hung, captured_stdout) where ``hung`` is True
+            if the watchdog killed the process due to no output, and
+            ``captured_stdout`` is the full remote stdout (used by the caller
+            to detect whether a PBS job id was emitted before any failure).
         """
+        process = None
+        hung = False
+        stdout_buf: List[str] = []
         try:
             process = subprocess.Popen(
                 ssh_command,
@@ -269,12 +451,14 @@ class PlatformRemoteExecutor:
                 universal_newlines=True,
             )
 
+            last_output = time.monotonic()
+
             # Stream output in real-time using select
             while True:
                 if hasattr(select, "select"):
                     # Unix-like systems - efficient multiplexing
                     ready, _, _ = select.select(
-                        [process.stdout, process.stderr], [], [], 0.1
+                        [process.stdout, process.stderr], [], [], 0.5
                     )
 
                     for stream in ready:
@@ -282,18 +466,42 @@ class PlatformRemoteExecutor:
                             line = process.stdout.readline()
                             if line:
                                 print(line, end="")
+                                stdout_buf.append(line)
+                                last_output = time.monotonic()
                         elif stream == process.stderr:
                             line = process.stderr.readline()
                             if line:
                                 print(line, end="", file=sys.stderr)
+                                last_output = time.monotonic()
                 else:
                     # Windows fallback - less efficient but functional
                     while True:
                         output = process.stdout.readline()
                         if output:
                             print(output, end="")
+                            stdout_buf.append(output)
+                            last_output = time.monotonic()
                         else:
                             break
+
+                # Idle watchdog — only fires while the process is still alive.
+                if (
+                    idle_timeout > 0
+                    and process.poll() is None
+                    and (time.monotonic() - last_output) > idle_timeout
+                ):
+                    hung = True
+                    logger.warning(
+                        "No output from remote for %ss; terminating SSH",
+                        idle_timeout,
+                    )
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    break
 
                 # Check if process has finished
                 if process.poll() is not None:
@@ -303,19 +511,22 @@ class PlatformRemoteExecutor:
             stdout, stderr = process.communicate()
             if stdout:
                 print(stdout, end="")
+                stdout_buf.append(stdout)
             if stderr:
                 print(stderr, end="", file=sys.stderr)
 
-            return process.returncode
+            exit_code = process.returncode if process.returncode is not None else 124
+            return exit_code, hung, "".join(stdout_buf)
 
         except KeyboardInterrupt:
             logger.info("Received interrupt signal, terminating remote process")
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-            return 130  # Standard exit code for SIGINT
+            if process is not None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+            return 130, False, "".join(stdout_buf)  # Standard exit code for SIGINT
 
     def test_connection(self) -> tuple[bool, str]:
         """
