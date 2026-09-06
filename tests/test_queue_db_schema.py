@@ -98,7 +98,9 @@ def test_empty_legacy_queue_is_rebuilt(tmp_path):
 def test_nonempty_legacy_queue_is_backed_up(tmp_path):
     """A legacy queue with rows is preserved as ``queue_legacy_backup``."""
     dbp = tmp_path / "legacy_rows.db"
-    _make_legacy_db(dbp, rows=[("qx-old", "111.gadi", "oldjob", "running", "2026-01-01")])
+    _make_legacy_db(
+        dbp, rows=[("qx-old", "111.gadi", "oldjob", "running", "2026-01-01")]
+    )
 
     db.init_db(db_path=dbp)
 
