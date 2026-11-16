@@ -12,6 +12,7 @@ import shutil
 
 logger = logging.getLogger(__name__)
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -113,7 +114,7 @@ class ExecutionContext:
         # Default to current working directory if execdir is None
         exec_dir = ctx_obj["execdir"] or os.getcwd()
         create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},qxub_version={qxub_version},qxub_path={qxub_exe},qxub_submit_host={submitting_host}'
+        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},qxub_version={qxub_version},qxub_path={qxub_exe},qxub_python={sys.executable},qxub_submit_host={submitting_host}'
 
         # Context-specific variables
         if self.context_type == "conda":

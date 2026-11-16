@@ -507,9 +507,9 @@ class HistoryManager:
         Example:
             >>> manager.get_execution_file_paths("153392916.gadi-pbs")
             {
-                'out': '/scratch/a56/user/qxub/job_20251026_205314.out',
-                'err': '/scratch/a56/user/qxub/job_20251026_205314.err',
-                'joblog': '/scratch/a56/user/qxub/job_20251026_205314.log'
+                'out': '/scratch/ab12/user/qxub/job_20251026_205314.out',
+                'err': '/scratch/ab12/user/qxub/job_20251026_205314.err',
+                'joblog': '/scratch/ab12/user/qxub/job_20251026_205314.log'
             }
         """
         if job_id:

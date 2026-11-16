@@ -15,6 +15,7 @@ Platform definitions are loaded from YAML files in standard locations:
 
 import logging
 import os
+import socket
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -204,6 +205,22 @@ class Platform:
     queues: Dict[str, Queue] = field(default_factory=dict)
     auto_selection_rules: List[AutoSelectionRule] = field(default_factory=list)
     auto_adjust: Dict[str, str] = field(default_factory=dict)
+    # Site conventions that used to be hard-coded for NCI Gadi.
+    # Environment variable holding the user's default project/account.
+    account_env: Optional[str] = None
+    # Named path templates; ``{project}`` and ``{user}`` are filled in.
+    # ``scratch`` is the per-user shared scratch area.
+    paths: Dict[str, str] = field(default_factory=dict)
+    # Scheduler arguments added to every submission, e.g. "-W umask=0027".
+    default_directives: List[str] = field(default_factory=list)
+
+    def matches_host(self, hostname: str) -> bool:
+        """Whether ``hostname`` belongs to this platform.
+
+        ``host`` matches as a case-insensitive substring, so ``gadi`` matches
+        ``gadi-login-01.gadi.nci.org.au``.
+        """
+        return bool(self.host) and self.host.lower() in hostname.lower()
 
     def get_queue(self, name: str) -> Optional[Queue]:
         """Get queue by name."""
@@ -381,6 +398,9 @@ class PlatformLoader:
             queues=queues,
             auto_selection_rules=auto_selection_rules,
             auto_adjust=auto_adjust,
+            account_env=data.get("account_env"),
+            paths=dict(data.get("paths") or {}),
+            default_directives=list(data.get("default_directives") or []),
         )
 
     def _create_queue(self, data: Dict[str, Any]) -> Queue:
@@ -475,13 +495,14 @@ def detect_platform() -> Optional[str]:
     if platform_override:
         return platform_override
 
-    hostname = os.getenv("HOSTNAME", "")
+    hostname = os.getenv("HOSTNAME") or socket.gethostname()
 
-    # NCI Gadi detection
-    if "gadi" in hostname.lower():
-        return "nci_gadi"
-
-    # Add other platform detection logic here
+    # Each platform definition names its host; match it against ours.
+    loader = get_platform_loader()
+    for name in loader.list_platforms():
+        platform = loader.get_platform(name)
+        if platform and platform.matches_host(hostname):
+            return name
 
     return None
 

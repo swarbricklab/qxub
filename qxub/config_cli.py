@@ -956,7 +956,7 @@ def shortcut_config():
 @click.option(
     "--volumes",
     "--storage",
-    help="Storage volumes to mount (NCI format). Examples: 'gdata/a56', 'gdata/a56+gdata/px14'",
+    help="Storage volumes to mount (NCI format). Examples: 'gdata/ab12', 'gdata/ab12+gdata/cd34'",
 )
 @click.option("-q", "--queue", help="PBS queue name")
 @click.option("-N", "--name", help="PBS job name")

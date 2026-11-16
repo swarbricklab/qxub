@@ -8,6 +8,19 @@ platform:
   host: gadi  # Matches any hostname containing "gadi"
   description: "NCI Gadi supercomputer - Australia's peak research supercomputer"
 
+  # Site conventions. These used to be hard-coded in qxub.
+  # Gadi sets $PROJECT to the user's default project at login.
+  account_env: PROJECT
+  paths:
+    # Per-user shared scratch, visible from login and compute nodes. qxub
+    # puts default job output under {scratch}/qt and status files under
+    # {scratch}/qxub/status.
+    scratch: "/scratch/{project}/{user}"
+  # Added to every qsub. Keeps job logs and outputs out of reach of other
+  # users (group read, no world access).
+  default_directives:
+    - "-W umask=0027"
+
   # Complete queue definitions based on NCI official documentation
   queues:
     - name: normal

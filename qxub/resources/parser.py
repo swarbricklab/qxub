@@ -294,7 +294,7 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
     ========================================================================
     Resource Usage on 2025-10-21 11:14:48:
        Job Id:             152942530.gadi-pbs
-       Project:            a56
+       Project:            ab12
        Exit Status:        0
        Service Units:      0.00
        NCPUs Requested:    1                      NCPUs Used: 1
@@ -314,7 +314,7 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
         >>> parse_joblog_resources("/path/to/joblog")
         {
             'job_id': '152942530.gadi-pbs',
-            'project': 'a56',
+            'project': 'ab12',
             'exit_status': 0,
             'service_units': 0.0,
             'ncpus_requested': 1,

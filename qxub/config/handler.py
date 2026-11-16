@@ -10,19 +10,21 @@ import click
 
 
 def _get_default_output_dir():
-    """Get appropriate output directory that works across login and compute nodes."""
+    """Get appropriate output directory that works across login and compute nodes.
+
+    Uses ``{scratch}/qt/<timestamp>`` when the current platform defines a
+    shared scratch area and it exists, otherwise ``./qt/<timestamp>``.
+    """
     from datetime import datetime
+
+    from .site import scratch_dir
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Prefer shared scratch space over TMPDIR to avoid cross-node access issues
-    project = os.getenv("PROJECT", "a56")
-    user = os.getenv("USER", "unknown")
-
-    # Try shared scratch first
-    scratch_path = Path("/scratch", project, user, "qt", timestamp)
-    if scratch_path.parent.parent.exists():  # /scratch/PROJECT/USER exists
-        return scratch_path
+    scratch = scratch_dir()
+    if scratch is not None and scratch.exists():
+        return scratch / "qt" / timestamp
 
     # Fallback to current directory
     return Path(os.getcwd(), "qt", timestamp)
@@ -86,7 +88,9 @@ def apply_config_defaults(params, config_manager):
         else:
             params["name"] = _default_job_name(params.get("command"))
     if params["project"] is None:
-        params["project"] = defaults.get("project", os.getenv("PROJECT"))
+        from .site import default_project
+
+        params["project"] = defaults.get("project") or default_project()
     if not params["resources"]:  # Empty tuple means no resources provided
         params["resources"] = defaults.get("resources", [])
 
@@ -303,7 +307,11 @@ def select_auto_queue(params):
 
 def build_qsub_options(params):
     """Build qsub options string from parameters."""
-    options = "-N {name} -q {queue} -P {project} ".format_map(params)
+    from .site import default_directives
+
+    options = "-N {name} -q {queue} ".format_map(params)
+    if params.get("project"):
+        options += f"-P {params['project']} "
     if params.get("resources"):
         options += " ".join([f"-l {resource}" for resource in params["resources"]])
     options += f" -o {params['joblog']}"
@@ -313,6 +321,10 @@ def build_qsub_options(params):
         options += f" -M {params['email']}"
         email_opts = params.get("email_opts", "ae")  # default: abort + end
         options += f" -m {email_opts}"
+
+    # Site-wide scheduler arguments from the platform, e.g. -W umask=0027
+    for directive in default_directives():
+        options += f" {directive}"
 
     return options
 

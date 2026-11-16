@@ -8,6 +8,7 @@ qsub
     create_execdir=false
     qxub_version=<VERSION>
     qxub_path=<QXUB_PATH>
+    qxub_python=<PYTHON>
     qxub_submit_host=<HOST>
     QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
 -N
@@ -18,4 +19,6 @@ copyq
 ab12
 -o
 <CWD>/wget-<TIMESTAMP>.log
+-W
+umask=0027
 <JOBSCRIPTS>/qdefault.pbs

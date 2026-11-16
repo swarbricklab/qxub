@@ -542,32 +542,37 @@ class ConfigManager:
         # Create directory
         user_config_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Create template config
-        template = {
-            "defaults": {
-                "name": "qt",
-                "queue": "normal",
-                "project": "a56",
-                "joblog": "{name}.log",
-                "resources": ["mem=4GB", "ncpus=1"],
-                "out": "/scratch/{project}/{user}/qt/{timestamp}/out",
-                "err": "/scratch/{project}/{user}/qt/{timestamp}/err",
-                # Workflow-friendly resource defaults
-                "mem": "4GB",
-                "cpus": 2,
-                "runtime": "1h",
-                "disk": "10GB",
-                "volumes": "gdata/{project}",
-                "conda": {"env": "base", "pre": None, "post": None},
-                "module": {"mod": ["python3"], "pre": None, "post": None},
-                "sing": {
-                    "sif": None,
-                    "bind": ["/scratch", "/g/data"],
-                    "env": [],
-                    "pre": None,
-                    "post": None,
-                },
+        # Create template config. Site-specific values (project, storage
+        # volumes, bind paths) are left for the user to fill in; the platform
+        # definition supplies scratch paths and the default project.
+        defaults = {
+            "name": "qt",
+            "queue": "normal",
+            "joblog": "{name}.log",
+            "resources": ["mem=4GB", "ncpus=1"],
+            # Workflow-friendly resource defaults
+            "mem": "4GB",
+            "cpus": 2,
+            "runtime": "1h",
+            "disk": "10GB",
+            "conda": {"env": "base", "pre": None, "post": None},
+            "module": {"mod": ["python3"], "pre": None, "post": None},
+            "sing": {
+                "sif": None,
+                "bind": [],
+                "env": [],
+                "pre": None,
+                "post": None,
             },
+        }
+        from .site import default_project
+
+        project = default_project()
+        if project:
+            defaults["project"] = project
+
+        template = {
+            "defaults": defaults,
             "aliases": {
                 "example": {
                     "cmd": 'echo "Hello from qxub alias!"',

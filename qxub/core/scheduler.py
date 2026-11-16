@@ -300,15 +300,12 @@ def get_default_status_dir():
     """Get the default status directory path for qxub jobs.
 
     Returns:
-        Path to the status directory (e.g., /scratch/{project}/{user}/qxub/status)
+        Path to the status directory: ``{scratch}/qxub/status`` from the
+        platform definition, or ``$XDG_STATE_HOME/qxub/status``.
     """
-    import os
-    from pathlib import Path
+    from ..config.site import default_status_dir
 
-    project = os.getenv("PROJECT", "a56")
-    user = os.getenv("USER", "unknown")
-
-    return Path("/scratch", project, user, "qxub", "status")
+    return default_status_dir()
 
 
 def job_status_from_files(job_id, status_dir=None, log_dir=None):

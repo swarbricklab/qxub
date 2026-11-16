@@ -447,7 +447,7 @@ class ResourceTracker:
         import re
 
         # Pattern to match the full path to qxub executable
-        # Examples: /g/data/a56/software/qsub_tools/venv/bin/qxub
+        # Examples: /g/data/ab12/software/venv/bin/qxub
         #           /some/other/path/to/qxub
         pattern = r"^[^\s]*qxub"
         cleaned = re.sub(pattern, "qxub", command)

@@ -14,7 +14,7 @@ Usage::
         resources={"walltime": "02:00:00", "mem": "8GB", "ncpus": 4},
         name="my_job",
         queue="normal",
-        project="a56",
+        project="ab12",
         env="myenv",          # conda environment
     )
     print(result.job_id)       # "12345.gadi-pbs"

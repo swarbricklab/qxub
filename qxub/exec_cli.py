@@ -91,7 +91,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--volumes",
     "--storage",
-    help="Storage volumes to mount (NCI format). Examples: 'gdata/a56', 'gdata/a56+gdata/px14'. (default: configured). Converted to PBS storage= automatically.",
+    help="Storage volumes to mount (NCI format). Examples: 'gdata/ab12', 'gdata/ab12+gdata/cd34'. (default: configured). Converted to PBS storage= automatically.",
 )
 @click.option(
     "-P", "--project", help="PBS project code (default: configured or $PROJECT)"

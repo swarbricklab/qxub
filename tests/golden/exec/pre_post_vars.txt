@@ -8,6 +8,7 @@ qsub
     create_execdir=false
     qxub_version=<VERSION>
     qxub_path=<QXUB_PATH>
+    qxub_python=<PYTHON>
     qxub_submit_host=<HOST>
     pre_cmd_b64=ZWNobyBzdGFydA==
     post_cmd_b64=ZWNobyBkb25l
