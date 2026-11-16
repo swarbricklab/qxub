@@ -443,7 +443,7 @@ class PlatformLoader:
     def reload_platforms(self):
         """Reload all platform definitions."""
         self.platforms.clear()
-        self._load_all_platforms()
+        self._load_platforms()
 
 
 # Global platform loader instance
@@ -819,7 +819,7 @@ def select_best_queue(
         QueueSelectionResult with selection details
     """
     # Import here to avoid circular import
-    from .config import config_manager
+    from ..config import config_manager
 
     # Get platform
     if platform_name:

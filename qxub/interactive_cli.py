@@ -6,6 +6,7 @@ PBS sessions with environment activation, resource allocation, and optional
 tmux integration for session persistence.
 """
 
+import base64
 import os
 import subprocess
 import sys
@@ -1383,9 +1384,11 @@ def interactive_cli(
 
         from .resources import resource_tracker
 
-        session_id = f"qxi_{name}_{int(_time.time())}"
+        # Distinct name: `session_id` keys the status directory the init
+        # script writes to, and is read back after the session ends.
+        tracker_job_id = f"qxi_{name}_{int(_time.time())}"
         resource_tracker.log_job_submitted(
-            job_id=session_id,
+            job_id=tracker_job_id,
             command=context_desc,
             tags=resolved_tags,
         )

@@ -6,6 +6,13 @@
 #PBS -W umask=0027
 #PBS -j oe
 
+# qxub passes the image as `sif` and bind mounts as `bind` (see
+# qxub/execution/context.py); map them onto the names used below.
+sif_file="${sif_file:-$sif}"
+if [ -z "$sing_options" ] && [ -n "$bind" ]; then
+    sing_options="--bind $bind"
+fi
+
 # Logging
 echo "📁 Execution directory: $cwd"
 echo "📦 Singularity container: $sif_file"
