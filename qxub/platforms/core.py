@@ -188,6 +188,8 @@ class AutoSelectionRule:
 
     condition: str  # Boolean expression like "gpu_requested > 0"
     queue: str  # Queue name to select
+    # A default rule is still matched in order like any other rule (when it
+    # has a condition); it is additionally the fallback when nothing matches.
     is_default: bool = False
 
 
@@ -227,8 +229,6 @@ class Platform:
             if internet_queues:
                 # Apply auto-selection rules restricted to internet-capable queues
                 for rule in self.auto_selection_rules:
-                    if rule.is_default:
-                        continue
                     if (
                         evaluate_condition(rule.condition, resources)
                         and rule.queue in internet_queues
@@ -242,16 +242,14 @@ class Platform:
                 return next(iter(internet_queues))
             # No queues flagged → assume universal internet; normal selection below.
 
-        # Apply auto-selection rules in order - most specific conditions first
+        # Apply auto-selection rules in order - most specific conditions first.
+        # Default rules take part too: their condition (if any) is honoured at
+        # their position in the list. An empty condition never matches here.
         for rule in self.auto_selection_rules:
-            if rule.is_default:
-                continue
-
-            # Evaluate rule condition
             if evaluate_condition(rule.condition, resources):
                 return rule.queue
 
-        # Return default queue
+        # No rule matched: return default queue
         for rule in self.auto_selection_rules:
             if rule.is_default:
                 return rule.queue
