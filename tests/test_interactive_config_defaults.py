@@ -68,15 +68,12 @@ def test_interactive_cli_defaults():
             success = False
 
         if success:
-            return True
+            return
         else:
             print("Output was:")
             print(result.output)
-            return False
+            raise AssertionError("see output above")
 
 
 if __name__ == "__main__":
-    if test_interactive_cli_defaults():
-        sys.exit(0)
-    else:
-        sys.exit(1)
+    test_interactive_cli_defaults()

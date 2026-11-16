@@ -12,7 +12,7 @@ from pathlib import Path
 # Add qxub to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from qxub.resource_utils import (
+from qxub.resources.utils import (
     compare_memory,
     compare_walltime,
     evaluate_condition,
@@ -48,7 +48,7 @@ def test_memory_parsing():
             print(f"  ❌ {memory_str} -> {result}, expected {expected}")
 
     print(f"Memory parsing: {passed}/{len(test_cases)} tests passed\n")
-    return passed == len(test_cases)
+    assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
 def test_memory_formatting():
@@ -72,7 +72,7 @@ def test_memory_formatting():
             print(f"  ❌ {bytes_size} bytes -> {result}, expected {expected}")
 
     print(f"Memory formatting: {passed}/{len(test_cases)} tests passed\n")
-    return passed == len(test_cases)
+    assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
 def test_walltime_parsing():
@@ -99,7 +99,7 @@ def test_walltime_parsing():
             print(f"  ❌ {walltime_str} -> {result}, expected {expected}")
 
     print(f"Walltime parsing: {passed}/{len(test_cases)} tests passed\n")
-    return passed == len(test_cases)
+    assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
 def test_walltime_formatting():
@@ -123,7 +123,7 @@ def test_walltime_formatting():
             print(f"  ❌ {hours} hours -> {result}, expected {expected}")
 
     print(f"Walltime formatting: {passed}/{len(test_cases)} tests passed\n")
-    return passed == len(test_cases)
+    assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
 def test_comparisons():
@@ -162,7 +162,7 @@ def test_comparisons():
             print(f"  ❌ {time1} vs {time2} -> {result}, expected {expected}")
 
     print(f"Comparisons: {passed}/{total} tests passed\n")
-    return passed == total
+    assert passed == total, f"{passed}/{total} cases passed"
 
 
 def test_condition_evaluation():
@@ -194,7 +194,7 @@ def test_condition_evaluation():
             print(f"  ❌ '{condition}' -> {result}, expected {expected}")
 
     print(f"Condition evaluation: {passed}/{len(test_cases)} tests passed\n")
-    return passed == len(test_cases)
+    assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
 def test_resource_adjustment():
@@ -213,10 +213,10 @@ def test_resource_adjustment():
 
     if suggestions and "cpus" in suggestions and "memory" in suggestions:
         print(f"  ✅ Generated suggestions: {suggestions}")
-        return True
+        return
     else:
         print(f"  ❌ No suggestions generated or missing expected keys")
-        return False
+        raise AssertionError("see output above")
 
 
 def main():
@@ -235,8 +235,11 @@ def main():
 
     passed = 0
     for test in tests:
-        if test():
+        try:
+            test()
             passed += 1
+        except AssertionError as e:
+            print(f"  ❌ {test.__name__}: {e}")
 
     print(f"📊 Overall result: {passed}/{len(tests)} test groups passed")
 

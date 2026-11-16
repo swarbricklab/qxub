@@ -33,10 +33,10 @@ def test_config_creation():
         and queue_prefs.get("optimization") == "balanced"
     ):
         print("  ✅ Config created with correct defaults")
-        return True
+        return
     else:
         print("  ❌ Config defaults are incorrect")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_config_search_paths():
@@ -52,10 +52,10 @@ def test_config_search_paths():
         print(f"  ✅ Found {len(search_paths)} search paths")
         for path in search_paths:
             print(f"      {path}")
-        return True
+        return
     else:
         print("  ❌ Search paths not configured correctly")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_config_file_loading():
@@ -99,10 +99,10 @@ def test_config_file_loading():
                 and config.get_default_resources()["cpus"] == 2
             ):
                 print("  ✅ Config file loaded successfully")
-                return True
+                return
             else:
                 print("  ❌ Config file not loaded correctly")
-                return False
+                raise AssertionError("see output above")
         finally:
             if original_home:
                 os.environ["HOME"] = original_home
@@ -125,10 +125,10 @@ def test_config_validation():
         print(f"  ✅ Validation returned {len(issues)} issues")
         for issue in issues[:3]:  # Show first 3 issues
             print(f"      {issue}")
-        return True
+        return
     else:
         print("  ❌ Validation did not return a list")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_config_user_preferences():
@@ -147,10 +147,10 @@ def test_config_user_preferences():
 
     if value == "test_value":
         print("  ✅ User preference set and retrieved correctly")
-        return True
+        return
     else:
         print(f"  ❌ User preference not set correctly: {value}")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_effective_config():
@@ -174,10 +174,10 @@ def test_effective_config():
 
     if not missing_keys:
         print("  ✅ Effective config has all required keys")
-        return True
+        return
     else:
         print(f"  ❌ Effective config missing keys: {missing_keys}")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_global_config():
@@ -192,10 +192,10 @@ def test_global_config():
     # Should be the same instance
     if config1 is config2:
         print("  ✅ Global config returns same instance")
-        return True
+        return
     else:
         print("  ❌ Global config returns different instances")
-        return False
+        raise AssertionError("see output above")
 
 
 def test_logging_setup():
@@ -224,9 +224,9 @@ def test_logging_setup():
             print(
                 f"  ❌ Verbosity {verbosity} -> {logging.getLevelName(logger.level)}, expected {logging.getLevelName(expected_levels[verbosity])}"
             )
-            return False
+            raise AssertionError("see output above")
 
-    return True
+    return
 
 
 def main():
@@ -246,8 +246,11 @@ def main():
 
     passed = 0
     for test in tests:
-        if test():
+        try:
+            test()
             passed += 1
+        except AssertionError as e:
+            print(f"  ❌ {test.__name__}: {e}")
         print()  # Add spacing between tests
 
     print(f"📊 Overall result: {passed}/{len(tests)} test groups passed")

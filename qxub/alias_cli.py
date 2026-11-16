@@ -178,7 +178,7 @@ def _handle_alias_execution(ctx, alias_name: str, command_args: tuple, overrides
     }
 
     # Build the command line for the unified CLI
-    cmd_args = ["qxub"]
+    cmd_args = ["qxub", "exec"]
 
     # Add execution context options (from alias, can be overridden)
     if clean_overrides.get("env") or alias_def.get("env"):
@@ -194,12 +194,32 @@ def _handle_alias_execution(ctx, alias_name: str, command_args: tuple, overrides
     elif clean_overrides.get("sif") or alias_def.get("sif"):
         cmd_args.extend(["--sif", clean_overrides.get("sif") or alias_def["sif"]])
 
-    # Add all PBS-related options from alias (can be overridden)
-    pbs_options = ["walltime", "mem", "ncpus", "jobfs", "queue", "project", "name"]
-    for option in pbs_options:
+    # Add resource/job options from alias (can be overridden). Legacy alias
+    # keys are mapped onto the option names that `qxub exec` accepts.
+    option_flags = {
+        "walltime": "--runtime",
+        "mem": "--mem",
+        "ncpus": "--cpus",
+        "jobfs": "--disk",
+        "queue": "--queue",
+        "project": "--project",
+        "name": "--name",
+    }
+    for option, flag in option_flags.items():
+        value = clean_overrides.get(option) or alias_def.get(option)
+        if value:
+            cmd_args.extend([flag, str(value)])
+
+    for option in ("out", "err", "pre", "post"):
         value = clean_overrides.get(option) or alias_def.get(option)
         if value:
             cmd_args.extend([f"--{option}", str(value)])
+
+    bind = clean_overrides.get("bind") or alias_def.get("bind")
+    if bind:
+        if isinstance(bind, (list, tuple)):
+            bind = ",".join(bind)
+        cmd_args.extend(["--bind", str(bind)])
 
     # Add resources (can be multiple, and can be overridden)
     resources = clean_overrides.get("resources") or alias_def.get("resources")

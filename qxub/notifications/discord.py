@@ -109,8 +109,8 @@ class DiscordNotifier:
         # Add helpful commands in footer
         embed["footer"] = {
             "text": (
-                f"View output: qxub history show {job_id} --output | "
-                f"View logs: qxub history show {job_id} --logs"
+                f"View output: qxub history out {job_id} | "
+                f"View logs: qxub history log {job_id}"
             )
         }
 

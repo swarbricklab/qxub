@@ -4,7 +4,6 @@ Performance regression tests for migration.
 
 import subprocess
 import time
-from pathlib import Path
 
 import pytest
 
@@ -12,36 +11,10 @@ import pytest
 class TestPerformanceRegression:
     """Test performance hasn't degraded after migration."""
 
-    def test_import_performance(self):
-        """Test import performance hasn't degraded."""
-        # Load baseline if available
-        baseline_file = Path("tests/migration/.baseline_import_time")
-        baseline = None
-        if baseline_file.exists():
-            try:
-                with open(baseline_file) as f:
-                    baseline = float(f.read().strip())
-            except (FileNotFoundError, ValueError):
-                pass
-
-        # Measure current import time
-        start_time = time.time()
-        import qxub
-
-        import_time = time.time() - start_time
-
-        print(f"📊 Current import time: {import_time:.3f}s")
-
-        if baseline:
-            print(f"📊 Baseline import time: {baseline:.3f}s")
-            # Allow 50% degradation during migration (temporary)
-            max_allowed = baseline * 1.5
-            assert (
-                import_time <= max_allowed
-            ), f"Import time degraded: {import_time:.3f}s > {max_allowed:.3f}s (baseline: {baseline:.3f}s)"
-        else:
-            # Without baseline, just ensure reasonable performance
-            assert import_time < 1.0, f"Import too slow: {import_time:.3f}s"
+    def test_import_performance(self, cold_import_time):
+        """A cold import should take under a second."""
+        print(f"📊 Cold import time: {cold_import_time:.3f}s")
+        assert cold_import_time < 1.0, f"Import too slow: {cold_import_time:.3f}s"
 
     def test_cli_startup_time(self):
         """Test CLI startup time hasn't degraded."""

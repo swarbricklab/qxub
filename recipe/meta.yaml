@@ -1,5 +1,5 @@
 {% set name = "qxub" %}
-{% set version = "3.3.1" %}
+{% set version = "3.7.0" %}
 
 package:
   name: {{ name|lower }}
@@ -37,7 +37,7 @@ test:
     - qxub
     - qxub.cli
     - qxub.config
-    - qxub.platform
+    - qxub.platforms
     - qxub.execution
     - qxub.resources
   commands:

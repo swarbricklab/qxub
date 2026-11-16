@@ -4,9 +4,6 @@ Creates a reference point for all functionality.
 """
 
 import subprocess
-import sys
-import time
-from pathlib import Path
 
 import pytest
 
@@ -33,32 +30,19 @@ class TestPreMigrationBaseline:
                 result.returncode == 0
             ), f"Command failed: {cmd}\nError: {result.stderr}"
 
-    def test_import_performance_baseline(self):
-        """Measure current import performance as baseline."""
-        start_time = time.time()
-        import qxub
-
-        import_time = time.time() - start_time
-
-        # Store baseline (should be < 1.0 seconds on NCI)
-        assert import_time < 1.0, f"Import too slow: {import_time}s"
-
-        # Save baseline for comparison
-        baseline_file = Path("tests/migration/.baseline_import_time")
-        baseline_file.parent.mkdir(exist_ok=True)
-        with open(baseline_file, "w") as f:
-            f.write(str(import_time))
-
-        print(f"📊 Baseline import time: {import_time:.3f}s")
+    def test_import_performance_baseline(self, cold_import_time):
+        """A cold import should take under a second (also on NCI)."""
+        print(f"📊 Cold import time: {cold_import_time:.3f}s")
+        assert cold_import_time < 1.0, f"Import too slow: {cold_import_time:.3f}s"
 
     def test_all_imports_work(self):
         """Verify all current imports work."""
         import_tests = [
-            "from qxub.config_manager import config_manager",
+            "from qxub.config import config_manager",
             "from qxub.platforms import get_platform",
             "from qxub.core.scheduler import qsub, qdel",
             "from qxub.resources import parse_memory_size",
-            "from qxub.execution_context import execute_unified",
+            "from qxub.execution.context import execute_unified",
         ]
 
         for import_test in import_tests:
@@ -146,9 +130,9 @@ class TestPreMigrationBaseline:
         assert parse_memory_size("4GB") > 0
         assert parse_memory_size("1000MB") > 0
 
-        # Test walltime parsing (returns seconds as int or None)
-        walltime_seconds = parse_walltime("2:00:00")
-        assert walltime_seconds == 7200  # 2 hours in seconds
+        # Test walltime parsing (returns hours as float, or None)
+        assert parse_walltime("2:00:00") == 2.0
+        assert parse_walltime("90m") == 1.5
 
     def test_platform_queue_selection(self):
         """Test platform queue selection works."""
