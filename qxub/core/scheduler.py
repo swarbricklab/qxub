@@ -956,8 +956,6 @@ def start_background_resource_collection(
     # Child process exits when done (don't return to caller)
     os._exit(0)
 
-    return thread
-
 
 def monitor_job_single_thread(
     job_id,
@@ -1087,7 +1085,7 @@ def monitor_job_single_thread(
     if run_foreground and verbose >= 2:
         print(f"🔍 DEBUG: Foreground resource collection enabled (verbose={verbose})")
 
-    thread = start_background_resource_collection(
+    start_background_resource_collection(
         job_id, joblog_path, foreground=run_foreground, verbose=verbose
     )
 

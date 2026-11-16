@@ -5,6 +5,7 @@ Logs every qxub command in YAML format alongside the config file,
 using the same hierarchical structure as aliases for easy conversion.
 """
 
+import logging
 import os
 import sys
 from datetime import datetime
@@ -13,6 +14,8 @@ from typing import Any, Dict, List, Optional
 
 import click
 from omegaconf import OmegaConf
+
+logger = logging.getLogger(__name__)
 
 
 class CommandHistoryLogger:

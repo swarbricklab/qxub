@@ -6,6 +6,7 @@ PBS sessions with environment activation, resource allocation, and optional
 tmux integration for session persistence.
 """
 
+import base64
 import os
 import subprocess
 import sys

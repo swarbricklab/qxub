@@ -6,6 +6,8 @@ options and contexts (conda, modules, singularity, default) into a single
 comprehensive interface.
 """
 
+import logging
+
 import click
 
 from .config.handler import process_job_options
@@ -718,9 +720,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         # Fall back to old root-level location for backward compatibility
         value = config_manager.get_config_value(key)
         if value is not None:
-            import logging
-
-            logger.warning(
+            logging.getLogger(__name__).warning(
                 f"Config key '{key}' at root level is deprecated. "
                 f"Please move to 'defaults.{key}' in your config file."
             )
