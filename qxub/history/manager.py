@@ -19,6 +19,7 @@ New in v3.2.0:
 
 import hashlib
 import json
+import logging
 import os
 import time
 from datetime import datetime
@@ -26,6 +27,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from omegaconf import OmegaConf
+
+logger = logging.getLogger(__name__)
 
 
 class HistoryManager:
