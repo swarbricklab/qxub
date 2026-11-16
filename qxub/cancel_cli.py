@@ -19,6 +19,35 @@ import click
 from .core.scheduler import qdel
 from .resources import ResourceTracker
 
+# First token of a job row in `qstat -u` output: "12345", "12345.server",
+# "12345[].server" (array parent) or "12345[7].server" (subjob). Header,
+# separator and server-name lines never start with a digit.
+_QSTAT_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
+
+
+def _parse_qstat_user_listing(output: str) -> List[tuple]:
+    """Parse `qstat -w -u USER` output into (job_id, queue, state) tuples.
+
+    The listing looks like (PBS Pro; Torque is the same shape)::
+
+        server:
+                                                     Req'd  Req'd   Elap
+        Job ID          Username Queue Jobname SessID NDS TSK Memory Time  S Time
+        --------------- -------- ----- ------- ------ --- --- ------ ----- - -----
+        12345.server    alice    normal myjob   4321   1   4  16gb 01:00 R 00:10
+
+    Rows are recognised by a job-ID-shaped first token rather than by
+    skipping a fixed number of header lines. The state is the second-to-last
+    column (just before elapsed time), the queue is the third.
+    """
+    jobs = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or not _QSTAT_JOB_ID_RE.match(parts[0]):
+            continue
+        jobs.append((parts[0], parts[2], parts[-2]))
+    return jobs
+
 
 @click.group(name="cancel")
 def cancel_cli():
@@ -489,26 +518,21 @@ def cancel_all(user, queue, status, force, quiet):
     if not user:
         user = os.environ.get("USER", os.environ.get("USERNAME", ""))
 
-    # Build qstat command
-    qstat_cmd = ["qstat", "-u", user]
-    if queue:
-        qstat_cmd.extend(["-q", queue])
+    # -w: don't truncate job IDs (e.g. "153392916.gadi-*"), which qdel would
+    # reject. Filter by queue here: `qstat -q` prints queue summaries, not jobs.
+    qstat_cmd = ["qstat", "-w", "-u", user]
 
     # Get job list
     try:
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, check=True)
-        lines = result.stdout.strip().split("\n")[2:]  # Skip header lines
-
-        matching_jobs = []
-        for line in lines:
-            if not line.strip():
-                continue
-            parts = line.split()
-            if len(parts) >= 5:
-                job_id = parts[0]
-                job_status = parts[4]
-                if status is None or job_status == status:
-                    matching_jobs.append(job_id)
+        matching_jobs = [
+            job_id
+            for job_id, job_queue, job_state in _parse_qstat_user_listing(
+                result.stdout
+            )
+            if (queue is None or job_queue == queue)
+            and (status is None or job_state == status)
+        ]
 
     except subprocess.CalledProcessError:
         click.echo(f"❌ Failed to get job list for user '{user}'", err=True)
