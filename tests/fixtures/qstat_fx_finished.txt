@@ -1,0 +1,32 @@
+Job Id: 1000.gadi-pbs
+    Job_Name = align-20261116-120000
+    Job_Owner = abc123@gadi-login-01.gadi.nci.org.au
+    resources_used.cpupercent = 380
+    resources_used.cput = 03:48:12
+    resources_used.jobfs = 1200MB
+    resources_used.mem = 6200MB
+    resources_used.ncpus = 4
+    resources_used.vmem = 6200MB
+    resources_used.walltime = 01:00:30
+    job_state = F
+    queue = normal
+    server = gadi-pbs-01.gadi.nci.org.au
+    ctime = Mon Nov 16 11:58:00 2026
+    Error_Path = gadi-login-01.gadi.nci.org.au:/scratch/ab12/abc123/qt/err
+    exec_host = gadi-cpu-clx-0123/4*4
+    exec_vnode = (gadi-cpu-clx-0123:ncpus=4:mem=16777216kb:jobfs=10485760kb)
+    group_list = ab12
+    mtime = Mon Nov 16 13:01:00 2026
+    Output_Path = gadi-login-01.gadi.nci.org.au:/scratch/ab12/abc123/qt/out
+    project = ab12
+    qtime = Mon Nov 16 11:58:00 2026
+    Resource_List.jobfs = 10gb
+    Resource_List.mem = 16gb
+    Resource_List.ncpus = 4
+    Resource_List.storage = gdata/ab12+scratch/ab12
+    Resource_List.walltime = 02:00:00
+    stime = Mon Nov 16 12:00:30 2026
+    session_id = 424242
+    etime = Mon Nov 16 11:58:00 2026
+    Exit_status = 0
+    obittime = Mon Nov 16 13:01:00 2026

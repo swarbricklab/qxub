@@ -1,0 +1,21 @@
+qsub
+-v
+    cmd_b64=cHdk
+    cwd=/tmp/elsewhere
+    out=/tmp/elsewhere/logs/out.txt
+    err=/tmp/elsewhere/logs/err.txt
+    quiet=false
+    create_execdir=false
+    qxub_version=<VERSION>
+    qxub_path=<QXUB_PATH>
+    qxub_submit_host=<HOST>
+    QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
+-N
+myjob
+-q
+normal
+-P
+ab12
+-o
+/tmp/elsewhere/myjob.log
+<JOBSCRIPTS>/qdefault.pbs

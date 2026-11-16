@@ -1,7 +1,10 @@
 """Shared pytest fixtures for the qxub test suite."""
 
+import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -33,3 +36,151 @@ def measure_cold_import_time(module: str = "qxub") -> float:
 def cold_import_time():
     """Seconds taken by a cold ``import qxub``."""
     return measure_cold_import_time()
+
+
+# ---------------------------------------------------------------------------
+# Sandboxed qxub runs against a fake PBS
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FAKE_PBS_BIN = Path(__file__).resolve().parent / "fakes" / "pbs"
+GADI_PLATFORM_DIR = REPO_ROOT / "docs" / "platforms"
+
+# Run the CLI the way the console script does, but with a stable prog name.
+_CLI_SHIM = "import sys; sys.argv[0] = 'qxub'; from qxub.cli import qxub; qxub()"
+
+
+class QxubSandbox:
+    """Runs ``qxub`` in a subprocess with an isolated home and a fake PBS.
+
+    Each sandbox has its own ``HOME``, XDG config directories and working
+    directory, so no user or system qxub config leaks in. The fake ``qsub``,
+    ``qstat`` and ``qdel`` from ``tests/fakes/pbs`` come first on ``PATH``,
+    so nothing can reach a real scheduler even on a PBS login node.
+    """
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        self.home = self.root / "home"
+        self.cwd = self.root / "work"
+        self.pbs_state = self.root / "pbs"
+        for path in (self.home, self.cwd, self.pbs_state, self.root / "xdg"):
+            path.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("QXUB_", "PBS_", "FAKE_"))
+        }
+        env.update(
+            HOME=str(self.home),
+            XDG_CONFIG_HOME=str(self.home / ".config"),
+            XDG_CONFIG_DIRS=str(self.root / "xdg"),
+            PATH=os.pathsep.join([str(FAKE_PBS_BIN), env.get("PATH", "")]),
+            FAKE_PBS_STATE=str(self.pbs_state),
+            NO_COLOR="1",
+        )
+        self.env = env
+
+    @property
+    def config_dir(self) -> Path:
+        return self.home / ".config" / "qxub"
+
+    def write_config(self, text: str) -> Path:
+        """Write the user ``config.yaml``."""
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        path = self.config_dir / "config.yaml"
+        path.write_text(text)
+        return path
+
+    def use_gadi_platform(self, extra_config: str = "") -> None:
+        """Select the bundled ``nci_gadi`` platform as the default platform."""
+        self.env["QXUB_PLATFORM_PATHS"] = str(GADI_PLATFORM_DIR)
+        definition = GADI_PLATFORM_DIR / "nci_gadi.yaml"
+        self.write_config(
+            "defaults:\n"
+            "  platform: nci_gadi\n"
+            "platforms:\n"
+            "  nci_gadi:\n"
+            f"    definition: {definition}\n" + extra_config
+        )
+
+    def run(self, *args: str, env: dict = None, input: str = None, timeout=60):
+        """Run ``qxub *args`` and return the ``CompletedProcess``."""
+        return subprocess.run(
+            [sys.executable, "-c", _CLI_SHIM, *args],
+            cwd=self.cwd,
+            env={**self.env, **(env or {})},
+            input=input,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    # -- fake PBS controls -------------------------------------------------
+
+    def pbs_calls(self, command: str = None) -> list:
+        """Calls the fake PBS commands received, oldest first."""
+        log = self.pbs_state / "calls.jsonl"
+        if not log.exists():
+            return []
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        return [c for c in calls if command is None or c["cmd"] == command]
+
+    def fail_qsub(self, exit_code: int, stderr: str) -> None:
+        self.env["FAKE_QSUB_EXIT"] = str(exit_code)
+        self.env["FAKE_QSUB_STDERR"] = stderr
+
+    def fail_qdel(self, exit_code: int, stderr: str) -> None:
+        self.env["FAKE_QDEL_EXIT"] = str(exit_code)
+        self.env["FAKE_QDEL_STDERR"] = stderr
+
+    def set_qstat(self, job_id: str, text: str) -> None:
+        """Set what ``qstat -fx job_id`` prints."""
+        qstat_dir = self.pbs_state / "qstat"
+        qstat_dir.mkdir(exist_ok=True)
+        (qstat_dir / f"{job_id}.txt").write_text(text)
+
+
+@pytest.fixture
+def sandbox(tmp_path):
+    """A :class:`QxubSandbox` rooted in a fresh temporary directory."""
+    return QxubSandbox(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Golden files
+# ---------------------------------------------------------------------------
+
+GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-golden",
+        action="store_true",
+        default=False,
+        help="Rewrite golden files under tests/golden from current output.",
+    )
+
+
+@pytest.fixture
+def golden(request):
+    """Compare text with ``tests/golden/<name>``.
+
+    Run ``pytest --update-golden`` to (re)write the files after an
+    intentional change, then review the diff before committing.
+    """
+    update = request.config.getoption("--update-golden")
+
+    def check(name: str, actual: str) -> None:
+        path = GOLDEN_DIR / name
+        if update:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(actual)
+            return
+        if not path.exists():
+            pytest.fail(f"Missing golden file {path}; run pytest --update-golden")
+        assert actual == path.read_text(), f"Output differs from golden file {path}"
+
+    return check

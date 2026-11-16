@@ -1,0 +1,24 @@
+qsub
+-v
+    cmd_b64=ZW52
+    cwd=<CWD>
+    out=<CWD>/qt/<TIMESTAMP>/out
+    err=<CWD>/qt/<TIMESTAMP>/err
+    quiet=false
+    create_execdir=false
+    qxub_version=<VERSION>
+    qxub_path=<QXUB_PATH>
+    qxub_submit_host=<HOST>
+    pre_cmd_b64=ZWNobyBzdGFydA==
+    post_cmd_b64=ZWNobyBkb25l
+    user_vars_b64=Rk9PPWJhcjtBPTE7Qj0y
+    QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
+-N
+env-<TIMESTAMP>
+-q
+normal
+-P
+ab12
+-o
+<CWD>/env-<TIMESTAMP>.log
+<JOBSCRIPTS>/qdefault.pbs
