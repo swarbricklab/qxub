@@ -198,6 +198,18 @@ class JobSpinner:  # pylint: disable=too-many-instance-attributes
                 self.coordinator.signal_spinner_cleared()
 
 
+def qsub_var_value(value) -> str:
+    """Quote a ``qsub -v`` value so that commas inside it survive.
+
+    ``qsub -v`` splits its argument on commas, so PBS needs a value that
+    contains commas wrapped in quotes that reach ``qsub`` itself, as in
+    ``qsub -v "bind='/a,/b'"``. The submission command is a string that
+    :func:`qsub` runs through :func:`shlex.split`, so the outer double quotes
+    are removed there and the inner single quotes are passed on to PBS.
+    """
+    return f"\"'{value}'\""
+
+
 class QsubError(Exception):
     """Raised when a ``qsub`` submission fails.
 

@@ -77,15 +77,14 @@ def test_cancel_reports_a_qdel_failure(sandbox):
     assert "Failed to cancel 1 job(s): 999.gadi-pbs" in result.stdout
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known bug: cancel returns 1 from a click command, which click "
-    "ignores, so a failed qdel still exits 0",
-)
 def test_cancel_exits_non_zero_when_qdel_fails(sandbox):
     sandbox.fail_qdel(35, "qdel: Unknown Job Id 999.gadi-pbs")
 
-    assert sandbox.run("cancel", "id", "--force", "999.gadi-pbs").returncode != 0
+    assert sandbox.run("cancel", "id", "--force", "999.gadi-pbs").returncode == 1
+
+
+def test_cancel_without_job_ids_exits_non_zero(sandbox):
+    assert sandbox.run("cancel", "id", input="").returncode == 1
 
 
 def test_cancel_dry_run_does_not_call_qdel(sandbox):
@@ -122,25 +121,32 @@ def test_job_resource_data_for_unknown_job_is_none():
     assert scheduler.get_job_resource_data("424242.gadi-pbs") is None
 
 
-# -- known bugs pinned by the golden files -----------------------------------
+# -- --array and --bind --------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, reason="known bug: --array is accepted but never sent to qsub"
-)
-def test_array_reaches_qsub(sandbox):
-    sandbox.run("exec", "--terse", "-P", "ab12", "--array", "1-10", "--", "true")
+def test_array_is_rejected_without_submitting(sandbox):
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--array", "1-10", "--", "true"
+    )
 
-    (call,) = sandbox.pbs_calls("qsub")
-    assert "-J" in call["argv"]
+    assert result.returncode == 1
+    assert "Job arrays (--array) are not supported yet" in result.stderr
+    assert sandbox.pbs_calls() == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known bug: the quotes around a comma-separated --bind are removed "
-    "by shlex.split before qsub, so PBS splits the value at the comma",
-)
-def test_multi_path_bind_survives_qsub_variable_parsing(sandbox):
+def test_array_from_a_shortcut_is_rejected(sandbox):
+    sandbox.config_dir.mkdir(parents=True)
+    (sandbox.config_dir / "shortcuts.json").write_text('{"sweep": {"array": "1-4"}}')
+
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--shortcut", "sweep", "--", "true"
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert sandbox.pbs_calls() == []
+
+
+def test_multi_path_bind_reaches_qsub_as_one_variable(sandbox):
     sandbox.run(
         "exec", "--terse", "-P", "ab12", "--sif", "/c/t.sif",
         "--bind", "/a,/b", "--", "true",
@@ -148,7 +154,8 @@ def test_multi_path_bind_survives_qsub_variable_parsing(sandbox):
 
     (call,) = sandbox.pbs_calls("qsub")
     variables = call["argv"][call["argv"].index("-v") + 1]
-    assert '"/a,/b"' in variables
+    # PBS only keeps commas inside a -v value when the value is quoted.
+    assert variables.startswith("sif=/c/t.sif,bind='/a,/b',")
 
 
 def test_fake_pbs_is_first_on_path(sandbox):

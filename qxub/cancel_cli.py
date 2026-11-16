@@ -52,7 +52,18 @@ def _parse_qstat_user_listing(output: str) -> List[tuple]:
 @click.group(name="cancel")
 def cancel_cli():
     """Cancel PBS jobs with database tracking."""
-    pass
+
+
+@cancel_cli.result_callback()
+def _exit_with_subcommand_status(result, **_kwargs):
+    """Use a subcommand's integer return value as the exit status.
+
+    Click ignores the values that commands return, so without this a
+    subcommand's ``return 1`` (for example after a failed ``qdel``) would
+    still exit 0.
+    """
+    if isinstance(result, int) and result:
+        click.get_current_context().exit(result)
 
 
 @cancel_cli.command(name="id")

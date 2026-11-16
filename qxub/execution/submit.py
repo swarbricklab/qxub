@@ -124,7 +124,7 @@ def submit_job(
         ValueError:   If multiple execution contexts are specified.
     """
     from ..config.handler import process_job_options
-    from ..core.scheduler import QsubError, qsub
+    from ..core.scheduler import QsubError, qsub, qsub_var_value
     from ..core.templates import get_template
     from ..queue import create_queue_entry, update_queue_entry
     from ..queue.db import get_db_path
@@ -248,7 +248,7 @@ def submit_job(
     elif context_type == "singularity":
         context_vars = f"sif={context_value}"
         if bind:
-            context_vars += f',bind="{bind}"'
+            context_vars += f",bind={qsub_var_value(bind)}"
     else:
         context_vars = ""
 
