@@ -522,13 +522,18 @@ def cancel_all(user, queue, status, force, quiet):
     # reject. Filter by queue here: `qstat -q` prints queue summaries, not jobs.
     qstat_cmd = ["qstat", "-w", "-u", user]
 
+    # qstat lists the queue a job is *in*, which on sites with routing queues
+    # differs from the one it was submitted to (Gadi: `copyq` -> `copyq-exec`).
+    # Accept either so `--queue copyq` works as users expect.
+    accepted_queues = {queue, f"{queue}-exec"} if queue else None
+
     # Get job list
     try:
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, check=True)
         matching_jobs = [
             job_id
             for job_id, job_queue, job_state in _parse_qstat_user_listing(result.stdout)
-            if (queue is None or job_queue == queue)
+            if (accepted_queues is None or job_queue in accepted_queues)
             and (status is None or job_state == status)
         ]
 
