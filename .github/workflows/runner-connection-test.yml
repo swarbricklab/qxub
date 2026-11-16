@@ -8,7 +8,7 @@ on:
       - dev
   pull_request:
     branches:
-      - main  # Only run heavy tests on dev → main PRs
+      - main  # Full runner tests on every PR into main
 
 jobs:
   test-runner-qxub:
