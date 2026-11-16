@@ -11,14 +11,8 @@ one means updating its golden file in the same change: run
 ``pytest --update-golden`` and review the diff. Known bugs pinned here:
 
 * ``no_project``: ``-P None`` when no project is configured.
-* ``array``: ``--array`` is dropped; there is no ``-J``.
-* ``singularity``: a comma-separated ``--bind`` reaches qsub unquoted, so
-  PBS splits it (shown as a separate ``-v`` line).
 * ``gadi_hugemem``: queue auto-selection only runs for ``--gpus``,
   ``--internet`` or ``-q auto``, so a 600GB job goes to ``normal``.
-
-``test_fake_pbs.py`` has strict ``xfail`` tests for the first-order bugs, so
-fixing one makes that test fail until its marker is removed.
 """
 
 import re
@@ -82,11 +76,6 @@ CASES = [
         ["-P", "ab12", "--email", "me@example.org", "--notify", "--", "ls"],
     ),
     (
-        "array",
-        None,
-        ["-P", "ab12", "--array", "1-10", "--", "echo", "$PBS_ARRAY_INDEX"],
-    ),
-    (
         "quoted_command",
         None,
         ["-P", "ab12", "--", "bash", "-c", "echo 'a b' | wc -w && echo \"$HOME\""],
@@ -138,6 +127,27 @@ def normalise(text: str, sandbox) -> str:
     return text
 
 
+def split_qsub_vars(value: str) -> list:
+    """Split a ``qsub -v`` list on the commas PBS treats as separators.
+
+    Commas inside single or double quotes belong to the value, as in
+    ``bind='/a,/b'``.
+    """
+    items, current, quote = [], "", None
+    for char in value:
+        if quote:
+            quote = None if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == ",":
+            items.append(current)
+            current = ""
+            continue
+        current += char
+    items.append(current)
+    return items
+
+
 def render_qsub_argv(argv: list) -> str:
     """One argument per line, with the ``-v`` list split onto its own lines.
 
@@ -149,7 +159,7 @@ def render_qsub_argv(argv: list) -> str:
     for arg in args:
         if arg == "-v":
             lines.append("-v")
-            lines.extend(f"    {item}" for item in next(args).split(","))
+            lines.extend(f"    {item}" for item in split_qsub_vars(next(args)))
         else:
             lines.append(arg)
     return "\n".join(lines) + "\n"

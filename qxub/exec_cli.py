@@ -150,7 +150,11 @@ def _get_shortcut_context_description(definition: dict) -> str:
     default=False,
     help="Disable PBS email notification (overrides config).",
 )
-@click.option("--array", help="Job array specification (e.g., '1-10' or '1-100:2')")
+@click.option(
+    "--array",
+    help="Job array specification (e.g., '1-10' or '1-100:2'). "
+    "Not supported yet: qxub exits with an error if this is set.",
+)
 @click.option(
     "--tag",
     multiple=True,
@@ -585,6 +589,15 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     else:
         # Default execution (explicit --default or implicit)
         execution_context = ExecutionContext("default", None, "default")
+
+    # Job arrays were never passed to qsub, and the monitoring and out/err
+    # handling assume a single job. Refuse rather than silently submitting
+    # one job.
+    if options.get("array"):
+        raise click.ClickException(
+            "Job arrays (--array) are not supported yet. Submit one job per "
+            "task instead, for example in a loop with --terse."
+        )
 
     # ── Early remote detection ──────────────────────────────────────────
     # Check if the target platform uses remote/delegated execution BEFORE

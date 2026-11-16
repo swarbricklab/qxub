@@ -1,8 +1,7 @@
 qsub
 -v
     sif=/containers/tool.sif
-    bind=/g/data/ab12
-    /scratch/ab12
+    bind='/g/data/ab12,/scratch/ab12'
     cmd_b64=dG9vbCBydW4=
     cwd=<CWD>
     out=<CWD>/qt/<TIMESTAMP>/out

@@ -17,7 +17,7 @@ from typing import List, Optional, Union
 
 import click
 
-from ..core.scheduler import QsubError, qsub
+from ..core.scheduler import QsubError, qsub, qsub_var_value
 from ..history import history_manager
 from ..queue import create_queue_entry, update_queue_entry
 from ..queue.db import get_db_path
@@ -128,7 +128,7 @@ class ExecutionContext:
         elif self.context_type == "singularity":
             context_vars = f"sif={self.context_value}"
             if bind:
-                context_vars += f',bind="{bind}"'
+                context_vars += f",bind={qsub_var_value(bind)}"
         else:  # default
             context_vars = ""
 

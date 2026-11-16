@@ -17,7 +17,12 @@ from typing import Dict, Optional, Tuple
 
 import click
 
-from ..core.scheduler import monitor_job_single_thread, print_status, qsub
+from ..core.scheduler import (
+    monitor_job_single_thread,
+    print_status,
+    qsub,
+    qsub_var_value,
+)
 from ..history import history_manager
 
 
@@ -209,7 +214,10 @@ def build_submission_variables(
     # Add context-specific variables
     for key, value in context_vars.items():
         if value is not None:
-            if key in ["env", "sif", "bind"]:
+            if key == "bind":
+                # Comma-separated bind paths must stay one qsub -v value
+                submission_vars += f",bind={qsub_var_value(value)}"
+            elif key in ["env", "sif"]:
                 # String values that need quotes
                 submission_vars += f',{key}="{value}"'
             elif key == "mods":
