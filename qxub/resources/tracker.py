@@ -611,9 +611,10 @@ class ResourceTracker:
 
             return [dict(row) for row in cursor.fetchall()]
 
-    def get_resource_trends(self, days: int = 30) -> Dict[str, Any]:
+    def get_resource_trends(self, days: int = 30) -> List[Dict[str, Any]]:
         """Get resource usage trends over time."""
         with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.execute(
                 """
                 SELECT

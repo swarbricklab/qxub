@@ -191,8 +191,8 @@ class SlackNotifier:
                     {
                         "type": "mrkdwn",
                         "text": (
-                            f"View output: `qxub history show {job_id} --output`\n"
-                            f"View logs: `qxub history show {job_id} --logs`"
+                            f"View output: `qxub history out {job_id}`\n"
+                            f"View logs: `qxub history log {job_id}`"
                         ),
                     }
                 ],

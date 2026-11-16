@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Issue deprecation warning
 warnings.warn(
-    "qxub.config module is deprecated. Use qxub.config_manager.config_manager instead.",
+    "qxub.config.base (QxubConfig, get_effective_config) is deprecated. "
+    "Use qxub.config.config_manager instead.",
     DeprecationWarning,
     stacklevel=2,
 )

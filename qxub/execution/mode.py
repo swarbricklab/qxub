@@ -52,7 +52,7 @@ def get_execution_mode(
         ...     'name': 'nci_gadi',
         ...     'definition': 'https://github.com/.../nci_gadi.yaml',
         ...     'remote': {
-        ...         'hostname': 'gadi',
+        ...         'host': 'gadi',
         ...         'working_dir': '/scratch/a56/{user}'
         ...     }
         ... }
@@ -63,7 +63,7 @@ def get_execution_mode(
         >>> config = {
         ...     'name': 'nci_gadi',
         ...     'remote': {
-        ...         'hostname': 'gadi',
+        ...         'host': 'gadi',
         ...         'working_dir': '/scratch/a56/{user}'
         ...     }
         ... }
