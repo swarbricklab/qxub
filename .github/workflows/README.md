@@ -4,7 +4,7 @@ This directory contains CI workflows for qxub testing and release automation.
 
 ## Branching Model & CI Tiers
 
-The project uses a **feature → dev → main** branching model with tiered CI:
+Feature/fix branches open PRs **directly against `main`** (see `.github/copilot-instructions.md`). CI is tiered:
 
 | CI tier | Workflows | Trigger | Runner |
 |---------|-----------|---------|--------|
@@ -12,8 +12,9 @@ The project uses a **feature → dev → main** branching model with tiered CI:
 | **Full** | `runner-connection-test.yml`, `runner-validation.yml` | Push to `dev`/`main`, PRs targeting `main` | Self-hosted |
 | **Release** | `release.yml` | Push to `main` (version bump) | GitHub-hosted |
 
-**Day-to-day**: feature/fix branches open PRs against `dev` → only formatting + pylint run.
-**Release cycle**: `dev → main` PRs trigger full self-hosted runner tests. Merging creates a GitHub Release when the version is bumped.
+**Day-to-day**: PRs into `main` run formatting + pylint and the full self-hosted runner tests.
+**Release**: merging into `main` creates a GitHub Release when the version is bumped.
+**Optional `dev` branch**: pushes to `dev` also run the runner tests; PRs into `dev` run only formatting + pylint.
 
 ## Active Workflows
 

@@ -168,21 +168,21 @@ qxub config shortcut show "dvc pull"  # Will fail or use wrong version
 - **After implementation**: Update affected documentation immediately
 - **Quality check**: Ensure docs remain concise and user-focused (no implementation details)
 
-### Branching Model — feature → dev → main
+### Branching Model — feature → main
 
-The project uses a **three-tier branching model**:
+Feature and fix branches open PRs **directly against `main`**:
 
-| Branch | Purpose | Merges into | CI intensity |
-|--------|---------|-------------|--------------|
-| `feature/*`, `fix/*` | Individual changes | `dev` | Lightweight (lint + format) |
-| `dev` | Integration & testing | `main` | Full (lint + format + self-hosted runner tests) |
-| `main` | Stable releases | — | Full + auto-release if version bumped |
+| Branch | Purpose | Merges into | CI |
+|--------|---------|-------------|----|
+| `feature/*`, `fix/*` | Individual changes | `main` (squash merge) | Full (lint + format + self-hosted runner tests) |
+| `main` | Latest code; releases cut from here | — | Full + auto-release if version bumped |
+| `dev` | Optional integration branch (see below) | `main` | Lint + format; runner tests on push |
 
 #### Day-to-day workflow
 
 ```bash
-# 1. Start work from dev
-git checkout dev && git pull
+# 1. Start work from main
+git checkout main && git pull
 git checkout -b fix/my-bug   # or feature/my-feature
 
 # 2. Work, commit, push
@@ -190,21 +190,21 @@ git add qxub/some_file.py
 git commit -m "fix: description"
 git push origin fix/my-bug
 
-# 3. Open PR targeting dev  ← lightweight CI
-#    Merge when formatting + pylint pass
+# 3. Open PR targeting main  ← full CI incl. self-hosted runner tests
+#    Branch must be up to date with main and pass format-check + pylint
+#    Squash-merge when green
 
-# 4. Periodically: create a dev → main PR for release
-#    - Bump version in qxub/__init__.py + setup.py
-#    - Full self-hosted runner tests run automatically
-#    - Merge triggers GitHub Release + tag creation
+# 4. To release: bump the version in the same PR (or a follow-up PR)
+#    - Update qxub/__init__.py + setup.py
+#    - Merging a version bump into main triggers GitHub Release + tag creation
 ```
 
 #### Rules
 
-- **Feature/fix PRs always target `dev`**, never `main` directly.
-- **Version bumps happen only in the dev → main PR**, not in feature branches.
-- **`main` always reflects the latest release.** Every merge into `main` should be releasable.
-- **`dev` may contain unreleased work.** It is the integration branch.
+- **PRs target `main`** and are squash-merged.
+- **`main` must stay releasable.** Every merge should pass full CI.
+- **Bump the version only when you intend to release.** Merges without a version bump don't publish anything.
+- **`dev` is optional.** Use it only to batch several risky or interdependent changes before they reach `main`; branch it fresh from `main` and merge it back promptly so it doesn't drift.
 
 ### Git Hygiene
 
@@ -271,17 +271,16 @@ When bumping versions for a new release, **ALWAYS update version numbers in BOTH
 1. **`qxub/__init__.py`** - Contains `__version__ = "x.y.z"`
 2. **`setup.py`** - Contains `version="x.y.z"` in the setup() call
 
-Version bumps happen **only in the dev → main merge PR**, not in feature branches:
+Bump the version in the PR that should trigger a release (either the feature/fix PR itself or a dedicated release PR):
 
 ```bash
-# In the dev branch, just before creating the dev → main PR:
-git checkout dev
+# On your feature/fix (or release) branch:
 # Edit qxub/__init__.py  →  __version__ = "3.5.0"
 # Edit setup.py           →  version="3.5.0"
 git add qxub/__init__.py setup.py
 git commit -m "Bump version to 3.5.0"
-git push origin dev
-# Then open PR: dev → main
+git push
+# Merging into main creates the v3.5.0 tag + GitHub Release
 ```
 
 **Critical**: The GitHub release workflow reads from `setup.py`, so both files must match!
