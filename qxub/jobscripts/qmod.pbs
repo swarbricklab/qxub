@@ -236,18 +236,6 @@ else
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 fi
 
-# Unload modules
-if [ -n "$modules" ]; then
-    echo "🔄 Unloading modules"
-    # Split modules string by spaces and unload each one (in reverse order)
-    reversed_modules=$(echo $modules | awk '{for(i=NF;i>=1;i--) printf "%s ", $i}')
-    for module in $reversed_modules; do
-        echo "📤 Unloading module: $module"
-        module unload "$module"
-    done
-    echo "✅ All modules unloaded"
-fi
-
 update_job_status "completed" "0"
 
 # Queue Slack/Discord notification if enabled
