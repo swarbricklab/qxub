@@ -42,9 +42,10 @@ def test_parse_empty_listing():
 
 def _run_cancel_all(args):
     completed = mock.Mock(stdout=QSTAT_W_U, returncode=0)
-    with mock.patch.object(
-        cancel_cli.subprocess, "run", return_value=completed
-    ) as run, mock.patch.object(cancel_cli, "cancel_by_id") as cancel_by_id:
+    with (
+        mock.patch.object(cancel_cli.subprocess, "run", return_value=completed) as run,
+        mock.patch.object(cancel_cli, "cancel_by_id") as cancel_by_id,
+    ):
         CliRunner().invoke(
             cancel_cli.cancel_all, ["--user", "abc123", "--force", *args]
         )

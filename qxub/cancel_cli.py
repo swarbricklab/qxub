@@ -527,9 +527,7 @@ def cancel_all(user, queue, status, force, quiet):
         result = subprocess.run(qstat_cmd, capture_output=True, text=True, check=True)
         matching_jobs = [
             job_id
-            for job_id, job_queue, job_state in _parse_qstat_user_listing(
-                result.stdout
-            )
+            for job_id, job_queue, job_state in _parse_qstat_user_listing(result.stdout)
             if (queue is None or job_queue == queue)
             and (status is None or job_state == status)
         ]
