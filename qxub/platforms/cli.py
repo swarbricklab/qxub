@@ -172,7 +172,9 @@ def platform_info(platform_name):
     if platform.auto_selection_rules:
         click.echo(f"\nAuto-selection rules:")
         for rule in platform.auto_selection_rules:
-            if rule.is_default:
+            if rule.is_default and rule.condition:
+                click.echo(f"  If {rule.condition}: {rule.queue} (default)")
+            elif rule.is_default:
                 click.echo(f"  Default: {rule.queue}")
             else:
                 click.echo(f"  If {rule.condition}: {rule.queue}")
