@@ -208,7 +208,8 @@ def build_submission_variables(
     # Build base submission variables
     submission_vars = (
         f'cmd_b64="{cmd_b64}",cwd={execdir},'
-        f"out={out},err={err},quiet={str(quiet).lower()}"
+        f"out={out},err={err},quiet={str(quiet).lower()},"
+        f"qxub_python={sys.executable}"
     )
 
     # Add context-specific variables

@@ -7,6 +7,8 @@ current host against each platform's ``host``.
 """
 
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -181,3 +183,34 @@ def test_job_scripts_use_the_submitting_python(script):
     text = script.read_text()
     assert 'QXUB_PYTHON="${qxub_python:-python3}"' in text
     assert "python3 -c" not in text.replace('"$QXUB_PYTHON" -c', "")
+
+
+# -- every submission path passes the submitting Python ------------------------
+
+
+def test_build_submission_variables_passes_qxub_python():
+    from qxub.execution.core import build_submission_variables
+
+    variables = build_submission_variables(("true",), "/w", Path("o"), Path("e"), True)
+
+    assert f"qxub_python={sys.executable}" in variables.split(",")
+
+
+def test_submit_job_api_passes_qxub_python(sandbox):
+    script = (
+        "from qxub.execution.submit import submit_job; "
+        "submit_job('true', env='base', project='ab12')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=sandbox.cwd,
+        env=sandbox.env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    (call,) = sandbox.pbs_calls("qsub")
+    variables = call["argv"][call["argv"].index("-v") + 1]
+    assert f"qxub_python={sys.executable}" in variables.split(",")

@@ -26,6 +26,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -237,6 +238,7 @@ def submit_job(
         f",err={processed_params['err']}"
         f",quiet=true"
         f",create_execdir=false"
+        f",qxub_python={sys.executable}"
     )
 
     # Context-specific variables

@@ -16,8 +16,10 @@ platform:
     # puts default job output under {scratch}/qt and status files under
     # {scratch}/qxub/status.
     scratch: "/scratch/{project}/{user}"
-  # Added to every qsub. Keeps job logs and outputs out of reach of other
-  # users (group read, no world access).
+  # Added to every qsub. PBS applies it to the job log it copies back
+  # (group read, no world access). It does not change the umask of the job
+  # itself, so files the job writes, including qxub's .out/.err, keep the
+  # user's default umask.
   default_directives:
     - "-W umask=0027"
 
