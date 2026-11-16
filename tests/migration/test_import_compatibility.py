@@ -3,8 +3,6 @@ Test import compatibility during migration.
 This test should pass at every phase of migration.
 """
 
-import importlib
-
 import pytest
 
 
@@ -23,7 +21,7 @@ class TestImportCompatibility:
     def test_config_imports(self):
         """Test configuration imports work."""
         # Current imports that should always work
-        from qxub.config_manager import config_manager
+        from qxub.config import config_manager
 
         assert config_manager is not None
 
@@ -38,20 +36,16 @@ class TestImportCompatibility:
     def test_scheduling_imports(self):
         """Test scheduling imports work."""
         # Current imports that should always work
-        from qxub.scheduler import job_status, qdel, qsub
+        from qxub.core.scheduler import job_status_from_files, qdel, qsub
 
         assert callable(qsub)
         assert callable(qdel)
-        assert callable(job_status)
+        assert callable(job_status_from_files)
 
     def test_resource_imports(self):
         """Test resource imports work."""
         # Current imports that should always work
-        from qxub.resource_utils import (
-            format_walltime,
-            parse_memory_size,
-            parse_walltime,
-        )
+        from qxub.resources import format_walltime, parse_memory_size, parse_walltime
 
         assert callable(parse_memory_size)
         assert callable(format_walltime)
@@ -60,7 +54,7 @@ class TestImportCompatibility:
     def test_execution_imports(self):
         """Test execution imports work."""
         # Current imports that should always work
-        from qxub.execution_context import ExecutionContext, execute_unified
+        from qxub.execution.context import ExecutionContext, execute_unified
 
         assert callable(execute_unified)
         assert ExecutionContext is not None
@@ -84,16 +78,9 @@ class TestImportCompatibility:
             # Remote functionality may not be available
             pass
 
-    def test_import_performance(self):
-        """Test that imports are reasonably fast."""
-        import time
-
-        start_time = time.time()
-        importlib.import_module("qxub")
-        import_time = time.time() - start_time
-
-        # Should import in under 0.5 seconds
-        assert import_time < 0.5, f"Import too slow: {import_time:.3f}s"
+    def test_import_performance(self, cold_import_time):
+        """Test that a cold import is reasonably fast."""
+        assert cold_import_time < 1.0, f"Import too slow: {cold_import_time:.3f}s"
 
 
 class TestCircularDependencies:
@@ -102,11 +89,11 @@ class TestCircularDependencies:
     def test_no_obvious_circular_imports(self):
         """Test that basic imports don't have circular dependencies."""
         # These imports should not cause circular import errors
-        import qxub.config_manager
+        import qxub.config
+        import qxub.core.scheduler
         import qxub.execution
         import qxub.platforms
-        import qxub.resource_utils
-        import qxub.scheduler
+        import qxub.resources
 
         # If we get here without ImportError, basic imports work
 

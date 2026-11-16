@@ -3,15 +3,13 @@
 Integration test for remote execution - checks the full flow without SSH.
 """
 import os
-import sys
-
-sys.path.insert(0, "/g/data/a56/software/qsub_tools")
 
 # Mock SSH execution by intercepting subprocess
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
-from qxub.execution_context import ExecutionContext
+from qxub.execution.context import ExecutionContext
 from qxub.remote.command_builder import build_remote_command
 from qxub.remote.platform_executor import PlatformRemoteExecutor
 
