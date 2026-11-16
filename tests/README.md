@@ -2,6 +2,28 @@
 
 This directory contains comprehensive integration tests and testing utilities for qxub, designed to catch bugs and validate functionality across different configurations and HPC environments.
 
+## pytest suite (no scheduler needed)
+
+```bash
+python -m pytest tests --ignore=tests/end_to_end
+```
+
+This runs in CI (`.github/workflows/tests.yml`) on every push and pull request.
+
+- **Fake PBS:** `tests/fakes/pbs/` holds stand-in `qsub`, `qstat` and `qdel`
+  commands. They record each call and print realistic output, so submit,
+  cancel and accounting code runs without PBS. Failures are injected with
+  environment variables; see `tests/fakes/pbs/_fake_pbs.py`.
+- **`sandbox` fixture** (`tests/conftest.py`): runs `qxub` in a subprocess
+  with its own `HOME`, XDG config and working directory, and the fake PBS
+  first on `PATH`, so `qsub`, `qstat` and `qdel` never reach a real
+  scheduler, even on Gadi.
+  `sandbox.pbs_calls("qsub")` returns what was submitted.
+- **Golden files** (`tests/golden/`): `test_golden_pbs_submission.py` pins
+  the exact `qsub` command line for a set of `qxub exec` calls. After an
+  intentional change, run `python -m pytest --update-golden` and review the
+  diff in `tests/golden/` before committing.
+
 ## Test Scripts
 
 ### Integration Tests

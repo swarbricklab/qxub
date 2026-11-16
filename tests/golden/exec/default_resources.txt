@@ -1,0 +1,27 @@
+qsub
+-v
+    cmd_b64=ZWNobyBoZWxsbw==
+    cwd=<CWD>
+    out=<CWD>/qt/<TIMESTAMP>/out
+    err=<CWD>/qt/<TIMESTAMP>/err
+    quiet=false
+    create_execdir=false
+    qxub_version=<VERSION>
+    qxub_path=<QXUB_PATH>
+    qxub_submit_host=<HOST>
+    QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
+-N
+echo-<TIMESTAMP>
+-q
+normal
+-P
+ab12
+-l
+mem=4GB
+-l
+walltime=1:00:00
+-l
+ncpus=2
+-o
+<CWD>/echo-<TIMESTAMP>.log
+<JOBSCRIPTS>/qdefault.pbs

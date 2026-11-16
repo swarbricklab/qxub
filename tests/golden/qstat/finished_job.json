@@ -1,0 +1,68 @@
+{
+  "efficiency": {
+    "cpu_efficiency": 380.0,
+    "jobfs_efficiency": 11.7,
+    "jobfs_requested_human": "10.0GB",
+    "jobfs_used_human": "1.2GB",
+    "memory_efficiency": 37.8,
+    "memory_requested_human": "16.0GB",
+    "memory_used_human": "6.1GB",
+    "time_efficiency": 50.4
+  },
+  "execution": {
+    "exec_host": "gadi-cpu-clx-0123/4*4",
+    "exec_host_parsed": {
+      "core": "4*4",
+      "hostname": "gadi-cpu-clx-0123"
+    },
+    "exec_vnode": "(gadi-cpu-clx-0123:ncpus=4:mem=16777216kb:jobfs=10485760kb)",
+    "exec_vnode_parsed": {
+      "hostname": "gadi-cpu-clx-0123",
+      "jobfs_kb": 10485760,
+      "mem_kb": 16777216,
+      "ncpus": 4
+    },
+    "group_list": "ab12",
+    "project": "ab12",
+    "queue": "normal",
+    "session_id": "424242"
+  },
+  "exit_status": 0,
+  "metadata": {
+    "Job_Name": "align-20261116-120000",
+    "Job_Owner": "abc123@gadi-login-01.gadi.nci.org.au",
+    "job_state": "F"
+  },
+  "resources_requested": {
+    "jobfs": "10gb",
+    "mem": "16gb",
+    "ncpus": "4",
+    "storage": "gdata/ab12+scratch/ab12",
+    "walltime": "02:00:00"
+  },
+  "resources_used": {
+    "cpupercent": "380",
+    "cput": "03:48:12",
+    "jobfs": "1200MB",
+    "mem": "6200MB",
+    "ncpus": "4",
+    "vmem": "6200MB",
+    "walltime": "01:00:30"
+  },
+  "timing": {
+    "ctime": "Mon Nov 16 11:58:00 2026",
+    "ctime_parsed": "2026-11-16T11:58:00",
+    "etime": "Mon Nov 16 11:58:00 2026",
+    "etime_parsed": "2026-11-16T11:58:00",
+    "execution_seconds": 3630,
+    "mtime": "Mon Nov 16 13:01:00 2026",
+    "mtime_parsed": "2026-11-16T13:01:00",
+    "obittime": "Mon Nov 16 13:01:00 2026",
+    "obittime_parsed": "2026-11-16T13:01:00",
+    "qtime": "Mon Nov 16 11:58:00 2026",
+    "qtime_parsed": "2026-11-16T11:58:00",
+    "queue_wait_seconds": 150,
+    "stime": "Mon Nov 16 12:00:30 2026",
+    "stime_parsed": "2026-11-16T12:00:30"
+  }
+}

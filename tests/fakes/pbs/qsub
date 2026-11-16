@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+"""Fake PBS command for the qxub test suite; see _fake_pbs.py."""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from _fake_pbs import main  # noqa: E402
+
+main()
