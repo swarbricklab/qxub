@@ -39,6 +39,7 @@ class QueueLimits:
     min_cpus: Optional[int] = None
     max_memory: Optional[str] = None
     max_local_storage: Optional[str] = None
+    min_local_storage: Optional[str] = None
     max_gpus: Optional[int] = None
     min_gpus: Optional[int] = None
     min_memory: Optional[str] = None  # Trigger threshold for auto-selection
@@ -96,6 +97,8 @@ class Queue:
     internet_connectivity: bool = False
     constraints: List[str] = field(default_factory=list)
     auto_min_cpus: Optional[int] = None
+    gpu_type: Optional[str] = None
+    cpus_per_gpu: Optional[int] = None
 
     def get_max_walltime(self, core_count: int) -> Optional[str]:
         """Get maximum walltime for given core count."""
@@ -394,6 +397,7 @@ class PlatformLoader:
             min_cpus=limits_data.get("min_cpus"),
             max_memory=limits_data.get("max_memory"),
             max_local_storage=limits_data.get("max_local_storage"),
+            min_local_storage=limits_data.get("min_local_storage"),
             max_gpus=limits_data.get("max_gpus"),
             min_gpus=limits_data.get("min_gpus"),
             min_memory=limits_data.get("min_memory"),
@@ -421,6 +425,8 @@ class PlatformLoader:
             internet_connectivity=data.get("internet_connectivity", False),
             constraints=data.get("constraints", []),
             auto_min_cpus=data.get("auto_min_cpus"),
+            gpu_type=data.get("gpu_type"),
+            cpus_per_gpu=data.get("cpus_per_gpu"),
         )
 
     def get_platform(self, name: str) -> Optional[Platform]:

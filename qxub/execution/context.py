@@ -8,6 +8,7 @@ and execute_default functions.
 
 import base64
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 import os
@@ -41,12 +42,14 @@ class ExecutionContext:
     def __init__(
         self,
         context_type: str,
-        context_value: Union[str, List[str]],
+        context_value: Union[str, List[str], dict, None],
         template_type: str,
     ):
-        self.context_type = context_type  # 'conda', 'module', 'singularity', 'default'
+        self.context_type = (
+            context_type  # 'conda', 'module', 'singularity', 'conda_module', 'default'
+        )
         self.context_value = (
-            context_value  # env name, module list, container path, or None
+            context_value  # env name, module list, container path, dict, or None
         )
         self.template_type = template_type
 
@@ -60,6 +63,15 @@ class ExecutionContext:
             raise click.ClickException("Error: No environment modules specified.")
         elif self.context_type == "singularity" and not self.context_value:
             raise click.ClickException("Error: Singularity container path is required.")
+        elif self.context_type == "conda_module":
+            if not self.context_value or not self.context_value.get("env"):
+                raise click.ClickException(
+                    "Error: No conda environment specified for combined context."
+                )
+            if not self.context_value.get("modules"):
+                raise click.ClickException(
+                    "Error: No modules specified for combined context."
+                )
 
     def get_default_template(self) -> str:
         """Get the default template for this execution context."""
@@ -89,13 +101,19 @@ class ExecutionContext:
         cmd_str = " ".join(command)
         cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
 
+        # Capture submitting host's qxub version and executable path
+        from .. import __version__ as qxub_version
+
+        qxub_exe = shutil.which("qxub") or "unknown"
+        submitting_host = os.uname().nodename
+
         # Base submission variables
         out = Path(ctx_obj["out"])
         err = Path(ctx_obj["err"])
         # Default to current working directory if execdir is None
         exec_dir = ctx_obj["execdir"] or os.getcwd()
         create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir}'
+        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},qxub_version={qxub_version},qxub_path={qxub_exe},qxub_submit_host={submitting_host}'
 
         # Context-specific variables
         if self.context_type == "conda":
@@ -103,6 +121,10 @@ class ExecutionContext:
         elif self.context_type == "module":
             mods_str = " ".join(self.context_value)
             context_vars = f'mods="{mods_str}"'
+        elif self.context_type == "conda_module":
+            env_name = self.context_value["env"]
+            mods_str = " ".join(self.context_value["modules"])
+            context_vars = f'env={env_name},mods="{mods_str}"'
         elif self.context_type == "singularity":
             context_vars = f"sif={self.context_value}"
             if bind:
@@ -178,6 +200,12 @@ class ExecutionContext:
             logger.debug("Conda environment: %s", self.context_value)
         elif self.context_type == "module":
             logger.debug("Environment modules: %s", self.context_value)
+        elif self.context_type == "conda_module":
+            logger.debug(
+                "Combined context - Conda: %s, Modules: %s",
+                self.context_value["env"],
+                self.context_value["modules"],
+            )
         elif self.context_type == "singularity":
             logger.debug("Singularity container: %s", self.context_value)
         else:
@@ -263,13 +291,18 @@ def execute_unified(
     # ------------------------------------------------------------------
     cmd_str = " ".join(command)
     tags = ctx_obj.get("tags") or []
+    if isinstance(execution_context.context_value, dict):
+        ctx_value_str = (
+            f"{execution_context.context_value.get('env', '')} "
+            f"+ {' '.join(execution_context.context_value.get('modules', []))}"
+        )
+    elif isinstance(execution_context.context_value, list):
+        ctx_value_str = " ".join(execution_context.context_value)
+    else:
+        ctx_value_str = execution_context.context_value
     exec_context_info = {
         "type": execution_context.context_type,
-        "value": (
-            execution_context.context_value
-            if not isinstance(execution_context.context_value, list)
-            else " ".join(execution_context.context_value)
-        ),
+        "value": (ctx_value_str),
     }
 
     virtual_id = None
@@ -444,3 +477,10 @@ def create_singularity_context(container: str) -> ExecutionContext:
 def create_default_context() -> ExecutionContext:
     """Create a default execution context."""
     return ExecutionContext("default", None, "default")
+
+
+def create_conda_module_context(env: str, modules: List[str]) -> ExecutionContext:
+    """Create a combined conda + module execution context."""
+    return ExecutionContext(
+        "conda_module", {"env": env, "modules": modules}, "conda_module"
+    )

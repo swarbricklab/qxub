@@ -23,6 +23,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Tracks (keys of) warnings already emitted this process so a persistently
+# broken DB surfaces once rather than on every single job submission.
+_WARNED_ONCE: set = set()
+
+
+def _warn_once(key: str, message: str, exc: Exception) -> None:
+    """Emit *message* at WARNING level the first time *key* fails, DEBUG after."""
+    if key in _WARNED_ONCE:
+        logger.debug("%s: %s", message, exc)
+        return
+    _WARNED_ONCE.add(key)
+    logger.warning("%s: %s", message, exc)
+
+
 # ---------------------------------------------------------------------------
 # DB path resolution
 # ---------------------------------------------------------------------------
@@ -108,6 +122,11 @@ def init_db(db_path: Optional[Path] = None) -> None:
     - ``meta``          — key/value store for DB-level state (active_count, etc.)
     """
     with get_connection(db_path) as conn:
+        # Heal a legacy (pre-unified) queue table before anything touches it,
+        # otherwise CREATE TABLE IF NOT EXISTS is a no-op and every insert /
+        # index fails with "no such column" against the old schema.
+        _rebuild_legacy_queue_schema(conn)
+
         # ------------------------------------------------------------------
         # queue: unified job table — virtual ID as PK, PBS ID nullable
         # ------------------------------------------------------------------
@@ -252,6 +271,62 @@ _QUEUE_NEW_COLUMNS = [
 ]
 
 
+def _rebuild_legacy_queue_schema(conn) -> None:
+    """Rebuild a legacy (pre-unified) ``queue`` table into the unified schema.
+
+    Phase 2 (issue #55) created ``queue`` with a ``virtual_id`` primary key and
+    an entirely different column set (``job_name``, ``created_at`` …).  The
+    unified merge (issue #63) replaced it with an ``entry_id``-keyed schema but
+    shipped **no migration**, so a shared DB created under Phase 2 keeps the old
+    table forever: ``CREATE TABLE IF NOT EXISTS`` is a no-op against it and every
+    insert / index creation then fails with ``no such column`` — silently, since
+    the callers swallow the error.  This is why a shared DB can appear to "stop
+    tracking" after an upgrade.
+
+    Detection: a ``queue`` table that has ``virtual_id`` but not ``entry_id``.
+    On a current (unified) DB this is a cheap no-op.
+
+    The legacy ``queue`` rows hold transient in-flight tracking state, so they
+    are not remapped into the new schema.  An empty legacy table is dropped; a
+    non-empty one is renamed to ``queue_legacy_backup`` (any previous backup is
+    replaced) so nothing is destroyed and the operator can inspect it.
+    """
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='queue'"
+    ).fetchone()
+    if row is None:
+        return  # No queue table yet — CREATE TABLE will build the current one.
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(queue)")}
+    if "entry_id" in cols or "virtual_id" not in cols:
+        return  # Already unified (or an unrecognised but compatible shape).
+
+    try:
+        n = conn.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
+    except Exception:  # pylint: disable=broad-except
+        n = 0
+
+    # Legacy indexes reference columns that won't exist on the new table; drop
+    # them so the recreated unified indexes don't collide.
+    for idx in ("idx_queue_pbs_job_id", "idx_queue_status", "idx_queue_user"):
+        conn.execute(f"DROP INDEX IF EXISTS {idx}")
+
+    if n == 0:
+        conn.execute("DROP TABLE queue")
+        logger.warning(
+            "Rebuilt empty legacy 'queue' table to the unified schema "
+            "(job tracking was silently disabled before this)."
+        )
+    else:
+        conn.execute("DROP TABLE IF EXISTS queue_legacy_backup")
+        conn.execute("ALTER TABLE queue RENAME TO queue_legacy_backup")
+        logger.warning(
+            "Legacy 'queue' table (%d rows) preserved as 'queue_legacy_backup'; "
+            "rebuilding unified schema.",
+            n,
+        )
+
+
 def _migrate_queue_schema(conn) -> None:
     """Add new resource-tracking columns to an existing ``queue`` table.
 
@@ -382,7 +457,10 @@ def create_queue_entry(
                     (pbs_job_id, entry_id, user, now, json.dumps(tags or [])),
                 )
     except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Failed to create queue entry: %s", exc)
+        # This is the primary write path — a failure here means the job is not
+        # being tracked at all.  Warn once (not per-submission) so a broken or
+        # incompatible DB is visible instead of silently losing every job.
+        _warn_once("create_queue_entry", "Failed to record job in tracking DB", exc)
 
     return entry_id
 

@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, "/g/data/a56/software/qsub_tools")
 
-from qxub.execution_context import ExecutionContext
+from qxub.execution.context import ExecutionContext
 from qxub.remote.command_builder import build_remote_command
 
 
@@ -65,6 +65,63 @@ def test_command_serialization():
     assert "--dry" in result
     assert "-vv" in result
     assert "echo hello" in result
+
+    # Test 5: GPU options
+    print("\n5. GPU options:")
+    ctx = ExecutionContext("conda", "ml-env", "conda")
+    options = {"gpus": 2, "gpu_type": "a100", "queue": "auto"}
+    command = ["python", "train.py"]
+    result = build_remote_command(ctx, options, command)
+    print(f"   Command: {result}")
+    assert "--gpus 2" in result
+    assert "--gpu-type a100" in result
+
+    # Test 6: Internet connectivity
+    print("\n6. Internet connectivity:")
+    ctx = ExecutionContext("default", None, "default")
+    options = {"internet": True}
+    command = ["curl", "https://example.com"]
+    result = build_remote_command(ctx, options, command)
+    print(f"   Command: {result}")
+    assert "--internet" in result
+
+    # Test 7: Tags and environment variables
+    print("\n7. Tags and environment variables:")
+    ctx = ExecutionContext("conda", "analysis", "conda")
+    options = {
+        "tag": ("rule=align", "workflow=brca"),
+        "tags": "step=1,batch=morning",
+        "var": ("FOO=bar", "BAZ=qux"),
+        "vars": "X=1,Y=2",
+    }
+    command = ["python", "run.py"]
+    result = build_remote_command(ctx, options, command)
+    print(f"   Command: {result}")
+    assert "--tag rule=align" in result
+    assert "--tag workflow=brca" in result
+    assert "--tags" in result
+    assert "--var FOO=bar" in result
+    assert "--var BAZ=qux" in result
+    assert "--vars" in result
+
+    # Test 8: Notification and log-dir options
+    print("\n8. Notification and log-dir options:")
+    ctx = ExecutionContext("default", None, "default")
+    options = {"notify": True, "log_dir": "/scratch/logs"}
+    command = ["hostname"]
+    result = build_remote_command(ctx, options, command)
+    print(f"   Command: {result}")
+    assert "--notify" in result
+    assert "--log-dir" in result
+
+    # Test 9: --no-notify flag
+    print("\n9. --no-notify flag:")
+    ctx = ExecutionContext("default", None, "default")
+    options = {"no_notify": True}
+    command = ["hostname"]
+    result = build_remote_command(ctx, options, command)
+    print(f"   Command: {result}")
+    assert "--no-notify" in result
 
     print("\n✅ All serialization tests passed!")
 

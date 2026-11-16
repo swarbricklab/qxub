@@ -33,6 +33,7 @@ def get_template(template_type: str, custom_template: str = None) -> str:
     template_files = {
         "conda": "qconda.pbs",
         "module": "qmod.pbs",
+        "conda_module": "qconda_mod.pbs",
         "singularity": "qsing.pbs",
         "default": "qdefault.pbs",
     }

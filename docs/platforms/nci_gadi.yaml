@@ -185,6 +185,23 @@ platform:
         max_jobs_queued: 300
         min_memory: "1000GB"
       priority: normal
+      su_billing_rate: 5.0
+      walltime_rules:
+        - cores: "1-48"
+          max_walltime: "48:00:00"
+        - cores: "96"
+          max_walltime: "24:00:00"
+
+    - name: megamembw
+      type: megamem
+      limits:
+        max_cpus: 64
+        max_memory: "3000GB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 300
+        min_memory: "1500GB"
+      priority: normal
       su_billing_rate: 1.25
       walltime_rules:
         - cores: "32"
@@ -194,6 +211,8 @@ platform:
 
     - name: gpuvolta
       type: gpu
+      gpu_type: v100
+      cpus_per_gpu: 12
       limits:
         max_cpus: 960
         max_memory: "382GB"
@@ -210,6 +229,27 @@ platform:
         - cores: "144-192"
           max_walltime: "24:00:00"
         - cores: "240-960"
+          max_walltime: "5:00:00"
+
+    - name: dgxa100
+      type: gpu
+      gpu_type: a100
+      cpus_per_gpu: 16
+      limits:
+        max_cpus: 256
+        max_memory: "2000GB"
+        max_local_storage: "28TB"
+        max_walltime: "48:00:00"
+        max_jobs_per_user: 50
+        max_jobs_queued: 50
+        max_gpus: 8
+        min_gpus: 1
+      priority: normal
+      su_billing_rate: 4.5
+      walltime_rules:
+        - cores: "16-128"
+          max_walltime: "48:00:00"
+        - cores: "144-256"
           max_walltime: "5:00:00"
 
     - name: copyq
@@ -229,6 +269,10 @@ platform:
   # Optimized for cost-effectiveness and resource availability
   # Rules are evaluated in order - most specific conditions first
   auto_selection_rules:
+    - condition: "gpu_type == a100"
+      queue: dgxa100
+    - condition: "gpu_type == v100"
+      queue: gpuvolta
     - condition: "gpu_requested > 0"
       queue: gpuvolta
     - condition: "memory >= 1000GB"
@@ -257,3 +301,4 @@ platform:
     hugemembw: "select_from_options(cores, [7, 14, 21, 28])"
     megamem: "select_from_options(cores, [32, 64])"
     gpuvolta: "round_cores_to_multiple(cores, 12)"
+    dgxa100: "round_cores_to_multiple(cores, 16)"

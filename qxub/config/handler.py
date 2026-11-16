@@ -6,6 +6,8 @@ logger = logging.getLogger(__name__)
 import os
 from pathlib import Path
 
+import click
+
 
 def _get_default_output_dir():
     """Get appropriate output directory that works across login and compute nodes."""
@@ -167,6 +169,8 @@ def select_auto_queue(params):
     if params["queue"] != "auto":
         return params
 
+    params["queue_was_auto"] = True
+
     try:
         from pathlib import Path
 
@@ -216,6 +220,27 @@ def select_auto_queue(params):
         # Add internet connectivity requirement if specified
         if params.get("internet"):
             requirements["internet"] = True
+
+        # Add GPU type for queue selection if specified
+        if params.get("gpu_type"):
+            gpu_type = params["gpu_type"].lower()
+            requirements["gpu_type"] = gpu_type
+
+            # Validate gpu_type against platform definitions
+            valid_gpu_types = set()
+            for platform_name in platform_names:
+                platform = loader.get_platform(platform_name)
+                if not platform:
+                    continue
+                for q in platform.queues.values():
+                    if q.gpu_type:
+                        valid_gpu_types.add(q.gpu_type.lower())
+            if valid_gpu_types and gpu_type not in valid_gpu_types:
+                sorted_types = sorted(valid_gpu_types)
+                raise click.ClickException(
+                    f"Unknown GPU type '{gpu_type}'. "
+                    f"Available types: {', '.join(sorted_types)}"
+                )
 
         # Try to find best queue from any platform
         best_queue = None
@@ -267,6 +292,8 @@ def select_auto_queue(params):
             "Platform system not available for auto queue selection, using 'normal'"
         )
         params["queue"] = "normal"
+    except click.ClickException:
+        raise
     except Exception as e:
         logger.warning("Auto queue selection failed: %s, using 'normal'", e)
         params["queue"] = "normal"
@@ -288,6 +315,209 @@ def build_qsub_options(params):
         options += f" -m {email_opts}"
 
     return options
+
+
+def adjust_cpus_for_gpus(params):
+    """Auto-set ncpus based on cpus_per_gpu when GPUs are requested without explicit CPUs."""
+    if params.get("cpus_explicit"):
+        return params
+
+    queue_name = params.get("queue")
+    if not queue_name or queue_name == "auto":
+        return params
+
+    # Find how many GPUs were requested
+    ngpus = 0
+    resources = list(params.get("resources") or [])
+    for r in resources:
+        if r.startswith("ngpus="):
+            ngpus = int(r.split("=", 1)[1])
+            break
+
+    if ngpus <= 0:
+        return params
+
+    try:
+        from pathlib import Path
+
+        from ..platforms.core import PlatformLoader
+
+        platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
+        if platform_paths_env:
+            search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
+            loader = PlatformLoader(search_paths=search_paths)
+        else:
+            loader = PlatformLoader()
+
+        for platform_name in loader.list_platforms():
+            platform = loader.get_platform(platform_name)
+            if not platform:
+                continue
+            queue = platform.get_queue(queue_name)
+            if queue and queue.cpus_per_gpu:
+                required_cpus = ngpus * queue.cpus_per_gpu
+                # Replace or inject ncpus in resources
+                has_ncpus = any(r.startswith("ncpus=") for r in resources)
+                if has_ncpus:
+                    resources = [
+                        f"ncpus={required_cpus}" if r.startswith("ncpus=") else r
+                        for r in resources
+                    ]
+                else:
+                    resources.append(f"ncpus={required_cpus}")
+                params["resources"] = resources
+                logger.info(
+                    "Auto-set ncpus=%d for %d GPU(s) on queue '%s' "
+                    "(%d cpus_per_gpu)",
+                    required_cpus,
+                    ngpus,
+                    queue_name,
+                    queue.cpus_per_gpu,
+                )
+                break
+    except Exception as e:
+        logger.debug("Could not adjust CPUs for GPU queue: %s", e)
+
+    return params
+
+
+def enforce_queue_minimums(params):
+    """Override user-specified resources that violate the selected queue's minimums.
+
+    Applies to both auto-selected queues (--queue auto) and explicitly named queues.
+    Emits a user-visible warning for each override so the user knows what changed.
+
+    CPU enforcement:
+    - If the queue has cpus_per_gpu, CPUs must be a positive multiple of that value.
+      Round up non-multiples; raise to the minimum if below it.
+    - If the queue has limits.min_cpus, enforce that floor independently.
+
+    Disk (jobfs) enforcement:
+    - If the queue has limits.min_local_storage and the user specified jobfs below
+      that threshold (or didn't specify it at all), inject/raise the minimum.
+    """
+    queue_name = params.get("queue")
+    if not queue_name or queue_name == "auto":
+        return params
+
+    try:
+        from pathlib import Path
+
+        from ..platforms.core import PlatformLoader
+        from ..resources import parse_memory_size
+
+        platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
+        if platform_paths_env:
+            search_paths = [Path(p.strip()) for p in platform_paths_env.split(":")]
+            loader = PlatformLoader(search_paths=search_paths)
+        else:
+            loader = PlatformLoader()
+
+        queue = None
+        for platform_name in loader.list_platforms():
+            platform = loader.get_platform(platform_name)
+            if platform:
+                queue = platform.get_queue(queue_name)
+                if queue:
+                    break
+
+        if not queue:
+            return params
+
+        was_auto = params.get("queue_was_auto", False)
+        queue_context = (
+            f"auto-selected queue '{queue_name}'"
+            if was_auto
+            else f"queue '{queue_name}'"
+        )
+
+        resources = list(params.get("resources") or [])
+
+        # --- CPU enforcement ---
+        if queue.cpus_per_gpu or queue.limits.min_cpus:
+            current_ncpus = None
+            for r in resources:
+                if r.startswith("ncpus="):
+                    current_ncpus = int(r.split("=", 1)[1])
+                    break
+
+            if current_ncpus is not None:
+                adjusted = current_ncpus
+
+                # Enforce minimum from cpus_per_gpu (minimum = 1 * cpus_per_gpu)
+                if queue.cpus_per_gpu:
+                    min_from_ratio = queue.cpus_per_gpu
+                    if adjusted < min_from_ratio:
+                        adjusted = min_from_ratio
+                    elif adjusted % queue.cpus_per_gpu != 0:
+                        adjusted = (
+                            (adjusted // queue.cpus_per_gpu) + 1
+                        ) * queue.cpus_per_gpu
+
+                # Enforce absolute minimum from limits
+                if queue.limits.min_cpus and adjusted < queue.limits.min_cpus:
+                    adjusted = queue.limits.min_cpus
+
+                if adjusted != current_ncpus:
+                    reason = (
+                        f"must be a multiple of {queue.cpus_per_gpu} (cpus_per_gpu)"
+                        if queue.cpus_per_gpu
+                        and current_ncpus % queue.cpus_per_gpu != 0
+                        else f"minimum is {adjusted}"
+                    )
+                    click.echo(
+                        click.style(
+                            f"Warning: ncpus={current_ncpus} overridden to ncpus={adjusted} "
+                            f"for {queue_context} ({reason})",
+                            fg="yellow",
+                        ),
+                        err=True,
+                    )
+                    resources = [
+                        f"ncpus={adjusted}" if r.startswith("ncpus=") else r
+                        for r in resources
+                    ]
+                    params["resources"] = resources
+
+        # --- Disk (jobfs) enforcement ---
+        if queue.limits.min_local_storage:
+            min_bytes = parse_memory_size(queue.limits.min_local_storage)
+            current_jobfs = None
+            current_jobfs_str = None
+            for r in resources:
+                if r.startswith("jobfs="):
+                    current_jobfs_str = r.split("=", 1)[1]
+                    current_jobfs = parse_memory_size(current_jobfs_str)
+                    break
+
+            if current_jobfs is not None and min_bytes and current_jobfs < min_bytes:
+                click.echo(
+                    click.style(
+                        f"Warning: jobfs={current_jobfs_str} overridden to "
+                        f"jobfs={queue.limits.min_local_storage} "
+                        f"for {queue_context} (minimum is {queue.limits.min_local_storage})",
+                        fg="yellow",
+                    ),
+                    err=True,
+                )
+                resources = [
+                    (
+                        f"jobfs={queue.limits.min_local_storage}"
+                        if r.startswith("jobfs=")
+                        else r
+                    )
+                    for r in resources
+                ]
+                params["resources"] = resources
+            elif current_jobfs is None and min_bytes:
+                # User didn't specify jobfs at all — inject the minimum silently
+                resources.append(f"jobfs={queue.limits.min_local_storage}")
+                params["resources"] = resources
+
+    except Exception as e:
+        logger.debug("Could not enforce queue minimums: %s", e)
+
+    return params
 
 
 def adjust_resources_for_queue(params):
@@ -361,6 +591,12 @@ def process_job_options(params, config_manager):
 
     # Handle auto queue selection
     params = select_auto_queue(params)
+
+    # Auto-set CPUs based on GPU queue's cpus_per_gpu
+    params = adjust_cpus_for_gpus(params)
+
+    # Enforce queue minimum resource requirements, overriding non-compliant user values
+    params = enforce_queue_minimums(params)
 
     # Adjust resources for explicitly specified queues
     params = adjust_resources_for_queue(params)
