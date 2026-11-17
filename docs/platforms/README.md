@@ -72,6 +72,26 @@ Each platform definition includes:
 - **Service Unit rates** for cost estimation
 - **Auto-selection rules** for intelligent queue choice
 - **Auto-adjustment policies** for resource optimization
+- **Site conventions** that qxub would otherwise have to guess:
+
+  ```yaml
+  platform:
+    host: gadi                 # matched case-insensitively against the hostname
+    account_env: PROJECT       # env var holding the default project (-P)
+    paths:
+      scratch: "/scratch/{project}/{user}"   # default output and status files
+    default_directives:        # added to every qsub
+      - "-W umask=0027"
+  ```
+
+  qxub picks the platform whose `host` appears in the current hostname.
+  Without a platform, qxub sends no `-P` unless one is configured, adds no
+  directives, writes default output to `./qt/` and keeps status files in
+  `$XDG_STATE_HOME/qxub/status`.
+
+  Storage that your group always needs (for example `gdata/<project>`) is a
+  group choice, not a platform one, so set it in config:
+  `qxub config set defaults.volumes gdata/<project>`.
 
 ## Contributing
 

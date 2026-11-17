@@ -121,11 +121,11 @@ class ResourceMapper:
         """Add storage volume specification for NCI storage mounts.
 
         Args:
-            storage: Storage volumes to mount (e.g., 'gdata/a56', 'gdata/a56+gdata/px14')
+            storage: Storage volumes to mount (e.g., 'gdata/ab12', 'gdata/ab12+gdata/cd34')
         """
         if isinstance(storage, str):
             # For NCI storage volumes, pass through directly to PBS
-            # Examples: 'gdata/a56', 'gdata/a56+gdata/px14', 'scratch/a56+gdata/a56'
+            # Examples: 'gdata/ab12', 'gdata/ab12+gdata/cd34', 'scratch/ab12+gdata/ab12'
             self.pbs_resources.append(f"storage={storage}")
         else:
             raise ValueError(f"Storage must be a string specifying volumes: {storage}")

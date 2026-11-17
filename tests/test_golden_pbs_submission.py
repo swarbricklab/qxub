@@ -10,7 +10,6 @@ The golden files record current behaviour, including known bugs. Fixing
 one means updating its golden file in the same change: run
 ``pytest --update-golden`` and review the diff. Known bugs pinned here:
 
-* ``no_project``: ``-P None`` when no project is configured.
 * ``gadi_hugemem``: queue auto-selection only runs for ``--gpus``,
   ``--internet`` or ``-q auto``, so a 600GB job goes to ``normal``.
 """
@@ -123,6 +122,7 @@ def normalise(text: str, sandbox) -> str:
     text = re.sub(r"\d{8}[_-]\d{6}", "<TIMESTAMP>", text)
     text = re.sub(r"qxub_version=[^,\s]+", "qxub_version=<VERSION>", text)
     text = re.sub(r"qxub_path=[^,\s]+", "qxub_path=<QXUB_PATH>", text)
+    text = re.sub(r"qxub_python=[^,\s]+", "qxub_python=<PYTHON>", text)
     text = re.sub(r"qxub_submit_host=[^,\s]+", "qxub_submit_host=<HOST>", text)
     return text
 

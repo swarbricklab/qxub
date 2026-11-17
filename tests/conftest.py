@@ -71,6 +71,7 @@ class QxubSandbox:
             k: v
             for k, v in os.environ.items()
             if not k.startswith(("QXUB_", "PBS_", "FAKE_"))
+            and k not in ("PROJECT", "HOSTNAME", "XDG_STATE_HOME")
         }
         env.update(
             HOME=str(self.home),
@@ -79,6 +80,9 @@ class QxubSandbox:
             PATH=os.pathsep.join([str(FAKE_PBS_BIN), env.get("PATH", "")]),
             FAKE_PBS_STATE=str(self.pbs_state),
             NO_COLOR="1",
+            XDG_STATE_HOME=str(self.home / ".local" / "state"),
+            # Never match a platform's host pattern by accident (e.g. on Gadi)
+            HOSTNAME="qxub-test-host",
         )
         self.env = env
 

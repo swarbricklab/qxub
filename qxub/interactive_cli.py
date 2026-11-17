@@ -8,6 +8,7 @@ tmux integration for session persistence.
 
 import base64
 import os
+import shlex
 import subprocess
 import sys
 import uuid
@@ -15,6 +16,8 @@ from pathlib import Path
 from typing import Optional
 
 import click
+
+from .config.site import default_project, default_status_dir
 
 
 def _get_config_manager():
@@ -234,12 +237,9 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
     Returns:
         dict with session info, or None if status files not found
     """
-    import os
-    from pathlib import Path
+    from .config.site import default_status_dir
 
-    project = os.environ.get("PROJECT", "a56")
-    user = os.environ.get("USER", "unknown")
-    status_dir = Path(f"/scratch/{project}/{user}/qxub/status/session_{session_id}")
+    status_dir = default_status_dir() / f"session_{session_id}"
 
     if not status_dir.exists():
         return None
@@ -353,7 +353,7 @@ def _build_interactive_script(
             [
                 "",
                 "# Set up status tracking for qxub history",
-                'QXUB_STATUS_DIR="/scratch/${PROJECT:-a56}/${USER}/qxub/status"',
+                f"QXUB_STATUS_DIR={shlex.quote(str(default_status_dir()))}",
                 f'QXUB_SESSION_DIR="$QXUB_STATUS_DIR/session_{session_id}"',
                 'mkdir -p "$QXUB_SESSION_DIR"',
                 "",
@@ -477,6 +477,14 @@ def _build_interactive_script(
         )
 
     if conda_env:
+        # The conda install qxub was submitted from (shared filesystems make
+        # it usable on the compute node), tried after the usual home paths.
+        conda_base_candidates = []
+        conda_exe = os.environ.get("CONDA_EXE")
+        if conda_exe:
+            conda_base = str(Path(conda_exe).parent.parent)
+            conda_base_candidates.append(f"        {shlex.quote(conda_base)} \\")
+
         # Conda activation (after modules if both specified)
         lines.extend(
             [
@@ -489,7 +497,7 @@ def _build_interactive_script(
                 '        "$HOME/anaconda3" \\',
                 '        "$HOME/miniforge3" \\',
                 '        "$HOME/mambaforge" \\',
-                '        "/g/data/a56/conda/miniconda3" \\',
+                *conda_base_candidates,
                 '        "/apps/conda"; do',
                 '        if [ -f "$CONDA_PATH/etc/profile.d/conda.sh" ]; then',
                 '            echo "📦 Found conda at: $CONDA_PATH"',
@@ -746,8 +754,8 @@ def _build_qsub_command(
     if project:
         cmd.extend(["-P", project])
     else:
-        # Try to get from environment
-        env_project = os.environ.get("PROJECT")
+        # Fall back to the platform's default project (e.g. $PROJECT on Gadi)
+        env_project = default_project()
         if env_project:
             cmd.extend(["-P", env_project])
 
@@ -852,7 +860,7 @@ def _build_qsub_command(
 @click.option(
     "--volumes",
     "--storage",
-    help="Storage volumes (e.g., 'gdata/a56+scratch/a56')",
+    help="Storage volumes (e.g., 'gdata/ab12+scratch/ab12')",
 )
 @click.option(
     "--shell",

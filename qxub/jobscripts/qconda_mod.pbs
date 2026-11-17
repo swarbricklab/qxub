@@ -1,9 +1,6 @@
 #! /bin/bash
 #PBS -N qconda_mod
-#PBS -P a56
-#PBS -l storage=gdata/a56
 #PBS -S /bin/bash
-#PBS -W umask=0027
 #PBS -j oe
 
 # Logging
@@ -49,14 +46,16 @@ echo "📍 Current directory: $(pwd)"
 # Strict mode with error handling
 set -e
 
+# Python for the DB status updates: the interpreter that ran qxub at
+# submission, so the same qxub install is imported here.
+QXUB_PYTHON="${qxub_python:-python3}"
+
 # Update database status function (defined early so error handler can use it)
 update_job_status() {
     local status="$1"
     local exit_code="${2:-0}"
-    if command -v python3 > /dev/null 2>&1; then
-        python3 -c "
-import sys
-sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+    if command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
+        "$QXUB_PYTHON" -c "
 try:
     from qxub.resources.tracker import resource_tracker
     if '$status' == 'running':
@@ -69,10 +68,8 @@ except Exception:
 " 2>/dev/null || true
     fi
     # Also write to the shared queue DB if QXUB_SHARED_DB is set
-    if [ -n "$QXUB_SHARED_DB" ] && command -v python3 > /dev/null 2>&1; then
-        python3 -c "
-import sys
-sys.path.insert(0, '/g/data/a56/software/qsub_tools')
+    if [ -n "$QXUB_SHARED_DB" ] && command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
+        "$QXUB_PYTHON" -c "
 try:
     from qxub.queue.db import mark_running, mark_complete
     if '$status' == 'running':
