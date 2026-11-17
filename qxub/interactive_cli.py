@@ -108,6 +108,22 @@ def _get_default_queue() -> str:
         return "normal"
 
 
+def _resolve_auto_queue(resources: list[str], internet: bool) -> str:
+    """Pick a real queue for ``auto`` the same way ``qxub exec`` does.
+
+    Uses the platform auto-selection rules with the session's resources
+    (``mem=``, ``ncpus=``, ``walltime=``, ``ngpus=``). Falls back to
+    ``normal`` with a warning if no platform or matching queue is found, so
+    ``auto`` is never passed to ``qsub``.
+    """
+    from .config.handler import select_auto_queue
+
+    params = select_auto_queue(
+        {"queue": "auto", "resources": list(resources), "internet": internet}
+    )
+    return params["queue"]
+
+
 def _get_internet_queue() -> Optional[str]:
     """Find an internet-capable queue from the current platform definition.
 
@@ -821,7 +837,8 @@ def _build_qsub_command(
     "-q",
     "--queue",
     default=None,
-    help=f"PBS queue name (default: from config or 'normal')",
+    help="PBS queue name, or 'auto' to choose one from --mem/--cpus/--runtime "
+    "(default: from config or 'normal')",
 )
 @click.option(
     "-P",
@@ -1284,6 +1301,11 @@ def interactive_cli(
 
     # Combine with any -l resources passed directly
     all_resources = list(resources) + mapped_resources
+
+    # "auto" (from --queue or config) is not a real queue; resolve it here
+    # rather than letting qsub reject it.
+    if queue == "auto":
+        queue = _resolve_auto_queue(all_resources, internet)
 
     # Build the interactive script
     # Resolve record_dir from config if not specified
