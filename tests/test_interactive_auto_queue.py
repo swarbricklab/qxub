@@ -44,9 +44,11 @@ def test_auto_picks_hugemem_for_large_memory(sandbox):
 
 
 def test_auto_with_internet_picks_an_internet_queue(sandbox):
-    gadi_config(sandbox, "  queue: auto\n")
+    gadi_config(sandbox)
 
-    assert qsub_queue(sandbox, "--internet", "--mem", "4GB") == "copyq"
+    queue = qsub_queue(sandbox, "--queue", "auto", "--internet", "--mem", "4GB")
+
+    assert queue == "copyq"
 
 
 @pytest.mark.parametrize(
@@ -67,4 +69,8 @@ def test_auto_without_a_platform_falls_back_to_normal(sandbox):
     sandbox.env["QXUB_PLATFORM_PATHS"] = str(sandbox.root / "no-platforms")
     sandbox.write_config("defaults:\n  queue: auto\n")
 
-    assert qsub_queue(sandbox, "--mem", "4GB") == "normal"
+    result = sandbox.run("interactive", "--dry-run", "--runtime", "15m", "--mem", "4GB")
+
+    assert "-q normal " in result.stdout
+    assert "No platforms available" in result.stderr
+    assert "using queue 'normal'" in result.stderr

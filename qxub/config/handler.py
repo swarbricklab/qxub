@@ -168,6 +168,17 @@ def process_job_configuration(params, config_manager):
     return params
 
 
+def _warn_auto_queue_fallback(reason: str) -> None:
+    """Tell the user that queue ``auto`` fell back to ``normal``.
+
+    Printed to stderr so it is seen without ``-v`` and does not mix with
+    output scripts read from stdout (e.g. the job ID from ``--terse``).
+    """
+    message = f"{reason}, using queue 'normal'"
+    logger.debug(message)
+    click.echo(f"Warning: {message}", err=True)
+
+
 def select_auto_queue(params):
     """Handle automatic queue selection based on resource requirements."""
     if params["queue"] != "auto":
@@ -192,9 +203,7 @@ def select_auto_queue(params):
         platform_names = loader.list_platforms()
 
         if not platform_names:
-            logger.warning(
-                "No platforms available for auto queue selection, using 'normal'"
-            )
+            _warn_auto_queue_fallback("No platforms available for auto queue selection")
             params["queue"] = "normal"
             return params
 
@@ -288,18 +297,18 @@ def select_auto_queue(params):
             params["queue"] = best_queue
             logger.info("Auto-selected queue: %s", best_queue)
         else:
-            logger.warning("No suitable queue found for requirements, using 'normal'")
+            _warn_auto_queue_fallback("No suitable queue found for requirements")
             params["queue"] = "normal"
 
     except ImportError:
-        logger.warning(
-            "Platform system not available for auto queue selection, using 'normal'"
+        _warn_auto_queue_fallback(
+            "Platform system not available for auto queue selection"
         )
         params["queue"] = "normal"
     except click.ClickException:
         raise
     except Exception as e:
-        logger.warning("Auto queue selection failed: %s, using 'normal'", e)
+        _warn_auto_queue_fallback(f"Auto queue selection failed: {e}")
         params["queue"] = "normal"
 
     return params
