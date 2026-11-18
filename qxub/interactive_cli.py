@@ -311,7 +311,43 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
         except Exception:
             pass
 
+    # The status files come from inside the job. They miss the final exit
+    # status and resource usage, and are not written at all if the session
+    # was killed (e.g. at walltime). Ask the scheduler once the job is over.
+    job_id = session_info.get("job_id")
+    if job_id:
+        final = _final_job_data(job_id)
+        if final:
+            session_info["resources"] = final
+            if final.get("exit_status") is not None:
+                session_info["exit_code"] = final["exit_status"]
+
     return session_info
+
+
+def _final_job_data(job_id: str, attempts: int = 3, delay: float = 2.0):
+    """Finished-job data from ``qstat -fx``, or ``None``.
+
+    The server may take a moment to record the exit status after an
+    interactive session ends, so retry briefly until it appears.
+    """
+    import time
+
+    from .core.scheduler import get_job_resource_data
+
+    data = None
+    for attempt in range(attempts):
+        try:
+            data = get_job_resource_data(job_id) or data
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if data is None:
+            return None  # the scheduler doesn't know the job; waiting won't help
+        if data.get("exit_status") is not None:
+            return data
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return data
 
 
 def _build_interactive_script(
@@ -378,18 +414,35 @@ def _build_interactive_script(
                 'date +%s > "$QXUB_SESSION_DIR/start_time"',
                 'hostname > "$QXUB_SESSION_DIR/hostname"',
                 "",
-                "# Set up cleanup trap to write exit status",
+                "# Record how the session ended (called from _qxub_on_exit)",
                 "_qxub_write_status() {",
-                "    local exit_code=$?",
+                "    local exit_code=$1",
                 '    date +%s > "$QXUB_SESSION_DIR/end_time"',
                 '    echo "$exit_code" > "$QXUB_SESSION_DIR/exit_code"',
                 "    # Capture resource usage from qstat before job ends",
                 '    qstat -f "$PBS_JOBID" 2>/dev/null > "$QXUB_SESSION_DIR/qstat_output" || true',
                 "}",
-                "trap _qxub_write_status EXIT",
                 "",
             ]
         )
+
+    # One EXIT handler for everything: a shell has only one EXIT trap, so a
+    # second 'trap ... EXIT' would replace the first. The session itself runs
+    # as a child of this script (never 'exec'), so this handler still runs
+    # when the user leaves the session.
+    lines.extend(
+        [
+            "_qxub_on_exit() {",
+            "    local exit_code=$?",
+            "    if declare -F _qxub_post_cmd >/dev/null; then _qxub_post_cmd; fi",
+            "    if declare -F _qxub_write_status >/dev/null; then",
+            '        _qxub_write_status "$exit_code"',
+            "    fi",
+            "}",
+            "trap _qxub_on_exit EXIT",
+            "",
+        ]
+    )
 
     lines.extend(
         [
@@ -587,8 +640,8 @@ def _build_interactive_script(
                 '    echo "✅ Post-command completed"',
                 "}",
                 "",
-                "# Trap EXIT to run post-command (best effort - may not run if killed)",
-                "trap _qxub_post_cmd EXIT",
+                "# _qxub_on_exit runs this once it is defined, i.e. only after the",
+                "# pre-command succeeded (best effort - may not run if killed)",
                 "",
                 "# Provide shortcut function to cleanly exit",
                 "qxub_exit() {",
@@ -602,7 +655,7 @@ def _build_interactive_script(
 
     # Main interactive part
     if container:
-        # Container mode: exec into singularity shell directly
+        # Container mode: run singularity shell as a child so the EXIT trap fires
         # Extract container basename for prompt
         container_name = container.split("/")[-1].replace(".sif", "")
         bind_opts = f"--bind {bind} " if bind else ""
@@ -621,12 +674,14 @@ def _build_interactive_script(
                 "# Set custom prompt for container shell",
                 f'export SINGULARITYENV_PS1="{container_prompt}"',
                 "",
-                f'exec singularity shell {bind_opts}"{container}"',
+                f'singularity shell {bind_opts}"{container}"',
+                "exit $?",
             ]
         )
     else:
         # Direct shell mode - create a custom rcfile that re-activates environment
-        # This is necessary because exec replaces the process, losing activation
+        # The new shell does not inherit shell functions such as conda's, so
+        # the rcfile activates the environment again
         lines.extend(
             [
                 "# Start interactive shell with environment",
@@ -734,7 +789,8 @@ def _build_interactive_script(
                     [
                         "# Use 'script' to create a pseudo-terminal for the command",
                         "# -e: return child's exit code, -q: quiet mode",
-                        f'exec script -eqc "{run_cmd}" /dev/null',
+                        f'script -eqc "{run_cmd}" /dev/null',
+                        "exit $?",
                     ]
                 )
         else:
@@ -742,7 +798,9 @@ def _build_interactive_script(
             lines.extend(
                 [
                     "# Start bash with our custom rcfile",
-                    'exec /bin/bash --rcfile "$QXUB_RCFILE"',
+                    "# Run as a child, not with exec, so _qxub_on_exit still runs",
+                    '/bin/bash --rcfile "$QXUB_RCFILE"',
+                    "exit $?",
                 ]
             )
 
