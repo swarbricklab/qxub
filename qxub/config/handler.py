@@ -179,6 +179,18 @@ def _warn_auto_queue_fallback(reason: str) -> None:
     click.echo(f"Warning: {message}", err=True)
 
 
+def _walltime_is_the_only_problem(loader, platform_names, requirements) -> bool:
+    """Whether some queue would fit if not for the requested walltime."""
+    if not requirements.get("walltime"):
+        return False
+    without_walltime = {k: v for k, v in requirements.items() if k != "walltime"}
+    for name in platform_names:
+        platform = loader.get_platform(name)
+        if platform and platform.select_queue(without_walltime):
+            return True
+    return False
+
+
 def select_auto_queue(params):
     """Handle automatic queue selection based on resource requirements."""
     if params["queue"] != "auto":
@@ -296,6 +308,13 @@ def select_auto_queue(params):
         if best_queue:
             params["queue"] = best_queue
             logger.info("Auto-selected queue: %s", best_queue)
+        elif _walltime_is_the_only_problem(loader, platform_names, requirements):
+            # Falling back to 'normal' would only get the job rejected by qsub.
+            raise click.ClickException(
+                f"No queue allows a walltime of {requirements['walltime']} "
+                f"with {requirements.get('cpus', 1)} CPU(s). "
+                "Request a shorter --runtime, or name a queue with --queue."
+            )
         else:
             _warn_auto_queue_fallback("No suitable queue found for requirements")
             params["queue"] = "normal"

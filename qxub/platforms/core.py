@@ -46,6 +46,8 @@ class QueueLimits:
     min_memory: Optional[str] = None  # Trigger threshold for auto-selection
     max_jobs_per_user: Optional[int] = None
     max_jobs_queued: Optional[int] = None
+    # Applies when no walltime rule covers the requested core count
+    max_walltime: Optional[str] = None
 
 
 @dataclass
@@ -102,11 +104,14 @@ class Queue:
     cpus_per_gpu: Optional[int] = None
 
     def get_max_walltime(self, core_count: int) -> Optional[str]:
-        """Get maximum walltime for given core count."""
+        """Get maximum walltime for given core count.
+
+        Uses the matching walltime rule, otherwise ``limits.max_walltime``.
+        """
         for rule in self.walltime_rules:
             if rule.matches_core_count(core_count):
                 return rule.max_walltime
-        return None
+        return self.limits.max_walltime
 
     def estimate_su_cost(self, cores: int, walltime_hours: float) -> float:
         """Estimate Service Unit cost for this queue."""
@@ -230,8 +235,30 @@ class Platform:
         """List all available queue names."""
         return list(self.queues.keys())
 
+    def allows_walltime(self, queue_name: str, resources: Dict[str, Any]) -> bool:
+        """Whether ``queue_name`` accepts the requested walltime.
+
+        Uses the queue's walltime rule for the requested CPU count, or its
+        ``limits.max_walltime``. A queue with neither, or a request without a
+        walltime, is accepted.
+        """
+        queue = self.queues.get(queue_name)
+        walltime = resources.get("walltime")
+        if queue is None or not walltime:
+            return True
+        limit = queue.get_max_walltime(int(resources.get("cpus", 1)))
+        if not limit:
+            return True
+        requested, allowed = parse_walltime(str(walltime)), parse_walltime(limit)
+        return requested is None or allowed is None or requested <= allowed
+
     def select_queue(self, resources: Dict[str, Any]) -> Optional[str]:
-        """Select best queue for given resource requirements."""
+        """Select the best queue for the given resource requirements.
+
+        Candidates are the queues of matching auto-selection rules, in order,
+        then the default rule's queue. The first one whose walltime limit
+        allows the request wins. Returns ``None`` if no candidate does.
+        """
         internet_required = resources.get("internet", False)
 
         # When internet connectivity is required, restrict candidates to queues
@@ -239,41 +266,56 @@ class Platform:
         # declares the capability, assume platform-wide internet access (e.g. a
         # cloud HPC where all nodes have outbound access) and fall through to
         # normal selection.
+        allowed = None
         if internet_required:
             internet_queues = {
                 name for name, q in self.queues.items() if q.internet_connectivity
             }
             if internet_queues:
-                # Apply auto-selection rules restricted to internet-capable queues
-                for rule in self.auto_selection_rules:
-                    if (
-                        evaluate_condition(rule.condition, resources)
-                        and rule.queue in internet_queues
-                    ):
-                        return rule.queue
-                # Try the default rule if it happens to be internet-capable
-                for rule in self.auto_selection_rules:
-                    if rule.is_default and rule.queue in internet_queues:
-                        return rule.queue
-                # Fall back to first internet-capable queue
-                return next(iter(internet_queues))
+                allowed = internet_queues
             # No queues flagged → assume universal internet; normal selection below.
 
-        # Apply auto-selection rules in order - most specific conditions first.
-        # Default rules take part too: their condition (if any) is honoured at
-        # their position in the list. An empty condition never matches here.
-        for rule in self.auto_selection_rules:
-            if evaluate_condition(rule.condition, resources):
-                return rule.queue
+        # Rules apply in order - most specific conditions first. Default rules
+        # take part too: their condition (if any) is honoured at their position
+        # in the list. An empty condition never matches here.
+        candidates = [
+            rule.queue
+            for rule in self.auto_selection_rules
+            if evaluate_condition(rule.condition, resources)
+        ]
+        # Then the default queue
+        candidates += [r.queue for r in self.auto_selection_rules if r.is_default]
 
-        # No rule matched: return default queue
-        for rule in self.auto_selection_rules:
-            if rule.is_default:
-                return rule.queue
+        if allowed is not None:
+            # Fall back to any internet-capable queue
+            candidates = [q for q in candidates if q in allowed]
+            candidates += sorted(allowed)
+        elif not candidates:
+            # No rules at all: fall back to the first available queue
+            candidates = list(self.queues)[:1]
 
-        # Fallback to first available queue
-        queues = list(self.queues.keys())
-        return queues[0] if queues else None
+        # The first candidate is what the rules chose; take it whenever its
+        # walltime fits. A later one is only a stand-in for a queue whose
+        # walltime is too short, so it must also take the rest of the request.
+        for position, queue_name in enumerate(candidates):
+            if not self.allows_walltime(queue_name, resources):
+                continue
+            if position == 0 or self._can_stand_in(queue_name, resources):
+                return queue_name
+        return None
+
+    def _can_stand_in(self, queue_name: str, resources: Dict[str, Any]) -> bool:
+        """Whether a fallback queue can take the request apart from walltime.
+
+        It must pass the queue's own limits (memory, CPUs, GPUs), and offer
+        GPUs exactly when GPUs are requested.
+        """
+        queue = self.queues.get(queue_name)
+        if queue is None or queue.validate_resources(resources).errors:
+            return False
+        wants_gpus = (resources.get("gpus") or resources.get("gpu_requested") or 0) > 0
+        has_gpus = bool(queue.gpu_type or queue.limits.max_gpus)
+        return wants_gpus == has_gpus
 
     def validate_queue_resources(
         self, queue_name: str, resources: Dict[str, Any]
@@ -421,6 +463,7 @@ class PlatformLoader:
             min_memory=limits_data.get("min_memory"),
             max_jobs_per_user=limits_data.get("max_jobs_per_user"),
             max_jobs_queued=limits_data.get("max_jobs_queued"),
+            max_walltime=limits_data.get("max_walltime"),
         )
 
         # Create walltime rules
