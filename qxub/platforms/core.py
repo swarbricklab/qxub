@@ -294,10 +294,28 @@ class Platform:
             # No rules at all: fall back to the first available queue
             candidates = list(self.queues)[:1]
 
-        for queue_name in candidates:
-            if self.allows_walltime(queue_name, resources):
+        # The first candidate is what the rules chose; take it whenever its
+        # walltime fits. A later one is only a stand-in for a queue whose
+        # walltime is too short, so it must also take the rest of the request.
+        for position, queue_name in enumerate(candidates):
+            if not self.allows_walltime(queue_name, resources):
+                continue
+            if position == 0 or self._can_stand_in(queue_name, resources):
                 return queue_name
         return None
+
+    def _can_stand_in(self, queue_name: str, resources: Dict[str, Any]) -> bool:
+        """Whether a fallback queue can take the request apart from walltime.
+
+        It must pass the queue's own limits (memory, CPUs, GPUs), and offer
+        GPUs exactly when GPUs are requested.
+        """
+        queue = self.queues.get(queue_name)
+        if queue is None or queue.validate_resources(resources).errors:
+            return False
+        wants_gpus = (resources.get("gpus") or resources.get("gpu_requested") or 0) > 0
+        has_gpus = bool(queue.gpu_type or queue.limits.max_gpus)
+        return wants_gpus == has_gpus
 
     def validate_queue_resources(
         self, queue_name: str, resources: Dict[str, Any]
