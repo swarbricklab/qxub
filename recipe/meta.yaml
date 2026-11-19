@@ -1,5 +1,5 @@
 {% set name = "qxub" %}
-{% set version = "3.7.0" %}
+{% set version = "3.8.0" %}
 
 package:
   name: {{ name|lower }}
