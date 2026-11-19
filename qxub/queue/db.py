@@ -6,8 +6,10 @@ DB path resolution (priority order):
 2. shared_db.path from config  (system → user → project precedence)
 3. ~/.config/qxub/qxub.db  (per-user fallback)
 
-All tables live in a single SQLite file.  WAL mode is enabled for safe
-concurrent access from multiple workflow nodes.
+All tables live in a single SQLite file, in DELETE journal mode (WAL's
+mmap'd -shm file is unsafe on shared filesystems, #75). Connections come
+from ``connection.py``, which retries transient lock and I/O errors and
+creates the schema only when the database's ``user_version`` is behind.
 """
 
 import base64
@@ -22,6 +24,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from .connection import connect
 
 # Tracks (keys of) warnings already emitted this process so a persistently
 # broken DB surfaces once rather than on every single job submission.
@@ -80,20 +84,16 @@ def get_db_path() -> Path:
 
 @contextmanager
 def get_connection(db_path: Optional[Path] = None):
-    """Context manager yielding a SQLite connection in WAL mode.
+    """Context manager yielding a connection to the job database.
 
-    Commits on clean exit, rolls back on exception.
+    The schema is ready, writes start with ``BEGIN IMMEDIATE``, and
+    transient errors are retried (see ``connection.py``). Commits on clean
+    exit, rolls back on exception.
     """
     if db_path is None:
         db_path = get_db_path()
 
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    conn = sqlite3.connect(str(db_path), timeout=5.0)
-    conn.execute("PRAGMA journal_mode=DELETE")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("PRAGMA mmap_size=0")
+    conn = connect(db_path)
     conn.row_factory = sqlite3.Row
 
     try:
@@ -112,131 +112,138 @@ def get_connection(db_path: Optional[Path] = None):
 
 
 def init_db(db_path: Optional[Path] = None) -> None:
-    """Create or migrate the unified qxub database schema.
+    """Create or migrate the qxub database schema if it is out of date.
 
-    This is idempotent — safe to call on every startup.
+    Cheap after the first call in a process: see ``connection.ensure_schema``.
+    """
+    if db_path is None:
+        db_path = get_db_path()
+    connect(db_path).close()
+
+
+def create_queue_schema(conn) -> None:
+    """Create or migrate the queue tables. Idempotent; does not commit.
+
+    Called by ``connection.ensure_schema`` inside its transaction.
 
     Tables created:
     - ``queue``         — virtual job IDs + PBS mapping (Phase 2+)
     - ``project_jobs``  — PBS-level job tracking across users
     - ``meta``          — key/value store for DB-level state (active_count, etc.)
     """
-    with get_connection(db_path) as conn:
-        # Heal a legacy (pre-unified) queue table before anything touches it,
-        # otherwise CREATE TABLE IF NOT EXISTS is a no-op and every insert /
-        # index fails with "no such column" against the old schema.
-        _rebuild_legacy_queue_schema(conn)
+    # Heal a legacy (pre-unified) queue table before anything touches it,
+    # otherwise CREATE TABLE IF NOT EXISTS is a no-op and every insert /
+    # index fails with "no such column" against the old schema.
+    _rebuild_legacy_queue_schema(conn)
 
-        # ------------------------------------------------------------------
-        # queue: unified job table — virtual ID as PK, PBS ID nullable
-        # ------------------------------------------------------------------
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS queue (
-                entry_id         TEXT PRIMARY KEY,
-                submitted_at     TEXT NOT NULL,
-                user             TEXT NOT NULL,
-                tags             TEXT DEFAULT '[]',
-                squashable       INTEGER DEFAULT 0,
-                squash_condition TEXT,
-                squash_batch_id  TEXT,
-                command_b64      TEXT NOT NULL,
-                command          TEXT,
-                working_dir      TEXT,
-                exec_context     TEXT,
-                resources        TEXT,
-                status           TEXT DEFAULT 'initiated',
-                pbs_job_id       TEXT,
-                initiated_at     TEXT,
-                dispatched_at    TEXT,
-                started_at       TEXT,
-                completed_at     TEXT,
-                last_status_update TEXT,
-                exit_code        INTEGER,
-
-                -- Identity / paths
-                username         TEXT,
-                joblog_path      TEXT,
-
-                -- PBS execution details
-                queue_name       TEXT,
-                hostname         TEXT,
-
-                -- Requested resources (standardised units)
-                mem_requested_mb    INTEGER,
-                time_requested_sec  INTEGER,
-                cpus_requested      INTEGER,
-                jobfs_requested_mb  INTEGER,
-
-                -- Used resources
-                mem_used_mb         INTEGER,
-                time_used_sec       INTEGER,
-                cpus_used           INTEGER,
-                jobfs_used_mb       INTEGER,
-                cpu_percent         REAL,
-
-                -- Efficiency metrics (%%)
-                mem_efficiency      REAL,
-                time_efficiency     REAL,
-                cpu_efficiency      REAL,
-                jobfs_efficiency    REAL,
-
-                -- Timing
-                queue_wait_sec      INTEGER,
-                execution_sec       INTEGER
-            )
+    # ------------------------------------------------------------------
+    # queue: unified job table — virtual ID as PK, PBS ID nullable
+    # ------------------------------------------------------------------
+    conn.execute(
         """
-        )
+        CREATE TABLE IF NOT EXISTS queue (
+            entry_id         TEXT PRIMARY KEY,
+            submitted_at     TEXT NOT NULL,
+            user             TEXT NOT NULL,
+            tags             TEXT DEFAULT '[]',
+            squashable       INTEGER DEFAULT 0,
+            squash_condition TEXT,
+            squash_batch_id  TEXT,
+            command_b64      TEXT NOT NULL,
+            command          TEXT,
+            working_dir      TEXT,
+            exec_context     TEXT,
+            resources        TEXT,
+            status           TEXT DEFAULT 'initiated',
+            pbs_job_id       TEXT,
+            initiated_at     TEXT,
+            dispatched_at    TEXT,
+            started_at       TEXT,
+            completed_at     TEXT,
+            last_status_update TEXT,
+            exit_code        INTEGER,
 
-        # ------------------------------------------------------------------
-        # project_jobs: PBS-level job tracking (all users on project)
-        # ------------------------------------------------------------------
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS project_jobs (
-                pbs_job_id          TEXT PRIMARY KEY,
-                entry_id            TEXT,
-                user                TEXT NOT NULL,
-                submitted_at        TEXT NOT NULL,
-                started_at          TEXT,
-                completed_at        TEXT,
-                status              TEXT DEFAULT 'submitted',
-                exit_code           INTEGER,
-                tags                TEXT DEFAULT '[]',
-                resources_requested TEXT,
-                resources_used      TEXT
-            )
+            -- Identity / paths
+            username         TEXT,
+            joblog_path      TEXT,
+
+            -- PBS execution details
+            queue_name       TEXT,
+            hostname         TEXT,
+
+            -- Requested resources (standardised units)
+            mem_requested_mb    INTEGER,
+            time_requested_sec  INTEGER,
+            cpus_requested      INTEGER,
+            jobfs_requested_mb  INTEGER,
+
+            -- Used resources
+            mem_used_mb         INTEGER,
+            time_used_sec       INTEGER,
+            cpus_used           INTEGER,
+            jobfs_used_mb       INTEGER,
+            cpu_percent         REAL,
+
+            -- Efficiency metrics (%%)
+            mem_efficiency      REAL,
+            time_efficiency     REAL,
+            cpu_efficiency      REAL,
+            jobfs_efficiency    REAL,
+
+            -- Timing
+            queue_wait_sec      INTEGER,
+            execution_sec       INTEGER
+        )
+    """
+    )
+
+    # ------------------------------------------------------------------
+    # project_jobs: PBS-level job tracking (all users on project)
+    # ------------------------------------------------------------------
+    conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS project_jobs (
+            pbs_job_id          TEXT PRIMARY KEY,
+            entry_id            TEXT,
+            user                TEXT NOT NULL,
+            submitted_at        TEXT NOT NULL,
+            started_at          TEXT,
+            completed_at        TEXT,
+            status              TEXT DEFAULT 'submitted',
+            exit_code           INTEGER,
+            tags                TEXT DEFAULT '[]',
+            resources_requested TEXT,
+            resources_used      TEXT
         )
+    """
+    )
 
-        # ------------------------------------------------------------------
-        # meta: key-value store (e.g. active_count)
-        # ------------------------------------------------------------------
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS meta (
-                key        TEXT PRIMARY KEY,
-                value      TEXT,
-                updated_at TEXT
-            )
+    # ------------------------------------------------------------------
+    # meta: key-value store (e.g. active_count)
+    # ------------------------------------------------------------------
+    conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS meta (
+            key        TEXT PRIMARY KEY,
+            value      TEXT,
+            updated_at TEXT
         )
+    """
+    )
 
-        # Useful indexes
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_queue_pbs_job_id ON queue(pbs_job_id)"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON queue(status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_user ON queue(user)")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_project_jobs_status ON project_jobs(status)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_project_jobs_user ON project_jobs(user)"
-        )
+    # Useful indexes
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_pbs_job_id ON queue(pbs_job_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_status ON queue(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_queue_user ON queue(user)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_jobs_status ON project_jobs(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_jobs_user ON project_jobs(user)"
+    )
 
-        # Schema migration for existing queue tables
-        _migrate_queue_schema(conn)
+    # Schema migration for existing queue tables
+    _migrate_queue_schema(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -330,22 +337,15 @@ def _rebuild_legacy_queue_schema(conn) -> None:
 def _migrate_queue_schema(conn) -> None:
     """Add new resource-tracking columns to an existing ``queue`` table.
 
-    Idempotent — safe to run on every startup.
+    Idempotent. Errors propagate: this runs inside ``ensure_schema``'s
+    transaction, which stamps ``user_version``, and a swallowed failure
+    would mark the database current without the column.
     """
-    try:
-        cursor = conn.execute("PRAGMA table_info(queue)")
-        existing = {row[1] for row in cursor.fetchall()}
-
-        for col_name, col_type in _QUEUE_NEW_COLUMNS:
-            if col_name not in existing:
-                conn.execute(f"ALTER TABLE queue ADD COLUMN {col_name} {col_type}")
-                logger.debug("queue: added column %s %s", col_name, col_type)
-
-        # Backfill: change old default status 'dispatched' to keep working
-        # (new default is 'initiated' but existing rows already have a status)
-        conn.commit()
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Queue schema migration failed (may be normal): %s", exc)
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(queue)")}
+    for col_name, col_type in _QUEUE_NEW_COLUMNS:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE queue ADD COLUMN {col_name} {col_type}")
+            logger.debug("queue: added column %s %s", col_name, col_type)
 
 
 # ---------------------------------------------------------------------------
