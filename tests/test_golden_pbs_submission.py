@@ -124,6 +124,7 @@ def normalise(text: str, sandbox) -> str:
     text = re.sub(r"qxub_path=[^,\s]+", "qxub_path=<QXUB_PATH>", text)
     text = re.sub(r"qxub_python=[^,\s]+", "qxub_python=<PYTHON>", text)
     text = re.sub(r"qxub_submit_host=[^,\s]+", "qxub_submit_host=<HOST>", text)
+    text = re.sub(r"qx-[0-9a-f]{8}-[0-9a-f-]{27}", "<RUN_ID>", text)
     return text
 
 

@@ -20,8 +20,8 @@ import click
 
 from ..core.scheduler import QsubError, qsub, qsub_var_value
 from ..history import history_manager
-from ..queue import create_queue_entry, update_queue_entry
-from ..queue.db import get_db_path
+from ..queue import create_queue_entry, runs, update_queue_entry
+from ..queue.db import new_virtual_id
 from ..resources import resource_tracker
 
 
@@ -154,10 +154,6 @@ class ExecutionContext:
             vars_b64 = base64.b64encode(vars_str.encode("utf-8")).decode("ascii")
             submission_vars += f',user_vars_b64="{vars_b64}"'
 
-        # Pass the resolved DB path so job scripts can write status to the right DB
-        db_path = str(get_db_path())
-        submission_vars += f",QXUB_SHARED_DB={db_path}"
-
         # Check if Slack/Discord notifications are configured
         if ctx_obj.get("notify") and self._has_push_notifications(ctx_obj):
             submission_vars += ",qxub_notify=true"
@@ -218,6 +214,33 @@ class ExecutionContext:
         logger.debug("Post-commands: %s", post)
 
 
+def _run_record_fields(ctx_obj: dict, command, execution_context) -> dict:
+    """What the run file records at submission (see ``qxub.queue.runs``)."""
+    from datetime import datetime
+
+    cmd_str = " ".join(command)
+    return {
+        "state": "submitted",
+        "submitted_at": datetime.now().isoformat(timespec="seconds"),
+        "user": os.environ.get("USER", ""),
+        "submit_host": os.uname().nodename,
+        "command_b64": base64.b64encode(cmd_str.encode("utf-8")).decode("ascii"),
+        "working_dir": ctx_obj.get("execdir") or os.getcwd(),
+        "exec_context": {
+            "type": execution_context.context_type,
+            "value": execution_context.context_value,
+        },
+        "queue": ctx_obj.get("queue"),
+        "job_name": ctx_obj.get("name"),
+        "project": ctx_obj.get("project"),
+        "resources": list(ctx_obj.get("resources") or []),
+        "tags": list(ctx_obj.get("tags") or []),
+        "joblog": ctx_obj.get("joblog"),
+        "out": ctx_obj.get("out"),
+        "err": ctx_obj.get("err"),
+    }
+
+
 def execute_unified(
     ctx,
     command: tuple,
@@ -256,6 +279,17 @@ def execute_unified(
     submission_vars = execution_context.build_submission_vars(
         command, ctx_obj, pre, post, bind, user_vars
     )
+
+    # The run ID names this run's record file, which the job updates instead
+    # of writing the job database (docs/dev/sqlite-robustness.md, Phase 2).
+    run_id = new_virtual_id()
+    run_path = None
+    if not ctx_obj["dry"]:
+        run_path = runs.write_submitted(
+            run_id,
+            _run_record_fields(ctx_obj, command, execution_context),
+        )
+    submission_vars += runs.submission_vars(run_id, run_path)
 
     # Build final submission command
     submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
@@ -317,6 +351,7 @@ def execute_unified(
             joblog_path=ctx_obj.get("joblog"),
             queue_name=ctx_obj.get("queue"),
             cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
+            entry_id=run_id,
         )
     except Exception as e:
         logger.debug("Failed to create queue entry: %s", e)

@@ -81,6 +81,7 @@ def status_cli(ctx):
 def list(status, limit, show_all, id_only):
     """List recent jobs with their status."""
 
+    resource_tracker.sync_from_run_files()
     if status:
         jobs = resource_tracker.get_jobs_by_status(status=status, limit=limit)
         title = f"Jobs with status: {status}"
@@ -134,6 +135,7 @@ def list(status, limit, show_all, id_only):
 def summary():
     """Show summary of job counts by status."""
 
+    resource_tracker.sync_from_run_files()
     status_counts = resource_tracker.get_status_summary()
 
     if not status_counts:
@@ -175,6 +177,7 @@ def show(job_id):
     if not job_id.endswith(".gadi-pbs"):
         job_id = f"{job_id}.gadi-pbs"
 
+    resource_tracker.sync_from_run_files([job_id])
     job = resource_tracker.get_job_status(job_id)
 
     if not job:
@@ -360,6 +363,7 @@ def check(job_id, output_format, snakemake, log_dir, audit):
     #    (e.g. just submitted, or pre-file-status era).
     # -------------------------------------------------------------------
     try:
+        resource_tracker.sync_from_run_files([job_id])
         job_info = resource_tracker.get_job_status(job_id)
     except DatabaseError as exc:
         logger.debug("Database error during status check: %s", exc)

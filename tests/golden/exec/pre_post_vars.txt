@@ -13,7 +13,8 @@ qsub
     pre_cmd_b64=ZWNobyBzdGFydA==
     post_cmd_b64=ZWNobyBkb25l
     user_vars_b64=Rk9PPWJhcjtBPTE7Qj0y
-    QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
+    QXUB_RUN_ID=<RUN_ID>
+    QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
 -N
 env-<TIMESTAMP>
 -q

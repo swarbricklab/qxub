@@ -15,45 +15,28 @@ echo "🏠 Hostname: $(hostname)"
 STATUS_DIR="${out%/*}/status"
 mkdir -p "$STATUS_DIR"
 
-# Python for the DB status updates: the interpreter that ran qxub at
-# submission, so the same qxub install is imported here.
-QXUB_PYTHON="${qxub_python:-python3}"
-
-# DB status helper function
-update_job_status() {
-    local status="$1"
-    local exit_code="${2:-0}"
-    if command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
-        "$QXUB_PYTHON" -c "
-try:
-    from qxub.resources.tracker import resource_tracker
-    if '$status' == 'running':
-        resource_tracker.update_job_status('${PBS_JOBID:-unknown}', 'running')
-    else:
-        joblog = '${out%.out}.log'
-        resource_tracker.finalize_job('${PBS_JOBID:-unknown}', int('$exit_code'), joblog)
-except Exception:
-    pass
-" 2>/dev/null || true
-    fi
-    if [ -n "$QXUB_SHARED_DB" ] && command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
-        "$QXUB_PYTHON" -c "
-try:
-    from qxub.queue.db import mark_running, mark_complete
-    if '$status' == 'running':
-        mark_running('${PBS_JOBID:-unknown}', db_path='$QXUB_SHARED_DB')
-    elif '$status' in ('completed', 'failed'):
-        mark_complete('${PBS_JOBID:-unknown}', int('$exit_code'), db_path='$QXUB_SHARED_DB')
-except Exception:
-    pass
-" 2>/dev/null || true
-    fi
+# Run record: one file per run ($QXUB_RUN_FILE), replaced by rename on each
+# update. Jobs never open the job database: on Lustre with localflock,
+# SQLite writes from many nodes corrupt it (docs/dev/sqlite-robustness.md).
+qxub_run_update() {
+    [ -n "${QXUB_RUN_FILE:-}" ] || return 0
+    local tmp="${QXUB_RUN_FILE%/*}/.${QXUB_RUN_FILE##*/}.$$.tmp"
+    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null
+    {
+        if [ -f "$QXUB_RUN_FILE" ]; then cat "$QXUB_RUN_FILE"; fi
+        printf '%s
+' "$@"
+    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
 }
 
 # Mark job as started
 echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "$PBS_JOBID" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
-update_job_status "running"
+qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=${PBS_JOBID:-}"
+# Every exit path (success, the ERR trap's exit, an explicit exit) records
+# the final state. A job killed by PBS may skip this; the joblog covers it.
+trap 'qxub_run_update state=finished "exit_code=$?" "finished_at=$(date -Iseconds)"' EXIT
 
 # Decode base64 encoded commands
 if [ -n "$cmd_b64" ]; then
@@ -94,7 +77,6 @@ error_handler() {
     echo "❌ Failed command: $BASH_COMMAND"
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    update_job_status "failed" "$exit_code"
 
     # Queue Slack/Discord notification if enabled
     if [ "$qxub_notify" = "true" ]; then
@@ -233,7 +215,6 @@ else
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 fi
 
-update_job_status "completed" "0"
 
 # Queue Slack/Discord notification if enabled
 if [ "$qxub_notify" = "true" ]; then

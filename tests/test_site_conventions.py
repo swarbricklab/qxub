@@ -179,10 +179,13 @@ def test_job_scripts_have_no_site_specific_values(script):
 
 
 @pytest.mark.parametrize("script", JOBSCRIPTS, ids=[p.name for p in JOBSCRIPTS])
-def test_job_scripts_use_the_submitting_python(script):
+def test_job_scripts_never_open_the_job_database(script):
+    """Jobs update their run file instead (docs/dev/sqlite-robustness.md)."""
     text = script.read_text()
-    assert 'QXUB_PYTHON="${qxub_python:-python3}"' in text
-    assert "python3 -c" not in text.replace('"$QXUB_PYTHON" -c', "")
+    for value in ("python", "qxub.queue", "qxub.resources", "QXUB_SHARED_DB"):
+        assert value not in text, f"{script.name} contains {value!r}"
+    assert "qxub_run_update state=running" in text
+    assert "trap 'qxub_run_update state=finished" in text
 
 
 # -- every submission path passes the submitting Python ------------------------

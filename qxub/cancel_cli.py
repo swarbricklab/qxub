@@ -248,6 +248,7 @@ def cancel_by_status(status, dry_run, force, quiet, limit):
 
     # Get jobs from qxub database
     tracker = ResourceTracker()
+    tracker.sync_from_run_files()
     jobs = tracker.get_jobs_by_status(status, limit)
 
     if not jobs:
@@ -335,6 +336,7 @@ def cancel_by_filter(
 
     # Get all jobs and apply filters
     tracker = ResourceTracker()
+    tracker.sync_from_run_files()
     jobs = tracker.get_jobs_by_status(limit=None)  # Get all jobs first
 
     if not jobs:

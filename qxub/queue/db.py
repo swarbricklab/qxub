@@ -51,7 +51,8 @@ def get_db_path() -> Path:
 
     Priority:
     1. ``QXUB_DB_PATH`` environment variable (testing / manual override)
-    2. ``QXUB_SHARED_DB`` environment variable (set by job scripts on compute nodes)
+    2. ``QXUB_SHARED_DB`` environment variable (manual override; jobs no longer
+       receive it, see ``qxub.queue.runs``)
     3. ``shared_db.path`` from the loaded config hierarchy
     4. ``~/.config/qxub/qxub.db`` per-user fallback
     """
@@ -379,6 +380,7 @@ def create_queue_entry(
     queue_name: Optional[str] = None,
     cpus_requested: Optional[int] = None,
     db_path: Optional[Path] = None,
+    entry_id: Optional[str] = None,
 ) -> str:
     """Register a job in the unified queue table.
 
@@ -397,11 +399,13 @@ def create_queue_entry(
         queue_name:       PBS queue name (e.g. ``normal``, ``express``).
         cpus_requested:   Number of CPUs requested.
         db_path:          Override DB path (defaults to ``get_db_path()``).
+        entry_id:         Use this ID (the run ID, ``QXUB_RUN_ID``) instead of
+                          generating one.
 
     Returns:
         The virtual job ID string (``qx-{uuid4}``).
     """
-    entry_id = new_virtual_id()
+    entry_id = entry_id or new_virtual_id()
     user = os.environ.get("USER", "unknown")
     now = datetime.now().isoformat()
     command_b64 = base64.b64encode(command.encode("utf-8")).decode("ascii")
@@ -594,7 +598,9 @@ def get_entries_bulk(
 def mark_running(pbs_job_id: str, db_path: Optional[Path] = None) -> None:
     """Mark a PBS job as running in ``project_jobs`` and ``queue``.
 
-    Called from within the running job script (via ``QXUB_SHARED_DB``).
+    Job scripts no longer call this; they update their run file instead
+    (``qxub.queue.runs``), and readers apply it via
+    ``ResourceTracker.sync_from_run_files``.
     Failures are silently swallowed — status files remain the authoritative
     fallback.
     """
@@ -624,7 +630,9 @@ def mark_complete(
 ) -> None:
     """Mark a PBS job as completed or failed in ``project_jobs`` and ``queue``.
 
-    Called from within the running job script (via ``QXUB_SHARED_DB``).
+    Job scripts no longer call this; they update their run file instead
+    (``qxub.queue.runs``), and readers apply it via
+    ``ResourceTracker.sync_from_run_files``.
     Failures are silently swallowed.
     """
     now = datetime.now().isoformat()
