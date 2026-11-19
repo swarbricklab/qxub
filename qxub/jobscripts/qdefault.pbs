@@ -72,8 +72,16 @@ qxub_run_update() {
 # Record that the job is running
 qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=${PBS_JOBID:-}"
 # Every exit path (success, the ERR trap's exit, an explicit exit) records
-# the final state. A job killed by PBS may skip this; the joblog covers it.
-trap 'qxub_run_update state=finished "exit_code=$?" "finished_at=$(date -Iseconds)"' EXIT
+# the final state. PBS stops a job (walltime, qdel, memory) with SIGTERM;
+# without a TERM trap bash would run the EXIT trap with the last completed
+# command's status, often 0, so a killed job looked successful. The signal
+# traps exit with 128+signal instead. A job that gets SIGKILL records
+# nothing and stays "running"; the joblog settles it. A user command that
+# sets its own EXIT trap replaces this one, because it is eval'ed here.
+trap 'qxub_run_update state=finished "exit_code=$?" "signal=${QXUB_SIGNAL:-}" "finished_at=$(date -Iseconds)"' EXIT
+trap 'QXUB_SIGNAL=TERM; exit 143' TERM
+trap 'QXUB_SIGNAL=INT; exit 130' INT
+trap 'QXUB_SIGNAL=HUP; exit 129' HUP
 
 # Error handler function
 error_handler() {

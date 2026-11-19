@@ -9,7 +9,9 @@ it to the database.
 
 import base64
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -70,8 +72,8 @@ def test_unwritable_run_dir_warns_once_and_returns_none(tmp_path, monkeypatch, c
 # -- the job script updates it ------------------------------------------------------
 
 
-def run_template(tmp_path, command: str, run_file: Path) -> subprocess.CompletedProcess:
-    env = {
+def template_env(tmp_path, command: str, run_file: Path) -> dict:
+    return {
         "PATH": "/usr/bin:/bin",
         "HOME": str(tmp_path),
         "cmd_b64": base64.b64encode(command.encode()).decode(),
@@ -83,8 +85,15 @@ def run_template(tmp_path, command: str, run_file: Path) -> subprocess.Completed
         "QXUB_RUN_ID": "qx-1",
         "QXUB_RUN_FILE": str(run_file),
     }
+
+
+def run_template(tmp_path, command: str, run_file: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(TEMPLATE)], env=env, capture_output=True, text=True, timeout=30
+        ["bash", str(TEMPLATE)],
+        env=template_env(tmp_path, command, run_file),
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -100,10 +109,47 @@ def test_job_records_running_and_finished(tmp_path, command, code):
     record = runs.read_run(run_file)
     assert record["state"] == "finished"
     assert runs.exit_code(record) == code
+    assert record["signal"] == ""
     assert record["native_job_id"] == "123.gadi-pbs"
     assert record["started_at"] and record["finished_at"] and record["host"]
     assert record["queue"] == "normal", "submission fields are kept"
     assert [p.name for p in run_file.parent.iterdir()] == ["qx-1.run"]
+
+
+@pytest.mark.parametrize(
+    "sig, code, name",
+    [
+        (signal.SIGTERM, 143, "TERM"),
+        (signal.SIGINT, 130, "INT"),
+        (signal.SIGHUP, 129, "HUP"),
+    ],
+)
+def test_job_killed_by_a_signal_is_not_recorded_as_success(tmp_path, sig, code, name):
+    """Review of #133: walltime and qdel kills were recorded as exit_code=0.
+
+    PBS sends SIGTERM to the job's processes, as here to the process group.
+    """
+    run_file = tmp_path / "runs" / "qx-1.run"
+    proc = subprocess.Popen(
+        ["bash", str(TEMPLATE)],
+        env=template_env(tmp_path, "sleep 30", run_file),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.time() + 20
+    while (runs.read_run(run_file) or {}).get("state") != "running":
+        assert time.time() < deadline, "job never recorded state=running"
+        time.sleep(0.05)
+    time.sleep(0.3)  # let it reach the main command
+
+    os.killpg(proc.pid, sig)
+    proc.wait(timeout=20)
+
+    record = runs.read_run(run_file)
+    assert record["state"] == "finished"
+    assert runs.exit_code(record) == code
+    assert record["signal"] == name
 
 
 def test_job_creates_the_run_file_if_submission_could_not(tmp_path):
