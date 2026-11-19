@@ -45,40 +45,19 @@ echo "📍 Current directory: $(pwd)"
 # Strict mode with error handling
 set -e
 
-# Python for the DB status updates: the interpreter that ran qxub at
-# submission, so the same qxub install is imported here.
-QXUB_PYTHON="${qxub_python:-python3}"
-
-# Update database status function (defined early so error handler can use it)
-update_job_status() {
-    local status="$1"
-    local exit_code="${2:-0}"
-    if command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
-        "$QXUB_PYTHON" -c "
-try:
-    from qxub.resources.tracker import resource_tracker
-    if '$status' == 'running':
-        resource_tracker.update_job_status('${PBS_JOBID:-unknown}', 'running')
-    else:
-        joblog = '${out%.out}.log'
-        resource_tracker.finalize_job('${PBS_JOBID:-unknown}', int('$exit_code'), joblog)
-except Exception:
-    pass
-" 2>/dev/null || true
-    fi
-    # Also write to the shared queue DB if QXUB_SHARED_DB is set (Phase 2+)
-    if [ -n "$QXUB_SHARED_DB" ] && command -v "$QXUB_PYTHON" > /dev/null 2>&1; then
-        "$QXUB_PYTHON" -c "
-try:
-    from qxub.queue.db import mark_running, mark_complete
-    if '$status' == 'running':
-        mark_running('${PBS_JOBID:-unknown}', db_path='$QXUB_SHARED_DB')
-    elif '$status' in ('completed', 'failed'):
-        mark_complete('${PBS_JOBID:-unknown}', int('$exit_code'), db_path='$QXUB_SHARED_DB')
-except Exception:
-    pass
-" 2>/dev/null || true
-    fi
+# Run record: one file per run ($QXUB_RUN_FILE), replaced by rename on each
+# update. Jobs never open the job database: on Lustre with localflock,
+# SQLite writes from many nodes corrupt it (docs/dev/sqlite-robustness.md).
+qxub_run_update() {
+    [ -n "${QXUB_RUN_FILE:-}" ] || return 0
+    local tmp="${QXUB_RUN_FILE%/*}/.${QXUB_RUN_FILE##*/}.$$.tmp"
+    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null
+    {
+        if [ -f "$QXUB_RUN_FILE" ]; then cat "$QXUB_RUN_FILE"; fi
+        printf '%s
+' "$@"
+    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    return 0
 }
 
 # Error handler function
@@ -90,8 +69,6 @@ error_handler() {
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 
-    # Update database status to 'failed'
-    update_job_status "failed" "$exit_code"
 
     # Queue Slack/Discord notification if enabled
     if [ "$qxub_notify" = "true" ]; then
@@ -119,8 +96,19 @@ echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
 echo "🚀 Job started at $(date -Iseconds)"
 
-# Mark job as running
-update_job_status "running"
+# Record that the job is running
+qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=${PBS_JOBID:-}"
+# Every exit path (success, the ERR trap's exit, an explicit exit) records
+# the final state. PBS stops a job (walltime, qdel, memory) with SIGTERM;
+# without a TERM trap bash would run the EXIT trap with the last completed
+# command's status, often 0, so a killed job looked successful. The signal
+# traps exit with 128+signal instead. A job that gets SIGKILL records
+# nothing and stays "running"; the joblog settles it. A user command that
+# sets its own EXIT trap replaces this one, because it is eval'ed here.
+trap 'qxub_run_update state=finished "exit_code=$?" "signal=${QXUB_SIGNAL:-}" "finished_at=$(date -Iseconds)"' EXIT
+trap 'QXUB_SIGNAL=TERM; exit 143' TERM
+trap 'QXUB_SIGNAL=INT; exit 130' INT
+trap 'QXUB_SIGNAL=HUP; exit 129' HUP
 
 # Activate conda environment
 echo "🔄 Activating conda environment: $env"
@@ -135,7 +123,6 @@ if ! command -v conda > /dev/null 2>&1; then
     echo "   4. Check that your conda installation path is accessible from compute nodes"
     echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    update_job_status "failed"
     exit 1
 fi
 
@@ -150,7 +137,6 @@ if ! eval "$(conda shell.bash hook)" 2>&1; then
     echo "   4. Ensure conda storage volumes are mounted in your PBS job"
     echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    update_job_status "failed"
     exit 1
 fi
 
@@ -163,7 +149,6 @@ if ! conda activate $env 2>&1; then
     echo "   3. Verify the environment name is spelled correctly"
     echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    update_job_status "failed"
     exit 1
 fi
 
@@ -174,7 +159,6 @@ if [ "$ACTIVATED_ENV_NAME" != "$env" ]; then
     echo "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
     echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    update_job_status "failed"
     exit 1
 fi
 
@@ -289,8 +273,6 @@ else
     echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
 fi
 
-# Update database status to 'completed'
-update_job_status "completed" "0"
 
 # Queue Slack/Discord notification if enabled
 if [ "$qxub_notify" = "true" ]; then

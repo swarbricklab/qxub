@@ -756,7 +756,7 @@ class ResourceTracker:
     def finalize_job(self, job_id: str, exit_code: int, joblog_path: str) -> bool:
         """Record job completion: update status and exit code.
 
-        Called from within the PBS job script at end-of-job.
+        Job scripts no longer call this (see ``qxub.queue.runs``).
         Resource data (mem, walltime, cpu) is NOT collected here because PBS
         only appends the resource section to the joblog AFTER the script exits.
         The joblog_path is stored so that ``backfill_resources()`` can pick it
@@ -946,6 +946,108 @@ class ResourceTracker:
             except Exception as exc:  # pylint: disable=broad-except
                 logger.debug("Backfill failed for %s: %s", row["job_id"], exc)
         return filled
+
+    def sync_from_run_files(
+        self, pbs_job_ids: Optional[Sequence[str]] = None, limit: int = 500
+    ) -> int:
+        """Apply run-file state to unfinished jobs in the database.
+
+        Jobs no longer write the database themselves; they update their run
+        file (``qxub.queue.runs``). Readers call this first so ``list``,
+        ``summary``, ``show`` and ``cancel`` see current states. Only rows
+        not yet finished are looked at (the ``limit`` most recent, or just
+        ``pbs_job_ids``), and only changed rows are written, in one short
+        transaction from this (login) node.
+
+        Returns the number of jobs updated. Never raises.
+        """
+        from ..queue import runs  # pylint: disable=import-outside-toplevel
+
+        try:
+            with self._connect() as conn:
+                query = (
+                    "SELECT entry_id, pbs_job_id, status FROM queue"
+                    " WHERE status IN ('initiated', 'dispatched', 'submitted', 'running')"
+                )
+                params: List[Any] = []
+                if pbs_job_ids is not None:
+                    if not pbs_job_ids:
+                        return 0
+                    query += " AND pbs_job_id IN (%s)" % ",".join(
+                        "?" * len(pbs_job_ids)
+                    )
+                    params.extend(pbs_job_ids)
+                query += " ORDER BY submitted_at DESC LIMIT ?"
+                params.append(limit)
+                rows = conn.execute(query, params).fetchall()
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("sync_from_run_files: query failed: %s", exc)
+            return 0
+
+        updates = []
+        for entry_id, pbs_job_id, status in rows:
+            record = runs.read_run(runs.run_file(entry_id))
+            if not record:
+                continue
+            state = record.get("state")
+            job_id = pbs_job_id or record.get("native_job_id") or None
+            if state == "finished":
+                code = runs.exit_code(record)
+                new_status = "completed" if code == 0 else "failed"
+            elif state == "running" and status != "running":
+                new_status, code = "running", None
+            else:
+                continue
+            updates.append(
+                (
+                    entry_id,
+                    job_id,
+                    new_status,
+                    code,
+                    record.get("started_at") or None,
+                    record.get("finished_at") or None,
+                )
+            )
+
+        if not updates:
+            return 0
+        now = datetime.now().isoformat()
+        try:
+            with self._connect() as conn:
+                for entry_id, job_id, status, code, started, finished in updates:
+                    conn.execute(
+                        """UPDATE queue
+                           SET status=?, exit_code=COALESCE(?, exit_code),
+                               started_at=COALESCE(started_at, ?),
+                               completed_at=COALESCE(?, completed_at),
+                               pbs_job_id=COALESCE(pbs_job_id, ?),
+                               last_status_update=?
+                           WHERE entry_id=?""",
+                        (status, code, started, finished, job_id, now, entry_id),
+                    )
+                    if not job_id:
+                        continue
+                    conn.execute(
+                        """UPDATE job_resources
+                           SET status=?, exit_code=COALESCE(?, exit_code),
+                               started_at=COALESCE(started_at, ?),
+                               completed_at=COALESCE(?, completed_at),
+                               last_status_update=?
+                           WHERE job_id=?""",
+                        (status, code, started, finished, now, job_id),
+                    )
+                    conn.execute(
+                        """UPDATE project_jobs
+                           SET status=?, exit_code=COALESCE(?, exit_code),
+                               started_at=COALESCE(started_at, ?),
+                               completed_at=COALESCE(?, completed_at)
+                           WHERE pbs_job_id=?""",
+                        (status, code, started, finished, job_id),
+                    )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("sync_from_run_files: update failed: %s", exc)
+            return 0
+        return len(updates)
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job.

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
@@ -127,8 +128,8 @@ def submit_job(
     from ..config.handler import process_job_options
     from ..core.scheduler import QsubError, qsub, qsub_var_value
     from ..core.templates import get_template
-    from ..queue import create_queue_entry, update_queue_entry
-    from ..queue.db import get_db_path
+    from ..queue import create_queue_entry, runs, update_queue_entry
+    from ..queue.db import new_virtual_id
     from ..resources.tracker import resource_tracker
 
     # ------------------------------------------------------------------
@@ -267,9 +268,30 @@ def submit_job(
         post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
         submission_vars += f',post_cmd_b64="{post_b64}"'
 
-    # Shared DB path for job scripts
-    db_path = str(get_db_path())
-    submission_vars += f",QXUB_SHARED_DB={db_path}"
+    # Run file: the job updates it instead of writing the job database
+    # (docs/dev/sqlite-robustness.md, Phase 2).
+    run_id = new_virtual_id()
+    run_path = runs.write_submitted(
+        run_id,
+        {
+            "state": "submitted",
+            "submitted_at": datetime.now().isoformat(timespec="seconds"),
+            "user": os.environ.get("USER", ""),
+            "submit_host": os.uname().nodename,
+            "command_b64": cmd_b64,
+            "working_dir": exec_dir,
+            "exec_context": {"type": context_type, "value": context_value},
+            "queue": processed_params.get("queue"),
+            "job_name": processed_params.get("name"),
+            "project": processed_params.get("project"),
+            "resources": list(pbs_resources),
+            "tags": list(tags or []),
+            "joblog": processed_params.get("joblog"),
+            "out": processed_params.get("out"),
+            "err": processed_params.get("err"),
+        },
+    )
+    submission_vars += runs.submission_vars(run_id, run_path)
 
     # ------------------------------------------------------------------
     # Build qsub command
@@ -303,6 +325,7 @@ def submit_job(
             joblog_path=processed_params.get("joblog"),
             queue_name=processed_params.get("queue"),
             cpus_requested=ncpus if ncpus else None,
+            entry_id=run_id,
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Failed to create queue entry: %s", exc)

@@ -10,7 +10,8 @@ qsub
     qxub_path=<QXUB_PATH>
     qxub_python=<PYTHON>
     qxub_submit_host=<HOST>
-    QXUB_SHARED_DB=<HOME>/.config/qxub/qxub.db
+    QXUB_RUN_ID=<RUN_ID>
+    QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
 -N
 wget-<TIMESTAMP>
 -q
