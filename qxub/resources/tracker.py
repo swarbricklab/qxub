@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from ..queue.connection import BUSY_TIMEOUT_SECONDS, connect
 from .parser import size_to_bytes, time_to_seconds
 
 
@@ -73,11 +74,100 @@ def _resolve_tracker_db_path() -> Path:
     return resolved
 
 
-# Default timeout (seconds) for all sqlite connections.  The shared DB on
-# /g/data can experience lock contention when many concurrent qxtat check
-# processes race on the same file.  30 s is generous enough to ride out
-# filesystem latency spikes on Gadi /scratch.
-_SQLITE_TIMEOUT = 30
+# Busy timeout for each attempt; RetryingConnection retries on top of it.
+_SQLITE_TIMEOUT = BUSY_TIMEOUT_SECONDS
+# Status reads (qxtat check, polled by Snakemake) retry here three times on
+# top of the connection's own retries, so each attempt waits less.
+_STATUS_READ_TIMEOUT = 5.0
+
+
+def create_job_resources_schema(conn) -> None:
+    """Create or migrate the ``job_resources`` table. Idempotent; no commit.
+
+    Called by ``qxub.queue.connection.ensure_schema`` inside its transaction.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS job_resources (
+            job_id TEXT PRIMARY KEY,
+            timestamp TEXT NOT NULL,
+            command TEXT,
+            exit_code INTEGER,
+
+            -- Job status tracking (new for v3)
+            status TEXT DEFAULT 'submitted',
+            submitted_at TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            last_status_update TEXT,
+
+            -- Requested resources
+            mem_requested_mb INTEGER,
+            time_requested_sec INTEGER,
+            cpus_requested INTEGER,
+            jobfs_requested_mb INTEGER,
+
+            -- Used resources
+            mem_used_mb INTEGER,
+            time_used_sec INTEGER,
+            cpus_used INTEGER,
+            jobfs_used_mb INTEGER,
+            cpu_percent REAL,
+
+            -- Efficiency metrics (%)
+            mem_efficiency REAL,
+            time_efficiency REAL,
+            cpu_efficiency REAL,
+            jobfs_efficiency REAL,
+
+            -- Execution details
+            queue TEXT,
+            hostname TEXT,
+
+            -- Timing
+            queue_wait_sec INTEGER,
+            execution_sec INTEGER,
+
+            -- Tags
+            tags TEXT DEFAULT '[]',
+
+            -- Identity
+            username TEXT,
+
+            -- Path to PBS joblog for deferred resource backfill
+            joblog_path TEXT
+        )
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(job_resources)")}
+    if "status" not in columns:
+        logger.debug("Migrating job_resources to add status tracking columns")
+        conn.execute(
+            "ALTER TABLE job_resources ADD COLUMN status TEXT DEFAULT 'completed'"
+        )
+        for column in (
+            "submitted_at",
+            "started_at",
+            "completed_at",
+            "last_status_update",
+        ):
+            conn.execute(f"ALTER TABLE job_resources ADD COLUMN {column} TEXT")
+        conn.execute(
+            """
+            UPDATE job_resources
+            SET status='completed',
+                completed_at=timestamp,
+                last_status_update=timestamp
+            WHERE status IS NULL OR status = 'completed'
+            """
+        )
+    for column, column_type in (
+        ("tags", "TEXT DEFAULT '[]'"),
+        ("username", "TEXT"),
+        ("joblog_path", "TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE job_resources ADD COLUMN {column} {column_type}")
 
 
 class DatabaseError(Exception):
@@ -100,136 +190,16 @@ class ResourceTracker:
         self._init_database()
 
     def _connect(self, timeout: float = _SQLITE_TIMEOUT):
-        """Return a new SQLite connection with mmap disabled.
+        """A connection to the job database (see ``qxub.queue.connection``).
 
-        Disabling mmap (``PRAGMA mmap_size=0``) prevents SIGBUS crashes
-        on shared/network filesystems (Lustre, GPFS) where concurrent
-        writers can corrupt memory-mapped pages.
+        mmap is disabled, writes start with ``BEGIN IMMEDIATE``, transient
+        errors are retried, and the schema is created if out of date.
         """
-        conn = sqlite3.connect(self.db_path, timeout=timeout)
-        conn.execute("PRAGMA mmap_size=0")
-        return conn
+        return connect(self.db_path, timeout=timeout)
 
     def _init_database(self):
-        """Initialize SQLite database with resource tracking table."""
-        with self._connect() as conn:
-            # DELETE mode avoids -shm sidecar which is always mmap'd.
-            # WAL's -shm causes SIGBUS on shared filesystems (Lustre/GPFS).
-            conn.execute("PRAGMA journal_mode=DELETE")
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS job_resources (
-                    job_id TEXT PRIMARY KEY,
-                    timestamp TEXT NOT NULL,
-                    command TEXT,
-                    exit_code INTEGER,
-
-                    -- Job status tracking (new for v3)
-                    status TEXT DEFAULT 'submitted',
-                    submitted_at TEXT,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    last_status_update TEXT,
-
-                    -- Requested resources
-                    mem_requested_mb INTEGER,
-                    time_requested_sec INTEGER,
-                    cpus_requested INTEGER,
-                    jobfs_requested_mb INTEGER,
-
-                    -- Used resources
-                    mem_used_mb INTEGER,
-                    time_used_sec INTEGER,
-                    cpus_used INTEGER,
-                    jobfs_used_mb INTEGER,
-                    cpu_percent REAL,
-
-                    -- Efficiency metrics (%)
-                    mem_efficiency REAL,
-                    time_efficiency REAL,
-                    cpu_efficiency REAL,
-                    jobfs_efficiency REAL,
-
-                    -- Execution details
-                    queue TEXT,
-                    hostname TEXT,
-
-                    -- Timing
-                    queue_wait_sec INTEGER,
-                    execution_sec INTEGER,
-
-                    -- Tags
-                    tags TEXT DEFAULT '[]',
-
-                    -- Identity
-                    username TEXT,
-
-                    -- Path to PBS joblog for deferred resource backfill
-                    joblog_path TEXT
-                )
-            """
-            )
-            conn.commit()
-
-            # Migrate existing database if needed
-            self._migrate_database_schema(conn)
-
-    def _migrate_database_schema(self, conn):
-        """Add new status tracking columns to existing database."""
-        try:
-            # Check if status column exists
-            cursor = conn.execute("PRAGMA table_info(job_resources)")
-            columns = [row[1] for row in cursor.fetchall()]
-
-            if "status" not in columns:
-                logger.debug("Migrating database schema to add status tracking columns")
-
-                # Add new columns
-                conn.execute(
-                    "ALTER TABLE job_resources ADD COLUMN status TEXT DEFAULT 'completed'"
-                )
-                conn.execute("ALTER TABLE job_resources ADD COLUMN submitted_at TEXT")
-                conn.execute("ALTER TABLE job_resources ADD COLUMN started_at TEXT")
-                conn.execute("ALTER TABLE job_resources ADD COLUMN completed_at TEXT")
-                conn.execute(
-                    "ALTER TABLE job_resources ADD COLUMN last_status_update TEXT"
-                )
-
-                # Update existing records to have completed status and timestamps
-                conn.execute(
-                    """
-                    UPDATE job_resources
-                    SET status='completed',
-                        completed_at=timestamp,
-                        last_status_update=timestamp
-                    WHERE status IS NULL OR status = 'completed'
-                """
-                )
-
-                conn.commit()
-                logger.debug("Database schema migration completed")
-
-            if "tags" not in columns:
-                logger.debug("Migrating database schema to add tags column")
-                conn.execute(
-                    "ALTER TABLE job_resources ADD COLUMN tags TEXT DEFAULT '[]'"
-                )
-                conn.commit()
-                logger.debug("Tags column migration completed")
-
-            if "username" not in columns:
-                logger.debug("Migrating database schema to add username column")
-                conn.execute("ALTER TABLE job_resources ADD COLUMN username TEXT")
-                conn.commit()
-                logger.debug("Username column migration completed")
-
-            if "joblog_path" not in columns:
-                logger.debug("Migrating database schema to add joblog_path column")
-                conn.execute("ALTER TABLE job_resources ADD COLUMN joblog_path TEXT")
-                conn.commit()
-                logger.debug("joblog_path column migration completed")
-        except Exception as e:
-            logger.debug("Database migration failed (may be normal): %s", e)
+        """Make sure the schema exists (a single version read once it does)."""
+        self._connect().close()
 
     def log_job_resources(
         self, job_id: str, resource_data: Dict[str, Any], command: Optional[str] = None
@@ -898,9 +868,9 @@ class ResourceTracker:
 
         Returns the number of jobs successfully backfilled.
         """
-        from .parser import (  # pylint: disable=import-outside-toplevel
+        from .parser import (
             parse_joblog_resources,
-        )
+        )  # pylint: disable=import-outside-toplevel
 
         # ---- Phase 1: discover joblog paths for jobs that lack them ----------
         try:
@@ -993,7 +963,7 @@ class ResourceTracker:
         last_exc: Optional[Exception] = None
         for attempt in range(3):
             try:
-                with self._connect() as conn:
+                with self._connect(timeout=_STATUS_READ_TIMEOUT) as conn:
                     conn.row_factory = sqlite3.Row
 
                     # Try unified queue table first (new jobs)
