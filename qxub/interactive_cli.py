@@ -311,7 +311,50 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
         except Exception:
             pass
 
+    # The status files come from inside the job. They miss the final exit
+    # status and resource usage, and are not written at all if the session
+    # was killed (e.g. at walltime). Ask the scheduler once the job is over.
+    job_id = session_info.get("job_id")
+    if job_id:
+        final = _final_job_data(job_id)
+        if final:
+            session_info["resources"] = final
+            # PBS reports Exit_status = 0 for any 'qsub -I' session that
+            # ends normally, so the status file's value is the real one.
+            # A negative value means PBS killed the job (e.g. -29 at
+            # walltime), which the status file cannot know about.
+            exit_status = final.get("exit_status")
+            if exit_status is not None and (
+                exit_status < 0 or "exit_code" not in session_info
+            ):
+                session_info["exit_code"] = exit_status
+
     return session_info
+
+
+def _final_job_data(job_id: str, attempts: int = 3, delay: float = 2.0):
+    """Finished-job data from ``qstat -fx``, or ``None``.
+
+    The server may take a moment to record the exit status after an
+    interactive session ends, so retry briefly until it appears.
+    """
+    import time
+
+    from .core.scheduler import get_job_resource_data
+
+    data = None
+    for attempt in range(attempts):
+        try:
+            data = get_job_resource_data(job_id) or data
+        except Exception:  # pylint: disable=broad-except
+            pass
+        if data is None:
+            return None  # the scheduler doesn't know the job; waiting won't help
+        if data.get("exit_status") is not None:
+            return data
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return data
 
 
 def _build_interactive_script(
@@ -378,18 +421,36 @@ def _build_interactive_script(
                 'date +%s > "$QXUB_SESSION_DIR/start_time"',
                 'hostname > "$QXUB_SESSION_DIR/hostname"',
                 "",
-                "# Set up cleanup trap to write exit status",
+                "# Record how the session ended (called from _qxub_on_exit)",
                 "_qxub_write_status() {",
-                "    local exit_code=$?",
+                "    local exit_code=$1",
                 '    date +%s > "$QXUB_SESSION_DIR/end_time"',
                 '    echo "$exit_code" > "$QXUB_SESSION_DIR/exit_code"',
                 "    # Capture resource usage from qstat before job ends",
                 '    qstat -f "$PBS_JOBID" 2>/dev/null > "$QXUB_SESSION_DIR/qstat_output" || true',
                 "}",
-                "trap _qxub_write_status EXIT",
                 "",
             ]
         )
+
+    # One EXIT handler for everything: a shell has only one EXIT trap, so a
+    # second 'trap ... EXIT' would replace the first. The session itself runs
+    # as a child of this script (never 'exec'), so this handler still runs
+    # when the user leaves the session.
+    lines.extend(
+        [
+            "_qxub_on_exit() {",
+            "    local exit_code=$?",
+            "    if declare -F _qxub_post_cmd >/dev/null; then _qxub_post_cmd; fi",
+            "    if declare -F _qxub_write_status >/dev/null; then",
+            '        _qxub_write_status "$exit_code"',
+            "    fi",
+            '    if [ -n "${QXUB_RCFILE:-}" ]; then rm -f "$QXUB_RCFILE"; fi',
+            "}",
+            "trap _qxub_on_exit EXIT",
+            "",
+        ]
+    )
 
     lines.extend(
         [
@@ -587,22 +648,15 @@ def _build_interactive_script(
                 '    echo "✅ Post-command completed"',
                 "}",
                 "",
-                "# Trap EXIT to run post-command (best effort - may not run if killed)",
-                "trap _qxub_post_cmd EXIT",
-                "",
-                "# Provide shortcut function to cleanly exit",
-                "qxub_exit() {",
-                '    echo "👋 Exiting interactive session..."',
-                "    exit 0",
-                "}",
-                "echo \"💡 Tip: Run 'qxub_exit' to cleanly exit and run post-command\"",
+                "# _qxub_on_exit runs this once it is defined, i.e. only after the",
+                "# pre-command succeeded (best effort - may not run if killed)",
                 "",
             ]
         )
 
     # Main interactive part
     if container:
-        # Container mode: exec into singularity shell directly
+        # Container mode: run singularity shell as a child so the EXIT trap fires
         # Extract container basename for prompt
         container_name = container.split("/")[-1].replace(".sif", "")
         bind_opts = f"--bind {bind} " if bind else ""
@@ -621,12 +675,14 @@ def _build_interactive_script(
                 "# Set custom prompt for container shell",
                 f'export SINGULARITYENV_PS1="{container_prompt}"',
                 "",
-                f'exec singularity shell {bind_opts}"{container}"',
+                f'singularity shell {bind_opts}"{container}"',
+                "exit $?",
             ]
         )
     else:
         # Direct shell mode - create a custom rcfile that re-activates environment
-        # This is necessary because exec replaces the process, losing activation
+        # The new shell does not inherit shell functions such as conda's, so
+        # the rcfile activates the environment again
         lines.extend(
             [
                 "# Start interactive shell with environment",
@@ -659,8 +715,6 @@ def _build_interactive_script(
 
         lines.extend(
             [
-                "# Clean up the temp rcfile",
-                'rm -f "$QXUB_RCFILE" 2>/dev/null',
                 "RCEOF",
                 "",
             ]
@@ -734,7 +788,8 @@ def _build_interactive_script(
                     [
                         "# Use 'script' to create a pseudo-terminal for the command",
                         "# -e: return child's exit code, -q: quiet mode",
-                        f'exec script -eqc "{run_cmd}" /dev/null',
+                        f'script -eqc "{run_cmd}" /dev/null',
+                        "exit $?",
                     ]
                 )
         else:
@@ -742,7 +797,9 @@ def _build_interactive_script(
             lines.extend(
                 [
                     "# Start bash with our custom rcfile",
-                    'exec /bin/bash --rcfile "$QXUB_RCFILE"',
+                    "# Run as a child, not with exec, so _qxub_on_exit still runs",
+                    '/bin/bash --rcfile "$QXUB_RCFILE"',
+                    "exit $?",
                 ]
             )
 
@@ -1053,7 +1110,7 @@ def interactive_cli(
     \b
     Tips:
         - Use Ctrl+D or 'exit' to end the PBS session normally
-        - If --post is set, use 'qxub_exit' function to ensure post runs
+        - --post runs when the session ends with 'exit' or Ctrl+D
         - With --tmux: session persists on login node after PBS job ends
         - Reconnect to tmux with: tmux attach -t <session>
     """
@@ -1535,6 +1592,7 @@ def interactive_cli(
             sys.exit(1)
 
         # Process session completion - read status files and update history
+        session_info = None
         try:
             session_info = _process_session_completion(session_id, ctx)
 
@@ -1568,8 +1626,22 @@ def interactive_cli(
         except Exception:
             pass
 
-        # Exit with the same code as the qsub process
-        sys.exit(qsub_exit_code)
+        sys.exit(_qxi_exit_code(qsub_exit_code, session_info))
+
+
+def _qxi_exit_code(qsub_exit_code: int, session_info: dict | None) -> int:
+    """Exit code for qxi itself.
+
+    'qsub -I' exits 0 however the session ended, so use the session's own
+    exit code when it is known. PBS reports a negative code when it killed
+    the job (e.g. -29 at walltime); that becomes 1.
+    """
+    if qsub_exit_code != 0 or not session_info:
+        return qsub_exit_code
+    code = session_info.get("exit_code")
+    if not isinstance(code, int):
+        return qsub_exit_code
+    return code if 0 <= code <= 255 else 1
 
 
 def qxi_main():
