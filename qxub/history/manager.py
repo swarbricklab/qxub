@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # Keep this many execution records; prune once there are PRUNE_SLACK more.
 MAX_EXECUTIONS = 1000
 PRUNE_SLACK = 50
+# A record with no job ID yet may still be updated (qxi fills it in when the
+# session ends), so pruning leaves it alone for this long.
+AWAITING_UPDATE_SECONDS = 24 * 3600
 
 
 def _with_imported_baseline(recipe: Dict[str, Any], until: str) -> Dict[str, Any]:
@@ -264,13 +267,31 @@ class HistoryManager:
             execution_timestamp = self._executions.create_unique(
                 int(execution_timestamp), execution_record
             )
-            self._executions.prune(keep=MAX_EXECUTIONS, slack=PRUNE_SLACK)
+            self._executions.prune(
+                keep=MAX_EXECUTIONS,
+                slack=PRUNE_SLACK,
+                protect=self._awaiting_update,
+            )
             return execution_timestamp
 
         except Exception as e:
             # Don't let history logging break the main command
             logger.warning("Failed to log execution to history: %s", e)
             return execution_timestamp
+
+    def _awaiting_update(self, key: str) -> bool:
+        """True for a recent record that has no job ID yet.
+
+        The key is the creation time in microseconds, so only records younger
+        than ``AWAITING_UPDATE_SECONDS`` are read.
+        """
+        cutoff = (time.time() - AWAITING_UPDATE_SECONDS) * 1000000
+        if int(key) < cutoff:
+            return False
+        record = self._executions.read(key)
+        if record is None:
+            return True  # claimed but not written yet: its writer is still running
+        return not (record.get("execution") or {}).get("job_id")
 
     def update_execution_with_resources(
         self, execution_timestamp: str, job_id: str, resource_data: Dict[str, Any]

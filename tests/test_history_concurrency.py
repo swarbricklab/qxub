@@ -121,7 +121,7 @@ def test_recipe_counts_come_from_executions(history):
 def test_old_records_are_pruned(history, monkeypatch):
     monkeypatch.setattr(manager_mod, "MAX_EXECUTIONS", 5)
     monkeypatch.setattr(manager_mod, "PRUNE_SLACK", 2)
-    keys = [history.log_execution(ctx(i=i)) for i in range(8)]
+    keys = [history.log_execution(ctx(i=i), job_id=f"{i}.pbs") for i in range(8)]
 
     kept = [e["timestamp"] for e in history.get_executions(limit=100)]
     assert kept == list(reversed(keys[3:]))
@@ -237,3 +237,30 @@ def test_imported_recipes_keep_run_counts(history):
     assert recipes[ours]["metadata"]["run_count"] == 851
     assert recipes[ours]["metadata"]["last_seen"] > "2026-11-16T10:00:00"
     assert recipes["ef808e9ff02a"]["metadata"]["run_count"] == 40
+
+
+def test_pruning_keeps_records_still_awaiting_their_update(history, monkeypatch):
+    """A qxi session logs without a job ID and fills it in when it ends."""
+    monkeypatch.setattr(manager_mod, "MAX_EXECUTIONS", 3)
+    monkeypatch.setattr(manager_mod, "PRUNE_SLACK", 0)
+    session = history.log_execution(ctx())  # job_id None until the session ends
+    for i in range(5):
+        history.log_execution(ctx(i=i))
+        history.update_execution_with_resources(
+            history.get_executions(limit=1)[0]["timestamp"], f"{i}.pbs", {}
+        )
+
+    assert history.update_execution_with_resources(session, "99.pbs", {})
+    assert history.get_execution_by_job_id("99.pbs")["timestamp"] == session
+    # The others were still pruned down to the newest three.
+    assert len(history.get_executions(limit=100)) == 4
+
+
+def test_old_records_without_job_id_are_pruned(history, monkeypatch):
+    monkeypatch.setattr(manager_mod, "MAX_EXECUTIONS", 2)
+    monkeypatch.setattr(manager_mod, "PRUNE_SLACK", 0)
+    monkeypatch.setattr(manager_mod, "AWAITING_UPDATE_SECONDS", -60)
+    keys = [history.log_execution(ctx(i=i)) for i in range(4)]
+
+    kept = [e["timestamp"] for e in history.get_executions(limit=100)]
+    assert kept == list(reversed(keys[2:]))

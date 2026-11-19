@@ -19,7 +19,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -123,17 +123,27 @@ class RecordStore:
         except FileNotFoundError:
             pass
 
-    def prune(self, keep: int, slack: int = 0) -> None:
+    def prune(
+        self,
+        keep: int,
+        slack: int = 0,
+        protect: Optional[Callable[[str], bool]] = None,
+    ) -> None:
         """Keep the newest ``keep`` integer-keyed records.
 
         Nothing happens until there are more than ``keep + slack``, so pruning
         runs now and then rather than on every write. Concurrent pruners may
         try to delete the same file; that is harmless.
+
+        A record for which ``protect(key)`` is true is kept even if it is
+        among the oldest; newer records are not deleted in its place.
         """
         keys = [k for k in self.keys() if k.isdigit()]
         if len(keys) <= keep + slack:
             return
         for key in sorted(keys, key=int)[: len(keys) - keep]:
+            if protect is not None and protect(key):
+                continue
             self.delete(key)
         self._remove_stale_tmp()
 
