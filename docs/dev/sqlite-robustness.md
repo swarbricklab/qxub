@@ -1,6 +1,6 @@
 # Making the job database robust on shared filesystems
 
-Status: **draft for review**. Phase 1 is in #132. Revised after the Gadi tests in the #132 review.
+Status: **draft for review**. Phase 1 is merged (#132). Revised after the Gadi tests in the #132 review, and to separate live state from resource statistics.
 
 ## Why
 
@@ -44,56 +44,93 @@ So **each job opens the shared DB about four times from its compute node, and ea
 
 The compute-node writes also import qxub there, which needs `qxub_python` to be reachable from the node (fixed in #123), and the job's exit path depends on it.
 
+## Two jobs, not one
+
+The shared DB was introduced to collect resource-usage statistics, so that resource requests can be tuned. Over time it also took on live job tracking (`qxtat check`, `cancel`). These two jobs need very different things:
+
+| | Live job state (`qxtat check`, `cancel`) | Resource statistics |
+|---|---|---|
+| Freshness | seconds | hours or days is fine |
+| Writers | every job, on every node | one, occasionally |
+| Scope | one run, or one workflow's runs | everything, across users |
+
+Per-run files fit the first column. A database consolidated from those files now and then fits the second. Trying to make one SQLite file do both, with writers on every node, is what corrupts it.
+
 ## Principles
 
-1. **Files are the source of truth; SQLite is an index.** A job's lifecycle is already written to per-job status files (`job_started_*`, `final_exit_code_*`) with plain shell. The DB should be rebuildable from those files plus submission records. Then losing or corrupting it costs a rebuild, not data.
-2. **Compute nodes never open SQLite.** Jobs write small files only, the same way #130 made history safe: one file per record, temp file + `rename`, no locks.
-3. **Fewer, shorter, idempotent DB writes, from login nodes only.** Status only moves forward (`initiated → dispatched → running → completed/failed`), so applying the same event twice is harmless.
-4. **A DB failure never fails a job or a status check.** Readers fall back to the files (as #83 started).
+1. **Per-run files are the source of truth.** Each run has one small file on the shared filesystem. It is written atomically (temp file + `rename`) and needs no locks, like history (#130). `rename`, `mkdir` and `O_EXCL` creates go through Lustre's metadata server, so they are atomic across nodes, whatever `localflock` does to POSIX locks.
+2. **Compute nodes never open SQLite**, and don't need qxub's Python at all.
+3. **The shared DB has one writer at a time, and nobody updates it in place.** The consolidator builds a new copy privately and publishes it with `rename`. Readers open it read-only and immutable.
+4. **Live state is read from the run files, not the DB.** A DB failure or lag never affects a status check.
 
 ## Proposal
 
-### Phase 1: quick hardening (#132)
+### Phase 1: quick hardening (#132, merged)
 
 - **One connection helper** for both `queue/db.py` and `ResourceTracker`, with the same pragmas and timeouts (previously 5 s vs 30 s).
-- **Schema init once per DB file, not per connection:** check `PRAGMA user_version` first and run DDL only when it is behind. Most connections then never need a write lock to start.
+- **Schema init only when `PRAGMA user_version` is behind**, so most connections never need a write lock to start.
 - **`BEGIN IMMEDIATE` for writes**, so a writer takes its lock up front. A deferred transaction that upgrades from read to write can get `SQLITE_BUSY` immediately, which `busy_timeout` does not retry.
 - **Retry with jittered backoff** on `database is locked`, `database is busy` and `disk I/O error`, then warn once and carry on.
-- **Corruption: warn once, leave the file alone.** An earlier version moved a corrupt file aside and started afresh. Under cross-node writers that cascaded: each fresh DB was soon damaged too, and the live file lost nearly all its data. Repair is a separate command, run while nothing writes (Phase 3).
+- **Corruption: warn once, leave the file alone.** An earlier version moved a corrupt file aside and started afresh. Under cross-node writers that cascaded: each fresh DB was soon damaged too, and the live file lost nearly all its data.
 
-Under `localflock` this only helps between processes on the same node. It reduces lock traffic and turns same-node contention into short waits, but **it does not prevent corruption.** Phase 2 does.
+Under `localflock` this only helps between processes on the same node, such as the per-user DB. **It does not prevent corruption of a DB written from several nodes.**
 
-### Phase 2: jobs write events, not rows (with audit step 3b). This is the fix.
+### Phase 2: one file per run (with audit step 3b). This is the fix for live state.
 
-- **Spool layout:** each run gets a directory keyed on `QXUB_RUN_ID` under the status directory, which is passed to the job explicitly (step 3b):
+- **One file per run, keyed on `QXUB_RUN_ID`:**
   ```
-  <status_dir>/<run_id>/started.json    # time, host, PBS job ID
-  <status_dir>/<run_id>/finished.json   # exit code, time
+  <spool_dir>/<run_id>.json
   ```
-  These are written atomically by shell (`printf … > .tmp && mv .tmp finished.json`). The existing `final_exit_code_*` files can stay for one release for compatibility.
-- **No more DB writes from jobs:** the job scripts stop calling `update_job_status`, so there is no `qxub_python` on the compute node and no SQLite there.
+  The file is overwritten by `rename` as the run moves through its states, so each run costs **one inode**. Gadi has inode quotas on `/g/data` and `/scratch`.
+  ```
+  submitted  # written at submission: command, resources requested, tags, user, PBS job ID, joblog path
+  running    # written by the job at start: + host, start time
+  finished   # written by the job at end: + exit code, end time
+  ```
+- **Writing from the job:**
+  - The job script merges its fields into the existing record with plain shell.
+  - The submission side writes the record in a form the shell can extend without a JSON parser, e.g. one `key=value` per line. Alternatively, the job could write a small sibling file that is folded into the record later.
+  - The spool directory is passed to the job explicitly (step 3b), rather than derived from `${out%/*}/status`.
+- **No more DB writes from jobs:** the job scripts stop calling `update_job_status`/`mark_running`/`mark_complete`, so there is no `qxub_python` and no SQLite on the compute node.
+- **Readers:**
+  - `qxtat check` reads the run's file. It falls back to the existing status files and the DB, so in-flight jobs from before the upgrade still work.
+  - `cancel` and `list` scan the spool for unfinished runs.
+- **Compatibility:** the existing `final_exit_code_*` files stay for one release.
 
-### Phase 3: one DB per host, as a cache of the spool
+### Phase 3: occasional consolidation into a published snapshot
 
-Removing compute-node writes is not enough on its own: Gadi has several login nodes (and `gadi-dm-*` data movers), and `localflock` doesn't coordinate them either. So:
+- **The consolidator** reads finished run files and builds the statistics DB:
+  - It applies them to a **private copy** of `qxub-stats.db` (copy, insert, `PRAGMA integrity_check`).
+  - Then it publishes the copy with `rename`. The DB is a few MB, so copying each round is cheap.
+- **Why copy instead of updating in place:** under `localflock`, a *reader* on another node can't see the writer's lock. It would treat the writer's rollback journal as left over from a crash and "roll it back", which corrupts the file even with a single writer.
+  - Readers open the published file with `?immutable=1`, so they never touch journals.
+  - Readers always see a complete snapshot.
+- **One consolidator at a time, without POSIX locks:**
+  - The consolidator takes a lease with `mkdir <spool_dir>/.consolidate.lease`, recording host, pid and start time.
+  - A lease older than a few hours is stale. A process breaks it by renaming it out of the way, and only one rename wins.
+  - A process that doesn't get the lease skips this round.
+- **Resource usage is collected here:**
+  - PBS appends resource usage to the joblog only *after* the job script exits, so the job can never record it itself.
+  - The consolidator parses joblogs, as `backfill_resources` does today. It also calls `qstat -fx` while PBS still remembers the job.
+  - Batching this is also kinder to PBS than one query per job.
+- **Cleanup:**
+  - Only run files already in a published snapshot are deleted, and only for finished runs older than a grace period (a few days, so `qxtat check` and `history` still see recent runs).
+  - Consolidation is idempotent: a consolidator that dies partway leaves files for the next round.
+  - Runs still in progress are never touched.
+- **When it runs:**
+  - *Opportunistically:* any `qxub` command checks a cheap condition, such as the last publish being more than 6 h ago or more than N finished runs waiting. If so, it starts a detached background consolidator, so the user's command doesn't wait.
+  - *Explicitly:* `qxub db consolidate`, for a Snakemake `onsuccess:` hook or by hand.
+  - A self-resubmitting `copyq` job could stand in for cron, if the opportunistic trigger proves too irregular.
+- **Whose runs:**
+  - To start, each user consolidates only their own runs into the shared snapshot. That avoids deleting other users' files, which would need group-writable, setgid spool directories.
+  - The lease still keeps it to one writer at a time.
+- **Lag:** statistics are as fresh as the last publish. That is fine for tuning allocations, and the stats commands should say how old the snapshot is.
 
-- **Submission records go to the spool too:** `<status_dir>/<run_id>/submitted.json`, written at submission. The spool on the shared filesystem becomes the complete record. It is written once per file, atomically, and needs no locks, like history (#130).
-- **SQLite becomes a per-host cache:** e.g. `qxub-<hostname>.db`, written only by processes on that host, so `localflock` is enough. A per-host file can live on the shared filesystem or on local disk.
-- **`sync_runs(run_ids)`:** reads the spool for runs the cache doesn't yet show as finished and applies newer state in one short `BEGIN IMMEDIATE` transaction. Called by `qxtat check`/`list`, `cancel`, `qxub history`, and at the end of a foreground `qx`/`qxi`.
-- **`qxub db rebuild`:** recreates this host's cache from the spool. A corrupt or missing cache costs a rebuild, not data, and that rebuild is the repair command that Phase 1 leaves out.
-- **Reads that need every run** (e.g. `qxtat list` across a workflow) sync first. Scanning the spool for unfinished runs keeps that cheap.
+### Phase 4: retire the shared live DB
 
-### Phase 4: retire the shared DB
-
-- **Recovery:** once the spool and the per-host caches exist, the team-shared DB on `/g/data` has no writer. Read whatever it still has into the spool or the caches once (`sqlite3 .recover` copes with the existing corruption), then stop using `shared_db.path` and `QXUB_SHARED_DB`.
-- **Cross-user `qxtat list` and `cancel`:** these read other users' spool directories, if team members want that.
-
-### Phase 4: where the DB lives
-
-Once compute nodes don't touch the DB, the remaining question is whether a team-shared DB on `/g/data` is worth it. The alternative is a per-user DB with team views built from the spool.
-
-- **Per-user DB:** `~/.config/qxub/qxub.db` on NFS `/home` sees far fewer writers (one user's login sessions).
-- **Shared DB:** what does it buy today? Mainly cross-user `qxtat list` and `cancel`. Both could instead read the spool directories.
+- **Recover once:** recover what the current shared DB holds (`sqlite3 .recover` copes with its existing corruption) and load it into the first published snapshot.
+- **Stop writing it:** stop using `shared_db.path`/`QXUB_SHARED_DB` for writes.
+- **Keep the per-user DB for now:** `~/.config/qxub/qxub.db` sees one user's login sessions, and Phase 1 covers same-node contention. Retire it later if the run files and the snapshot cover everything it does.
 
 ## Alternatives considered
 
@@ -101,16 +138,19 @@ Once compute nodes don't touch the DB, the remaining question is whether a team-
 - **Lock files (`flock`) around every write:** same dependence on cross-node lock semantics that SQLite already has, which `localflock` doesn't provide.
 - **A dot-lock (`O_EXCL` lock file) around every SQLite write:** works across nodes without POSIX locks, but needs stale-lock handling when a holder dies, and every compute node would still contend for it. It doesn't remove the coupling Phase 2 removes.
 - **A DB server (Postgres, etc.):** none available to users on Gadi, and it would add a service to run.
-- **One SQLite file per job, merged on read:** this is the spool idea with a heavier format. JSON files are simpler to write from shell.
+- **One SQLite file per job, merged on read:** this is the run-file idea with a heavier format. A text file is simpler to write from shell.
+- **Per-host SQLite caches of the run files** (an earlier draft of Phase 3): these keep each file to one node's writers, but they are another copy to keep in sync. Live state can be read straight from the run files, and statistics come from the snapshot.
+- **Updating the shared stats DB in place from a single consolidator:** unsafe under `localflock`, because readers on other nodes can roll back the writer's journal (see Phase 3).
 
 ## How #107 fits
 
-#107 shows submissions not reaching either DB since March. Phase 1's "warn once instead of swallowing" and the connection helper should surface why. Phase 3's rebuild gives `cancel` a correct view regardless.
+#107 shows submissions not reaching either DB since March. Phase 1's "warn once instead of swallowing" should surface why. Phase 2 gives `cancel` a correct view regardless, from the run files.
 
 ## Open questions
 
 1. ~~What does "flakes out" look like?~~ "disk I/O error" and "malformed" under cross-node writers, from the #132 review.
 2. ~~Mount options~~: `/g/data` and `/scratch` are `localflock`. Is the same true on the compute nodes and `gadi-dm-*`? The cross-host results behave as if it is.
 3. **Is the team-shared view needed?** Who uses cross-user `qxtat list`/`cancel`? This decides whether the spool must be readable across users.
-4. **Spool retention:** how long to keep `<run_id>` directories? Tie it to the status-dir cleanup we already do?
-5. **Per-host cache location:** shared filesystem (survives login-node reboots) or local disk (faster; rebuilt after a reboot)?
+4. **Grace period before cleanup:** how long should finished run files stay after they are consolidated? A few days covers `qxtat check` and `history` on recent runs.
+5. **Cross-user consolidation:** is per-user consolidation enough, or should one user's consolidator also pick up teammates' runs? The latter needs group-writable, setgid spool directories.
+6. **Consolidation trigger:** is the opportunistic trigger enough, or do we want a self-resubmitting `copyq` job?
