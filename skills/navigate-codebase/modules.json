@@ -308,7 +308,7 @@
     },
     {
       "path": "qxub/history/manager.py",
-      "description": "Dual-log history system – recipes.yaml + executions.yaml",
+      "description": "Dual-log history system – one JSON file per recipe/execution under ~/.config/qxub/history",
       "exports": ["HistoryManager"]
     },
 
