@@ -337,19 +337,15 @@ def _rebuild_legacy_queue_schema(conn) -> None:
 def _migrate_queue_schema(conn) -> None:
     """Add new resource-tracking columns to an existing ``queue`` table.
 
-    Idempotent — safe to run on every startup.
+    Idempotent. Errors propagate: this runs inside ``ensure_schema``'s
+    transaction, which stamps ``user_version``, and a swallowed failure
+    would mark the database current without the column.
     """
-    try:
-        cursor = conn.execute("PRAGMA table_info(queue)")
-        existing = {row[1] for row in cursor.fetchall()}
-
-        for col_name, col_type in _QUEUE_NEW_COLUMNS:
-            if col_name not in existing:
-                conn.execute(f"ALTER TABLE queue ADD COLUMN {col_name} {col_type}")
-                logger.debug("queue: added column %s %s", col_name, col_type)
-
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Queue schema migration failed (may be normal): %s", exc)
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(queue)")}
+    for col_name, col_type in _QUEUE_NEW_COLUMNS:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE queue ADD COLUMN {col_name} {col_type}")
+            logger.debug("queue: added column %s %s", col_name, col_type)
 
 
 # ---------------------------------------------------------------------------

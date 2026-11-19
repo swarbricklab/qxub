@@ -183,29 +183,38 @@ def test_which_errors_are_retried(message, in_transaction, retry):
 # -- corruption -------------------------------------------------------------------
 
 
-def test_corrupt_database_is_moved_aside(tmp_path, caplog):
+def test_corrupt_database_is_left_in_place_with_one_warning(tmp_path, caplog):
+    """Review of #132: moving it aside cascaded under cross-node writers."""
     path = tmp_path / "qxub.db"
-    path.write_bytes(b"this is not a database" * 100)
-    (tmp_path / "qxub.db-journal").write_bytes(b"stale journal")
+    junk = b"this is not a database" * 100
+    path.write_bytes(junk)
 
-    with pytest.raises(sqlite3.DatabaseError):
+    for _ in range(3):
+        with pytest.raises(sqlite3.DatabaseError):
+            connection.connect(path)
+
+    assert [p.name for p in tmp_path.iterdir()] == ["qxub.db"]
+    assert path.read_bytes() == junk
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "is corrupt" in warnings[0].getMessage()
+
+
+def test_failed_migration_does_not_stamp_the_version(tmp_path, monkeypatch):
+    """Review of #132: a swallowed ALTER error marked the DB current."""
+    path = tmp_path / "qxub.db"
+    old = sqlite3.connect(path)
+    old.execute(
+        "CREATE TABLE queue (entry_id TEXT PRIMARY KEY, command_b64 TEXT,"
+        " pbs_job_id TEXT, status TEXT, user TEXT)"
+    )
+    old.commit()
+    old.close()
+    monkeypatch.setattr(db, "_QUEUE_NEW_COLUMNS", [("not a valid name", "TEXT")])
+
+    with pytest.raises(sqlite3.OperationalError):
         connection.connect(path)
 
-    moved = [p.name for p in tmp_path.iterdir()]
-    assert [n for n in moved if n.startswith("qxub.db.corrupt-")], moved
-    assert not path.exists() and not (tmp_path / "qxub.db-journal").exists()
-    assert "was corrupt" in caplog.text
-
-    # The next connection starts a fresh database.
-    db.create_queue_entry("echo hi", db_path=path, pbs_job_id="1.pbs")
-    assert db.get_queue_entry("1.pbs", db_path=path)["command"] == "echo hi"
-
-
-def test_healthy_database_is_not_moved(tmp_path):
-    path = tmp_path / "qxub.db"
-    connection.connect(path).close()
-    assert connection.quarantine_if_corrupt(path) is None
-    assert path.exists()
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone() == (0,)
 
 
 # -- many processes ---------------------------------------------------------------

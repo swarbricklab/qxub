@@ -13,17 +13,19 @@ job database comes from :func:`connect`, which:
 - creates or migrates the schema only when ``PRAGMA user_version`` is behind
   :data:`SCHEMA_VERSION`, once per process (:func:`ensure_schema`). Before,
   every connection ran DDL, and each job opened the DB about four times;
-- moves a corrupt database aside so the next connection starts a fresh one
-  (:func:`quarantine_if_corrupt`).
+- warns once per process when the database is corrupt
+  (:func:`warn_if_corrupt`). It does not repair or move the file: on Gadi's
+  ``localflock`` Lustre mounts, processes on different nodes don't see each
+  other's locks, so a fresh database would soon be damaged too, and moving
+  the file aside under other writers loses data (review of #132). Repair
+  belongs in an explicit command run while nothing else writes.
 """
 
 import logging
-import os
 import random
 import sqlite3
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Set
 
@@ -96,8 +98,8 @@ class RetryingConnection(sqlite3.Connection):
             try:
                 return op(*args)
             except sqlite3.DatabaseError as exc:
-                if is_corrupt(exc) and getattr(self, "db_path", None):
-                    quarantine_if_corrupt(self.db_path)
+                if is_corrupt(exc):
+                    warn_if_corrupt(getattr(self, "db_path", None), exc)
                     raise
                 if attempt == RETRY_ATTEMPTS - 1 or not _should_retry(
                     exc, was_in_transaction
@@ -179,7 +181,7 @@ def ensure_schema(conn: sqlite3.Connection, db_path: Path) -> None:
                 _upgrade(conn)
         except sqlite3.DatabaseError as exc:
             if is_corrupt(exc):
-                quarantine_if_corrupt(db_path)
+                warn_if_corrupt(db_path, exc)
             raise
         _schema_ready.add(key)
 
@@ -212,8 +214,9 @@ def _upgrade(conn: sqlite3.Connection) -> None:
 
 
 def forget_schema_cache() -> None:
-    """For tests: make the next connection check the schema version again."""
+    """For tests: check the schema again and re-arm the corruption warning."""
     _schema_ready.clear()
+    _warned_corrupt.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -221,62 +224,20 @@ def forget_schema_cache() -> None:
 # ---------------------------------------------------------------------------
 
 
-def quarantine_if_corrupt(db_path) -> Optional[Path]:
-    """Move a corrupt database aside so the next connection starts afresh.
+_warned_corrupt: Set[str] = set()
 
-    Called after an operation fails with "malformed" or "not a database". A
-    torn read on a shared filesystem can raise the same error on a healthy
-    file, so the file is checked first with ``PRAGMA quick_check`` and only
-    moved if that fails too. The rollback journal is moved with it: a hot
-    journal left behind would be applied to the new database.
 
-    Returns the new path of the corrupt file, or None if it was not moved.
-    """
-    db_path = Path(db_path)
-    try:
-        before = db_path.stat()
-    except FileNotFoundError:
-        return None
-    if _passes_quick_check(db_path):
-        return None
-    try:
-        after = db_path.stat()
-    except FileNotFoundError:
-        return None
-    if (after.st_ino, after.st_mtime_ns) != (before.st_ino, before.st_mtime_ns):
-        return None  # replaced or written meanwhile; let the next failure decide
-
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = db_path.with_name(f"{db_path.name}.corrupt-{stamp}-{os.getpid()}")
-    try:
-        os.replace(db_path, target)
-    except FileNotFoundError:
-        return None  # another process moved it first
-    for suffix in ("-journal", "-wal", "-shm"):
-        side = db_path.with_name(db_path.name + suffix)
-        try:
-            os.replace(side, target.with_name(target.name + suffix))
-        except FileNotFoundError:
-            pass
-    _schema_ready.discard(str(db_path.resolve()))
+def warn_if_corrupt(db_path, exc: BaseException) -> None:
+    """Warn once per process that the database is corrupt; leave it alone."""
+    key = str(db_path)
+    if key in _warned_corrupt:
+        logger.debug("qxub job database %s is corrupt: %s", db_path, exc)
+        return
+    _warned_corrupt.add(key)
     logger.warning(
-        "qxub job database %s was corrupt; moved it to %s and started a new one",
+        "qxub job database %s is corrupt (%s). Job tracking may be incomplete; "
+        "status checks fall back to status files. Repair it while no jobs are "
+        "writing to it.",
         db_path,
-        target,
+        exc,
     )
-    return target
-
-
-def _passes_quick_check(db_path: Path) -> bool:
-    try:
-        conn = sqlite3.connect(str(db_path), timeout=BUSY_TIMEOUT_SECONDS)
-        try:
-            conn.execute("PRAGMA mmap_size=0")
-            rows = conn.execute("PRAGMA quick_check").fetchall()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        if is_corrupt(exc):
-            return False
-        return True  # busy or I/O trouble: not evidence of corruption
-    return rows == [("ok",)]
