@@ -40,6 +40,21 @@ MAX_EXECUTIONS = 1000
 PRUNE_SLACK = 50
 
 
+def _with_imported_baseline(recipe: Dict[str, Any], until: str) -> Dict[str, Any]:
+    """Keep a YAML recipe's run count and last use as a baseline.
+
+    ``until`` is the import time as an execution key: executions up to it
+    are already in ``run_count``, so ``get_recipes`` only adds later ones.
+    """
+    metadata = dict(recipe.get("metadata") or {})
+    metadata["imported"] = {
+        "run_count": metadata.pop("run_count", 0) or 0,
+        "last_seen": metadata.pop("last_seen", None),
+        "until": until,
+    }
+    return {**recipe, "metadata": metadata}
+
+
 def _resources_section(resource_data: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "requested": resource_data.get("resources_requested", {}),
@@ -294,7 +309,18 @@ class HistoryManager:
             yield record
 
     def get_recipes(self) -> Dict[str, Any]:
-        """All recipes, with metadata derived from the execution records."""
+        """All recipes, with ``run_count`` and ``last_seen`` filled in.
+
+        Both are derived from the execution records rather than stored as
+        counters, which every process would have to rewrite. A recipe
+        imported from ``recipes.yaml`` keeps its old totals as a baseline
+        (``metadata.imported``); executions logged after the import are
+        added to it, and earlier ones are already included in it.
+
+        Executions pruned beyond the newest ``MAX_EXECUTIONS`` stop
+        counting, so for recipes created after the import ``run_count`` is
+        the number of runs still in history, not a lifetime total.
+        """
         self._import_legacy_yaml()
         recipes = {}
         for recipe_hash in self._recipes.keys():
@@ -302,19 +328,29 @@ class HistoryManager:
             if recipe is not None:
                 recipes[recipe_hash] = recipe
 
+        def imported(recipe_hash: str) -> Dict[str, Any]:
+            recipe = recipes.get(recipe_hash) or {}
+            return (recipe.get("metadata") or {}).get("imported") or {}
+
         usage: Dict[str, Dict[str, Any]] = {}
         for execution in self._all_executions():
             h = execution.get("recipe_hash")
+            if int(execution["timestamp"]) <= int(imported(h).get("until", 0)):
+                continue  # already counted in the imported baseline
             when = (execution.get("execution") or {}).get("timestamp")
             if h not in usage:
-                usage[h] = {"last_seen": when, "run_count": 0}
+                usage[h] = {"last_seen": when, "run_count": 0}  # newest first
             usage[h]["run_count"] += 1
 
         for recipe_hash, recipe in recipes.items():
             metadata = recipe.setdefault("metadata", {})
+            baseline = imported(recipe_hash)
             used = usage.get(recipe_hash, {})
-            metadata["run_count"] = used.get("run_count", 0)
-            metadata["last_seen"] = used.get("last_seen") or metadata.get("first_seen")
+            metadata["run_count"] = int(baseline.get("run_count") or 0) + used.get(
+                "run_count", 0
+            )
+            seen = [t for t in (baseline.get("last_seen"), used.get("last_seen")) if t]
+            metadata["last_seen"] = max(seen) if seen else metadata.get("first_seen")
         return recipes
 
     def get_executions(
@@ -380,9 +416,13 @@ class HistoryManager:
             except Exception as e:  # unreadable: leave it for a human
                 logger.warning("Could not import %s: %s", path, e)
                 continue
+            until = str(int(time.time() * 1000000))
             for record_key, record in (data.get(key) or {}).items():
-                if isinstance(record, dict):
-                    store.write_if_absent(str(record_key), record)
+                if not isinstance(record, dict):
+                    continue
+                if key == "recipes":
+                    record = _with_imported_baseline(record, until)
+                store.write_if_absent(str(record_key), record)
             try:
                 os.replace(path, path.with_name(path.name + ".imported"))
             except FileNotFoundError:

@@ -148,7 +148,11 @@ def test_yaml_history_is_imported_once(history):
                     "abc123abc123": {
                         "executor": {"type": "default"},
                         "target": {"cmd": "ls"},
-                        "metadata": {"first_seen": "2026-01-01T00:00:00"},
+                        "metadata": {
+                            "first_seen": "2026-01-01T00:00:00",
+                            "last_seen": "2026-01-02T00:00:00",
+                            "run_count": 1,
+                        },
                     }
                 }
             }
@@ -173,3 +177,63 @@ def test_clear_all_history(history):
     history.clear_all_history()
     assert history.get_executions() == []
     assert history.get_recipes() == {}
+
+
+def write_legacy_recipes(config_dir, recipes):
+    (config_dir / "recipes.yaml").write_text(yaml.safe_dump({"recipes": recipes}))
+
+
+def test_imported_recipes_keep_run_counts(history):
+    """Review of #130: run counts were reset to the retained executions."""
+    ours = history.compute_recipe_hash(
+        {"executor": {"type": "conda", "env": "dt3"}, "target": {"cmd": "echo hi"}}
+    )
+    write_legacy_recipes(
+        history.config_dir,
+        {
+            ours: {
+                "executor": {"type": "conda", "env": "dt3"},
+                "target": {"cmd": "echo hi"},
+                "metadata": {
+                    "first_seen": "2026-11-12T09:00:00",
+                    "last_seen": "2026-11-16T10:00:00",
+                    "run_count": 850,
+                },
+            },
+            "ef808e9ff02a": {
+                "executor": {"type": "default"},
+                "target": {"cmd": "dt-hook-pre-commit"},
+                "metadata": {
+                    "first_seen": "2026-11-07T09:00:00",
+                    "last_seen": "2026-11-17T10:00:00",
+                    "run_count": 40,
+                },
+            },
+        },
+    )
+    # One of the 850 runs is still in executions.yaml: it must not count twice.
+    (history.config_dir / "executions.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "executions": {
+                    "1763283600000000": {
+                        "recipe_hash": ours,
+                        "execution": {"timestamp": "2026-11-16T10:00:00"},
+                    }
+                }
+            }
+        )
+    )
+
+    recipes = history.get_recipes()
+    assert recipes[ours]["metadata"]["run_count"] == 850
+    assert recipes[ours]["metadata"]["last_seen"] == "2026-11-16T10:00:00"
+    assert recipes["ef808e9ff02a"]["metadata"]["run_count"] == 40
+    assert recipes["ef808e9ff02a"]["metadata"]["last_seen"] == "2026-11-17T10:00:00"
+
+    history.log_execution(ctx())
+
+    recipes = history.get_recipes()
+    assert recipes[ours]["metadata"]["run_count"] == 851
+    assert recipes[ours]["metadata"]["last_seen"] > "2026-11-16T10:00:00"
+    assert recipes["ef808e9ff02a"]["metadata"]["run_count"] == 40
