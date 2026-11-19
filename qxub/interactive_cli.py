@@ -319,8 +319,15 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
         final = _final_job_data(job_id)
         if final:
             session_info["resources"] = final
-            if final.get("exit_status") is not None:
-                session_info["exit_code"] = final["exit_status"]
+            # PBS reports Exit_status = 0 for any 'qsub -I' session that
+            # ends normally, so the status file's value is the real one.
+            # A negative value means PBS killed the job (e.g. -29 at
+            # walltime), which the status file cannot know about.
+            exit_status = final.get("exit_status")
+            if exit_status is not None and (
+                exit_status < 0 or "exit_code" not in session_info
+            ):
+                session_info["exit_code"] = exit_status
 
     return session_info
 
@@ -438,6 +445,7 @@ def _build_interactive_script(
             "    if declare -F _qxub_write_status >/dev/null; then",
             '        _qxub_write_status "$exit_code"',
             "    fi",
+            '    if [ -n "${QXUB_RCFILE:-}" ]; then rm -f "$QXUB_RCFILE"; fi',
             "}",
             "trap _qxub_on_exit EXIT",
             "",
@@ -643,13 +651,6 @@ def _build_interactive_script(
                 "# _qxub_on_exit runs this once it is defined, i.e. only after the",
                 "# pre-command succeeded (best effort - may not run if killed)",
                 "",
-                "# Provide shortcut function to cleanly exit",
-                "qxub_exit() {",
-                '    echo "👋 Exiting interactive session..."',
-                "    exit 0",
-                "}",
-                "echo \"💡 Tip: Run 'qxub_exit' to cleanly exit and run post-command\"",
-                "",
             ]
         )
 
@@ -714,8 +715,6 @@ def _build_interactive_script(
 
         lines.extend(
             [
-                "# Clean up the temp rcfile",
-                'rm -f "$QXUB_RCFILE" 2>/dev/null',
                 "RCEOF",
                 "",
             ]
@@ -1111,7 +1110,7 @@ def interactive_cli(
     \b
     Tips:
         - Use Ctrl+D or 'exit' to end the PBS session normally
-        - If --post is set, use 'qxub_exit' function to ensure post runs
+        - --post runs when the session ends with 'exit' or Ctrl+D
         - With --tmux: session persists on login node after PBS job ends
         - Reconnect to tmux with: tmux attach -t <session>
     """
@@ -1593,6 +1592,7 @@ def interactive_cli(
             sys.exit(1)
 
         # Process session completion - read status files and update history
+        session_info = None
         try:
             session_info = _process_session_completion(session_id, ctx)
 
@@ -1626,8 +1626,22 @@ def interactive_cli(
         except Exception:
             pass
 
-        # Exit with the same code as the qsub process
-        sys.exit(qsub_exit_code)
+        sys.exit(_qxi_exit_code(qsub_exit_code, session_info))
+
+
+def _qxi_exit_code(qsub_exit_code: int, session_info: dict | None) -> int:
+    """Exit code for qxi itself.
+
+    'qsub -I' exits 0 however the session ended, so use the session's own
+    exit code when it is known. PBS reports a negative code when it killed
+    the job (e.g. -29 at walltime); that becomes 1.
+    """
+    if qsub_exit_code != 0 or not session_info:
+        return qsub_exit_code
+    code = session_info.get("exit_code")
+    if not isinstance(code, int):
+        return qsub_exit_code
+    return code if 0 <= code <= 255 else 1
 
 
 def qxi_main():

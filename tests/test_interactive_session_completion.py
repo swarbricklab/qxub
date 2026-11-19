@@ -140,3 +140,79 @@ def test_status_files_are_used_when_qstat_has_no_record(fake_pbs, status_root):
     assert info["exit_code"] == 5
     assert "resources" not in info
     assert len(fake_pbs.pbs_calls("qstat")) == 1, "no retries for an unknown job"
+
+
+def test_status_file_exit_code_wins_over_qstat_zero(fake_pbs, status_root):
+    # PBS reports Exit_status = 0 for every 'qsub -I' session that ends normally.
+    status_root.mkdir(parents=True)
+    (status_root / "job_id").write_text("1001.gadi-pbs\n")
+    (status_root / "exit_code").write_text("7\n")
+    fake_pbs.set_qstat("1001.gadi-pbs", finished_job(0))
+
+    info = interactive_cli._process_session_completion(SESSION)
+
+    assert info["exit_code"] == 7
+    assert info["resources"]["exit_status"] == 0
+
+
+def test_walltime_kill_overrides_status_file(fake_pbs, status_root):
+    # The EXIT trap still runs after a walltime kill and writes 0 (seen on Gadi).
+    status_root.mkdir(parents=True)
+    (status_root / "job_id").write_text("1002.gadi-pbs\n")
+    (status_root / "exit_code").write_text("0\n")
+    fake_pbs.set_qstat("1002.gadi-pbs", finished_job(-29))
+
+    info = interactive_cli._process_session_completion(SESSION)
+
+    assert info["exit_code"] == -29
+
+
+@pytest.mark.parametrize(
+    "qsub_code, info, expected",
+    [
+        (0, {"exit_code": 7}, 7),
+        (0, {"exit_code": 0}, 0),
+        (0, {"exit_code": -29}, 1),
+        (0, {}, 0),
+        (0, None, 0),
+        (2, {"exit_code": 7}, 2),  # qsub itself failed
+    ],
+)
+def test_qxi_exits_with_the_session_exit_code(qsub_code, info, expected):
+    assert interactive_cli._qxi_exit_code(qsub_code, info) == expected
+
+
+def test_rcfile_is_removed_when_the_session_ends(tmp_path, status_root):
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    script = interactive_cli._build_interactive_script(
+        shell="/bin/bash",
+        working_dir=str(tmp_path),
+        pre_cmd=None,
+        post_cmd=None,
+        session_id=SESSION,
+    ).replace("/tmp/qxub_rc.", f"{tmp}/qxub_rc.")
+    path = tmp_path / "qxi_init.sh"
+    path.write_text(script)
+
+    subprocess.run(
+        ["bash", str(path)],
+        input="exit 0\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PBS_JOBID": "9.pbs"},
+    )
+
+    assert list(tmp.iterdir()) == []
+
+
+def test_post_banner_has_no_exit_helper(tmp_path):
+    script = interactive_cli._build_interactive_script(
+        shell="/bin/bash",
+        working_dir=str(tmp_path),
+        pre_cmd=None,
+        post_cmd="echo bye",
+        session_id=SESSION,
+    )
+    assert "qxub_exit()" not in script and "Tip: Run" not in script
