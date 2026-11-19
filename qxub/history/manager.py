@@ -2,8 +2,13 @@
 New dual-log history system for qxub.
 
 This system separates "what" (recipes) from "how/when" (executions):
-- recipes.yaml: Unique computational recipes indexed by hash
-- executions.yaml: Individual execution records indexed by microsecond timestamp
+- history/recipes/<hash>.json: Unique computational recipes indexed by hash
+- history/executions/<timestamp>.json: Individual execution records indexed
+  by microsecond timestamp
+
+Each record is its own file so concurrent qxub processes cannot lose each
+other's records (#129); see ``store.py``. The older ``recipes.yaml`` and
+``executions.yaml`` are imported on first use.
 
 The manager provides comprehensive job tracking including:
 - Recipe storage and deduplication
@@ -24,11 +29,43 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
-from omegaconf import OmegaConf
+from .store import RecordStore
 
 logger = logging.getLogger(__name__)
+
+# Keep this many execution records; prune once there are PRUNE_SLACK more.
+MAX_EXECUTIONS = 1000
+PRUNE_SLACK = 50
+# A record with no job ID yet may still be updated (qxi fills it in when the
+# session ends), so pruning leaves it alone for this long.
+AWAITING_UPDATE_SECONDS = 24 * 3600
+
+
+def _with_imported_baseline(recipe: Dict[str, Any], until: str) -> Dict[str, Any]:
+    """Keep a YAML recipe's run count and last use as a baseline.
+
+    ``until`` is the import time as an execution key: executions up to it
+    are already in ``run_count``, so ``get_recipes`` only adds later ones.
+    """
+    metadata = dict(recipe.get("metadata") or {})
+    metadata["imported"] = {
+        "run_count": metadata.pop("run_count", 0) or 0,
+        "last_seen": metadata.pop("last_seen", None),
+        "until": until,
+    }
+    return {**recipe, "metadata": metadata}
+
+
+def _resources_section(resource_data: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "requested": resource_data.get("resources_requested", {}),
+        "used": resource_data.get("resources_used", {}),
+        "efficiency": resource_data.get("efficiency", {}),
+        "execution_env": resource_data.get("execution", {}),
+        "timing": resource_data.get("timing", {}),
+    }
 
 
 class HistoryManager:
@@ -41,8 +78,11 @@ class HistoryManager:
             config_dir = Path.home() / ".config" / "qxub"
 
         self.config_dir = Path(config_dir)
+        # Written by older qxub; imported on first use
         self.recipes_file = self.config_dir / "recipes.yaml"
         self.executions_file = self.config_dir / "executions.yaml"
+        self._recipes = RecordStore(self.config_dir / "history" / "recipes")
+        self._executions = RecordStore(self.config_dir / "history" / "executions")
 
         # Ensure config directory exists
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -155,6 +195,8 @@ class HistoryManager:
 
         return recipe
 
+    # -- writing -------------------------------------------------------------
+
     def log_execution(
         self,
         ctx,
@@ -165,12 +207,13 @@ class HistoryManager:
         file_paths: Optional[Dict[str, str]] = None,
         tags: Optional[List[str]] = None,
     ) -> str:
-        """Log a command execution and return the execution timestamp."""
-        try:
-            # Generate microsecond timestamp
-            execution_timestamp = str(int(time.time() * 1000000))
+        """Log a command execution and return the execution timestamp.
 
-            # Extract recipe from command
+        The timestamp is the record's key; pass it to
+        ``update_execution_with_resources`` once the job has finished.
+        """
+        execution_timestamp = str(int(time.time() * 1000000))
+        try:
             import sys
 
             command_line = " ".join(sys.argv)
@@ -179,70 +222,20 @@ class HistoryManager:
             # Only proceed if we have a valid executor (not config commands, etc.)
             if not recipe_data.get("executor") or recipe_data["executor"].get(
                 "type"
-            ) not in [
-                "conda",
-                "module",
-                "sing",
-                "default",  # Added default execution type
-            ]:
-                return execution_timestamp  # Skip logging for non-execution commands
+            ) not in ["conda", "module", "sing", "default"]:
+                return execution_timestamp
 
-            # Compute recipe hash
+            self._import_legacy_yaml()
+
             recipe_hash = self.compute_recipe_hash(recipe_data)
+            now = datetime.now().isoformat()
+            # A recipe's content depends only on its hash, so whichever
+            # process writes it first, the result is the same. Run counts and
+            # last-seen times are derived from the execution records.
+            self._recipes.write_if_absent(
+                recipe_hash, {**recipe_data, "metadata": {"first_seen": now}}
+            )
 
-            # Load or create recipes file
-            if self.recipes_file.exists():
-                try:
-                    recipes_config = OmegaConf.load(self.recipes_file)
-                    if not recipes_config:
-                        recipes_config = OmegaConf.create({"recipes": {}})
-                except Exception:
-                    recipes_config = OmegaConf.create({"recipes": {}})
-            else:
-                recipes_config = OmegaConf.create({"recipes": {}})
-
-            # Ensure recipes key exists
-            if "recipes" not in recipes_config:
-                recipes_config.recipes = {}
-
-            # Add or update recipe
-            if recipe_hash not in recipes_config.recipes:
-                # New recipe
-                recipes_config.recipes[recipe_hash] = {
-                    **recipe_data,
-                    "metadata": {
-                        "first_seen": datetime.now().isoformat(),
-                        "last_seen": datetime.now().isoformat(),
-                        "run_count": 1,
-                    },
-                }
-            else:
-                # Update existing recipe metadata
-                recipes_config.recipes[recipe_hash].metadata.last_seen = (
-                    datetime.now().isoformat()
-                )
-                recipes_config.recipes[recipe_hash].metadata.run_count += 1
-
-            # Save recipes file
-            with open(self.recipes_file, "w", encoding="utf-8") as f:
-                OmegaConf.save(recipes_config, f, resolve=True)
-
-            # Load or create executions file
-            if self.executions_file.exists():
-                try:
-                    executions_config = OmegaConf.load(self.executions_file)
-                    if not executions_config:
-                        executions_config = OmegaConf.create({"executions": {}})
-                except Exception:
-                    executions_config = OmegaConf.create({"executions": {}})
-            else:
-                executions_config = OmegaConf.create({"executions": {}})
-
-            # Ensure executions key exists
-            if "executions" not in executions_config:
-                executions_config.executions = {}
-
-            # Create execution record
             execution_record = {
                 "recipe_hash": recipe_hash,
                 "context": {
@@ -250,114 +243,136 @@ class HistoryManager:
                     "working_directory": os.getcwd(),
                     "user": os.getenv("USER", "unknown"),
                 },
-                "requested": {"main_options": ctx.params.copy() if ctx.params else {}},
+                "requested": {
+                    "main_options": dict(ctx.params) if ctx and ctx.params else {}
+                },
                 "execution": {
                     "job_id": job_id,
                     "joblog": None,  # To be filled in later if available
                     "status": "completed" if success else "failed",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": now,
                     "exit_code": (
                         resource_data.get("exit_status") if resource_data else None
                     ),
                 },
             }
-
-            # Add resource information if available
             if resource_data:
-                execution_record["resources"] = {
-                    "requested": resource_data.get("resources_requested", {}),
-                    "used": resource_data.get("resources_used", {}),
-                    "efficiency": resource_data.get("efficiency", {}),
-                    "execution_env": resource_data.get("execution", {}),
-                    "timing": resource_data.get("timing", {}),
-                }
-
+                execution_record["resources"] = _resources_section(resource_data)
             if error:
                 execution_record["execution"]["error"] = error
-
-            # Add tags (resolved merged list)
             execution_record["tags"] = tags or []
-
-            # Add file paths if provided
             if file_paths:
                 execution_record["files"] = file_paths
 
-            # Add execution record
-            executions_config.executions[execution_timestamp] = execution_record
-
-            # Keep only last 1000 executions to prevent file from growing too large
-            if len(executions_config.executions) > 1000:
-                # Sort by timestamp and keep the most recent 1000
-                sorted_timestamps = sorted(executions_config.executions.keys(), key=int)
-                old_timestamps = sorted_timestamps[:-1000]
-                for ts in old_timestamps:
-                    del executions_config.executions[ts]
-
-            # Save executions file
-            with open(self.executions_file, "w", encoding="utf-8") as f:
-                OmegaConf.save(executions_config, f, resolve=True)
-
+            execution_timestamp = self._executions.create_unique(
+                int(execution_timestamp), execution_record
+            )
+            self._executions.prune(
+                keep=MAX_EXECUTIONS,
+                slack=PRUNE_SLACK,
+                protect=self._awaiting_update,
+            )
             return execution_timestamp
 
         except Exception as e:
             # Don't let history logging break the main command
-            import logging
+            logger.warning("Failed to log execution to history: %s", e)
+            return execution_timestamp
 
-            logger.debug("Failed to log execution to history: %s", str(e))
-            return str(int(time.time() * 1000000))
+    def _awaiting_update(self, key: str) -> bool:
+        """True for a recent record that has no job ID yet.
+
+        The key is the creation time in microseconds, so only records younger
+        than ``AWAITING_UPDATE_SECONDS`` are read.
+        """
+        cutoff = (time.time() - AWAITING_UPDATE_SECONDS) * 1000000
+        if int(key) < cutoff:
+            return False
+        record = self._executions.read(key)
+        if record is None:
+            return True  # claimed but not written yet: its writer is still running
+        return not (record.get("execution") or {}).get("job_id")
 
     def update_execution_with_resources(
         self, execution_timestamp: str, job_id: str, resource_data: Dict[str, Any]
     ) -> bool:
-        """Update an existing execution record with resource data after job completion."""
-        if not self.executions_file.exists():
-            return False
-
+        """Update an execution record with resource data after job completion."""
         try:
-            # Load executions
-            config = OmegaConf.load(self.executions_file)
-            executions = config.get("executions", {})
-
-            if execution_timestamp not in executions:
+            record = self._executions.read(str(execution_timestamp))
+            if record is None:
+                logger.warning(
+                    "History record %s not found; job %s not recorded",
+                    execution_timestamp,
+                    job_id,
+                )
                 return False
 
-            # Update the execution record
-            execution = executions[execution_timestamp]
-            execution.execution.job_id = job_id
-            execution.execution.exit_code = resource_data.get("exit_status")
-
-            # Add resource information
+            execution = record.setdefault("execution", {})
+            execution["job_id"] = job_id
+            execution["exit_code"] = resource_data.get("exit_status")
             if resource_data:
-                execution.resources = {
-                    "requested": resource_data.get("resources_requested", {}),
-                    "used": resource_data.get("resources_used", {}),
-                    "efficiency": resource_data.get("efficiency", {}),
-                    "execution_env": resource_data.get("execution", {}),
-                    "timing": resource_data.get("timing", {}),
-                }
+                record["resources"] = _resources_section(resource_data)
 
-            # Save updated executions
-            with open(self.executions_file, "w", encoding="utf-8") as f:
-                OmegaConf.save(config, f, resolve=True)
-
+            self._executions.write(str(execution_timestamp), record)
             return True
 
         except Exception as e:
-            import logging
-
-            logger.debug("Failed to update execution with resources: %s", str(e))
+            logger.warning("Failed to update execution with resources: %s", e)
             return False
 
-    def get_recipes(self) -> Dict[str, Any]:
-        """Get all recipes."""
-        if not self.recipes_file.exists():
-            return {}
+    # -- reading -------------------------------------------------------------
 
-        try:
-            config = OmegaConf.load(self.recipes_file)
-            return config.get("recipes", {})
-        except Exception:
-            return {}
+    def _all_executions(self) -> Iterator[Dict[str, Any]]:
+        """Execution records, newest first, each with its ``timestamp`` key."""
+        self._import_legacy_yaml()
+        for ts, record in self._executions.items_newest_first():
+            record["timestamp"] = ts
+            yield record
+
+    def get_recipes(self) -> Dict[str, Any]:
+        """All recipes, with ``run_count`` and ``last_seen`` filled in.
+
+        Both are derived from the execution records rather than stored as
+        counters, which every process would have to rewrite. A recipe
+        imported from ``recipes.yaml`` keeps its old totals as a baseline
+        (``metadata.imported``); executions logged after the import are
+        added to it, and earlier ones are already included in it.
+
+        Executions pruned beyond the newest ``MAX_EXECUTIONS`` stop
+        counting, so for recipes created after the import ``run_count`` is
+        the number of runs still in history, not a lifetime total.
+        """
+        self._import_legacy_yaml()
+        recipes = {}
+        for recipe_hash in self._recipes.keys():
+            recipe = self._recipes.read(recipe_hash)
+            if recipe is not None:
+                recipes[recipe_hash] = recipe
+
+        def imported(recipe_hash: str) -> Dict[str, Any]:
+            recipe = recipes.get(recipe_hash) or {}
+            return (recipe.get("metadata") or {}).get("imported") or {}
+
+        usage: Dict[str, Dict[str, Any]] = {}
+        for execution in self._all_executions():
+            h = execution.get("recipe_hash")
+            if int(execution["timestamp"]) <= int(imported(h).get("until", 0)):
+                continue  # already counted in the imported baseline
+            when = (execution.get("execution") or {}).get("timestamp")
+            if h not in usage:
+                usage[h] = {"last_seen": when, "run_count": 0}  # newest first
+            usage[h]["run_count"] += 1
+
+        for recipe_hash, recipe in recipes.items():
+            metadata = recipe.setdefault("metadata", {})
+            baseline = imported(recipe_hash)
+            used = usage.get(recipe_hash, {})
+            metadata["run_count"] = int(baseline.get("run_count") or 0) + used.get(
+                "run_count", 0
+            )
+            seen = [t for t in (baseline.get("last_seen"), used.get("last_seen")) if t]
+            metadata["last_seen"] = max(seen) if seen else metadata.get("first_seen")
+        return recipes
 
     def get_executions(
         self,
@@ -365,70 +380,74 @@ class HistoryManager:
         tags: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get recent executions, optionally filtered by tags."""
-        if not self.executions_file.exists():
-            return []
-
-        try:
-            config = OmegaConf.load(self.executions_file)
-            executions = config.get("executions", {})
-
-            # Sort by timestamp (most recent first)
-            sorted_timestamps = sorted(executions.keys(), key=int, reverse=True)
-
-            result = []
-            for ts in sorted_timestamps:
-                execution = dict(executions[ts])
-                execution["timestamp"] = ts
-
-                if tags:
-                    record_tags = list(execution.get("tags") or [])
-                    if not all(t in record_tags for t in tags):
-                        continue
-
-                result.append(execution)
-                if len(result) >= limit:
-                    break
-
-            return result
-        except Exception:
-            return []
+        result = []
+        for execution in self._all_executions():
+            if tags:
+                record_tags = list(execution.get("tags") or [])
+                if not all(t in record_tags for t in tags):
+                    continue
+            result.append(execution)
+            if len(result) >= limit:
+                break
+        return result
 
     def get_recipe_by_hash(self, recipe_hash: str) -> Optional[Dict[str, Any]]:
         """Get a specific recipe by hash."""
-        recipes = self.get_recipes()
-        return recipes.get(recipe_hash)
+        return self.get_recipes().get(recipe_hash)
 
     def get_executions_for_recipe(
         self, recipe_hash: str, limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """Get executions for a specific recipe."""
-        if not self.executions_file.exists():
-            return []
-
-        try:
-            config = OmegaConf.load(self.executions_file)
-            executions = config.get("executions", {})
-
-            # Filter executions for this recipe
-            matching_executions = []
-            for ts, execution in executions.items():
-                if execution.get("recipe_hash") == recipe_hash:
-                    exec_copy = execution.copy()
-                    exec_copy["timestamp"] = ts
-                    matching_executions.append(exec_copy)
-
-            # Sort by timestamp (most recent first) and limit
-            matching_executions.sort(key=lambda x: int(x["timestamp"]), reverse=True)
-            return matching_executions[:limit]
-        except Exception:
-            return []
+        """Get executions for a specific recipe, most recent first."""
+        result = []
+        for execution in self._all_executions():
+            if execution.get("recipe_hash") == recipe_hash:
+                result.append(execution)
+                if len(result) >= limit:
+                    break
+        return result
 
     def clear_all_history(self):
         """Clear all history (recipes and executions)."""
-        if self.recipes_file.exists():
-            self.recipes_file.unlink()
-        if self.executions_file.exists():
-            self.executions_file.unlink()
+        self._executions.clear()
+        self._recipes.clear()
+        for legacy in (self.executions_file, self.recipes_file):
+            if legacy.exists():
+                legacy.unlink()
+
+    # -- migration from the YAML files ---------------------------------------
+
+    def _import_legacy_yaml(self) -> None:
+        """Import ``executions.yaml``/``recipes.yaml`` written by older qxub.
+
+        Records are written only if absent, so running this twice, in two
+        processes at once, or after an older qxub re-created the YAML files,
+        is harmless. Each file is renamed to ``*.imported`` afterwards.
+        """
+        for path, store, key in (
+            (self.recipes_file, self._recipes, "recipes"),
+            (self.executions_file, self._executions, "executions"),
+        ):
+            if not path.exists():
+                continue
+            try:
+                from omegaconf import OmegaConf
+
+                data = OmegaConf.to_container(OmegaConf.load(path)) or {}
+            except Exception as e:  # unreadable: leave it for a human
+                logger.warning("Could not import %s: %s", path, e)
+                continue
+            until = str(int(time.time() * 1000000))
+            for record_key, record in (data.get(key) or {}).items():
+                if not isinstance(record, dict):
+                    continue
+                if key == "recipes":
+                    record = _with_imported_baseline(record, until)
+                store.write_if_absent(str(record_key), record)
+            try:
+                os.replace(path, path.with_name(path.name + ".imported"))
+            except FileNotFoundError:
+                pass  # another process got there first
 
     def convert_recipe_to_alias(self, recipe_hash: str) -> Optional[Dict[str, Any]]:
         """Convert a recipe to alias format for backward compatibility."""
@@ -455,31 +474,15 @@ class HistoryManager:
         Supports both full IDs (e.g., "153392916.gadi-pbs") and partial numeric
         IDs (e.g., "153392916"). Partial IDs match the portion before the first dot.
 
-        Args:
-            job_id: PBS job ID, full or numeric-only prefix.
-
         Returns:
             Execution record dictionary with 'timestamp' field added, or None if not found.
             The record includes 'files' section with paths to out, err, and joblog files.
         """
-        if not self.executions_file.exists():
-            return None
-
-        try:
-            config = OmegaConf.load(self.executions_file)
-            if not config or "executions" not in config:
-                return None
-
-            # Search through executions for matching job_id (exact or numeric prefix)
-            for timestamp, execution in config.executions.items():
-                stored_id = execution.get("execution", {}).get("job_id") or ""
-                if stored_id == job_id or stored_id.split(".")[0] == job_id:
-                    execution_copy = dict(execution)
-                    execution_copy["timestamp"] = timestamp
-                    return execution_copy
-            return None
-        except Exception:
-            return None
+        for execution in self._all_executions():
+            stored_id = (execution.get("execution") or {}).get("job_id") or ""
+            if stored_id == job_id or stored_id.split(".")[0] == job_id:
+                return execution
+        return None
 
     def get_most_recent_execution(self) -> Optional[Dict[str, Any]]:
         """Get the most recent execution record.

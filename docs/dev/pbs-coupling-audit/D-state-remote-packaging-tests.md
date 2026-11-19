@@ -245,7 +245,7 @@ Severity: **High** = blocks any non-PBS backend or causes unsafe behaviour on on
 
 ## Proposed seams
 
-1. **Backend identity on every record.** Add `backend`, `platform` and `cluster` columns to `queue` and `project_jobs` through `_QUEUE_NEW_COLUMNS` and a new `_PROJECT_JOBS_NEW_COLUMNS`, backfilling `'pbs'`. Mirror them in history `executions.yaml` records. Replace the `project_jobs` PK with `entry_id` and add `UNIQUE(backend, cluster, native_job_id)`. Rename `pbs_job_id` to `native_job_id`, keeping a compatibility view or alias for one release.
+1. **Backend identity on every record.** Add `backend`, `platform` and `cluster` columns to `queue` and `project_jobs` through `_QUEUE_NEW_COLUMNS` and a new `_PROJECT_JOBS_NEW_COLUMNS`, backfilling `'pbs'`. Mirror them in history execution records. Replace the `project_jobs` PK with `entry_id` and add `UNIQUE(backend, cluster, native_job_id)`. Rename `pbs_job_id` to `native_job_id`, keeping a compatibility view or alias for one release.
 
 2. **Opaque `JobRef`.**
    ```python
