@@ -42,7 +42,11 @@ def runs_dir() -> Path:
 
 
 def run_file(run_id: str) -> Path:
-    return runs_dir() / f"{run_id}{SUFFIX}"
+    return run_file_in(runs_dir(), run_id)
+
+
+def run_file_in(directory, run_id: str) -> Path:
+    return Path(directory) / f"{run_id}{SUFFIX}"
 
 
 def _value(value: Any) -> str:
@@ -86,6 +90,16 @@ def write_submitted(run_id: str, fields: Dict[str, Any]) -> Optional[Path]:
         _warned = True
         logger.log(level, "Could not write run file %s: %s", path, exc)
         return None
+
+
+def discard(path: Optional[Path]) -> None:
+    """Remove a run file whose job was never submitted (``qsub`` failed)."""
+    if path is None:
+        return
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass
 
 
 def read_run(path) -> Optional[Dict[str, str]]:

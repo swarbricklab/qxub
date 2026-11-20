@@ -116,6 +116,33 @@ Monitor options with defaults:
 - `monitor.default_suffix` - Suffix to remove from job IDs in display
 - `monitor.default_interval` - Refresh interval in seconds (default: 30)
 
+## Resource Statistics Snapshot
+
+Each job records its state in a small run file under
+`<scratch>/qxub/status/runs/`. Now and then, qxub folds finished runs into a
+statistics database, `qxub-stats.db`, with each job's requested and used
+resources (from its joblog, or `qstat -fx`). It publishes a new copy of the
+database each time instead of updating it in place, so it is safe on
+`/scratch` and `/g/data`. Run files are removed 7 days after they are added.
+
+A round starts in the background after a submission when the last one was
+more than 6 hours ago. To run one yourself, for example from a Snakemake
+`onsuccess:` hook:
+
+```bash
+qxub db consolidate      # add finished runs, remove old run files
+qxub db status           # snapshot age, job count, run files waiting
+```
+
+- `stats_db.path` - Where the snapshot is published (default:
+  `stats/qxub-stats.db` beside `shared_db.path`). Every user who publishes
+  needs write access to its directory: qxub creates it group-writable and
+  setgid, and `qxub db status` warns if you can't write it. Give the
+  snapshot a directory of its own, since everyone in the group can replace
+  files there.
+- `stats_db.auto_consolidate` - Set to `false` to stop background rounds
+  (or set `QXUB_AUTO_CONSOLIDATE=0`).
+
 ## Aliases
 
 Create shortcuts for common workflows:

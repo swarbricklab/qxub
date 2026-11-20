@@ -83,6 +83,8 @@ class QxubSandbox:
             XDG_STATE_HOME=str(self.home / ".local" / "state"),
             # Never match a platform's host pattern by accident (e.g. on Gadi)
             HOSTNAME="qxub-test-host",
+            # No background consolidation rounds (qxub.queue.consolidate)
+            QXUB_AUTO_CONSOLIDATE="0",
         )
         self.env = env
 

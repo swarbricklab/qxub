@@ -13,8 +13,8 @@ Behaviour is driven by environment variables:
 ``FAKE_QDEL_EXIT``   Exit code for ``qdel`` (default 0); stderr is
                      ``FAKE_QDEL_STDERR``.
 
-``qstat -fx JOBID`` prints ``$FAKE_PBS_STATE/qstat/JOBID.txt`` if it exists,
-otherwise it fails the way PBS does for an unknown job.
+``qstat -fx JOBID...`` prints ``$FAKE_PBS_STATE/qstat/JOBID.txt`` for each
+job that has one, and fails the way PBS does if any job is unknown.
 """
 
 import json
@@ -69,12 +69,16 @@ def qstat(argv: list) -> None:
     job_ids = [a for a in argv if not a.startswith("-")]
     if not job_ids:
         return
-    canned = state / "qstat" / f"{job_ids[-1]}.txt"
-    if canned.exists():
-        sys.stdout.write(canned.read_text())
-        return
-    sys.stderr.write(f"qstat: Unknown Job Id {job_ids[-1]}\n")
-    sys.exit(153)
+    unknown = False
+    for job_id in job_ids:
+        canned = state / "qstat" / f"{job_id}.txt"
+        if canned.exists():
+            sys.stdout.write(canned.read_text().rstrip("\n") + "\n\n")
+        else:
+            sys.stderr.write(f"qstat: Unknown Job Id {job_id}\n")
+            unknown = True
+    if unknown:
+        sys.exit(153)
 
 
 def qdel(argv: list) -> None:
