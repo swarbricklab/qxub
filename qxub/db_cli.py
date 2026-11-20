@@ -48,10 +48,14 @@ def status():
         lease_path,
         open_snapshot,
         stats_db_path,
+        writable_problem,
     )
 
     snapshot = stats_db_path()
     click.echo(f"Snapshot:   {snapshot}")
+    problem = writable_problem(snapshot)
+    if problem:
+        click.echo(f"Warning:    cannot publish: {problem}")
     if snapshot.exists():
         conn = open_snapshot(snapshot)
         try:

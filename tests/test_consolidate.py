@@ -47,6 +47,7 @@ Job Id: {job_id}
     resources_used.ncpus = 2
     resources_used.walltime = 00:30:00
     resources_used.cpupercent = 150
+    resources_used.cput = 00:45:00
     Exit_status = {code}
 """
 
@@ -152,6 +153,8 @@ def test_usage_comes_from_one_batched_qstat_when_there_is_no_joblog(area):
     assert result.added == 2
     assert [r["mem_used_mb"] for r in rows(snapshot)] == [4096, 4096]
     assert rows(snapshot)[0]["cpu_percent"] == 150.0
+    # Review of #135: the same measure as from a joblog, not cpupercent.
+    assert rows(snapshot)[0]["cpu_efficiency"] == 75.0  # 45 min / (30 min x 2)
 
 
 def test_query_qstat_parses_several_jobs_from_one_call(sandbox, monkeypatch):
@@ -376,6 +379,56 @@ def test_stale_lease_is_broken(area):
     assert [p.name for p in snapshot.parent.iterdir()] == ["qxub-stats.db"]
 
 
+def test_round_that_lost_its_lease_does_not_publish(area):
+    """Review of #135: a round past LEASE_STALE_SECONDS whose lease was taken."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    lease = cons.lease_path(snapshot)
+
+    def qstat_while_lease_is_taken_over(job_ids):
+        os.rename(lease, lease.with_name("gone"))
+        assert cons.Lease(lease).acquire()
+        return {}
+
+    result = run(area, qstat=qstat_while_lease_is_taken_over)
+
+    assert not result.published and "lost the lease" in result.errors[0]
+    assert not snapshot.exists()
+    assert lease.is_dir(), "the other round's lease is left alone"
+
+
+def test_unwritable_snapshot_directory_is_reported(area):
+    """Review of #135: other users couldn't take the lease, silently."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    snapshot.parent.mkdir()
+    snapshot.parent.chmod(0o555)
+    try:
+        result = run(area, qstat=lambda ids: {})
+    finally:
+        snapshot.parent.chmod(0o755)
+
+    assert "chmod g+ws" in result.skipped
+    assert cons.writable_problem(snapshot) is None
+
+
+def test_snapshot_directory_is_created_group_writable(area):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+
+    run(area, qstat=lambda ids: {})
+
+    assert snapshot.parent.stat().st_mode & 0o070 == 0o070
+    assert snapshot.stat().st_mode & 0o040
+
+
+def test_default_snapshot_has_its_own_directory(tmp_path, monkeypatch):
+    monkeypatch.delenv("QXUB_STATS_DB", raising=False)
+    monkeypatch.setenv("QXUB_DB_PATH", str(tmp_path / "config" / "qxub.db"))
+
+    assert cons.stats_db_path() == tmp_path / "config" / "stats" / "qxub-stats.db"
+
+
 WORKER = textwrap.dedent(
     """
     import sys
@@ -424,7 +477,9 @@ def test_concurrent_rounds_from_many_users_lose_nothing(tmp_path):
 def test_first_submission_starts_the_clock_instead_of_a_round(tmp_path, monkeypatch):
     monkeypatch.delenv("QXUB_AUTO_CONSOLIDATE", raising=False)
     started = []
-    monkeypatch.setattr(cons.subprocess, "Popen", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(
+        cons.subprocess, "Popen", lambda *a, **k: started.append((a, k))
+    )
 
     assert not cons.maybe_start_in_background(tmp_path)
     assert (tmp_path / cons.ATTEMPT_MARKER).exists()
@@ -433,7 +488,9 @@ def test_first_submission_starts_the_clock_instead_of_a_round(tmp_path, monkeypa
     old = time.time() - cons.DUE_SECONDS - 60
     os.utime(tmp_path / cons.ATTEMPT_MARKER, (old, old))
     assert cons.maybe_start_in_background(tmp_path)
-    assert started and started[0][0][1:] == ["-m", "qxub.queue.consolidate"]
+    ((args, kwargs),) = started
+    assert args[0][1:] == ["-m", "qxub.queue.consolidate"]
+    assert kwargs["cwd"] == str(tmp_path), "not the user's cwd (review of #135)"
     assert not cons.maybe_start_in_background(tmp_path), "the clock restarted"
 
 

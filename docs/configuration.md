@@ -135,8 +135,11 @@ qxub db status           # snapshot age, job count, run files waiting
 ```
 
 - `stats_db.path` - Where the snapshot is published (default:
-  `qxub-stats.db` next to `shared_db.path`). Every user who writes it needs
-  write access to its directory.
+  `stats/qxub-stats.db` beside `shared_db.path`). Every user who publishes
+  needs write access to its directory: qxub creates it group-writable and
+  setgid, and `qxub db status` warns if you can't write it. Give the
+  snapshot a directory of its own, since everyone in the group can replace
+  files there.
 - `stats_db.auto_consolidate` - Set to `false` to stop background rounds
   (or set `QXUB_AUTO_CONSOLIDATE=0`).
 

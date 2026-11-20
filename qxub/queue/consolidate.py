@@ -32,6 +32,7 @@ import os
 import shutil
 import socket
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -46,6 +47,9 @@ from . import runs
 logger = logging.getLogger(__name__)
 
 STATS_DB_NAME = "qxub-stats.db"
+# The snapshot gets a directory of its own: every user who publishes needs
+# write access to it, which the config directory beside it shouldn't grant.
+STATS_DIR_NAME = "stats"
 SNAPSHOT_VERSION = 1
 
 # A round that holds the lease longer than this is presumed dead.
@@ -74,7 +78,7 @@ def stats_db_path() -> Path:
     """The published snapshot.
 
     ``QXUB_STATS_DB``, then ``stats_db.path`` from config, then
-    ``qxub-stats.db`` next to the job database (``shared_db.path``).
+    ``stats/qxub-stats.db`` beside the job database (``shared_db.path``).
     """
     env = os.environ.get("QXUB_STATS_DB")
     if env:
@@ -84,7 +88,37 @@ def stats_db_path() -> Path:
         return Path(str(configured))
     from .db import get_db_path  # pylint: disable=import-outside-toplevel
 
-    return get_db_path().parent / STATS_DB_NAME
+    return get_db_path().parent / STATS_DIR_NAME / STATS_DB_NAME
+
+
+def prepare_dir(directory: Path) -> None:
+    """Create the snapshot directory so the whole group can publish to it.
+
+    Group-writable and setgid when this process creates it. An existing
+    directory is left as it is; ``writable_problem`` reports on it.
+    """
+    if directory.is_dir():
+        return
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        mode = directory.stat().st_mode
+        os.chmod(directory, mode | stat.S_IRWXG | stat.S_ISGID)
+    except OSError as exc:
+        logger.debug("Could not make %s group-writable: %s", directory, exc)
+
+
+def writable_problem(snapshot: Path) -> Optional[str]:
+    """Why this user can't publish ``snapshot``, or None if they can."""
+    directory = snapshot.parent
+    while not directory.exists() and directory.parent != directory:
+        directory = directory.parent
+    if os.access(directory, os.W_OK | os.X_OK):
+        return None
+    return (
+        f"{directory} is not writable by {os.environ.get('USER') or 'this user'}."
+        f" Its owner can run `chmod g+ws {directory}`, or set stats_db.path"
+        " to a directory you can write"
+    )
 
 
 def _config_value(key: str):
@@ -121,6 +155,7 @@ class Lease:
         self.stale_seconds = stale_seconds
         self.token = uuid.uuid4().hex
         self.held = False
+        self.error: Optional[OSError] = None
 
     def _owner(self, directory: Path) -> Optional[str]:
         try:
@@ -155,6 +190,7 @@ class Lease:
                     return False
                 continue
             except OSError as exc:
+                self.error = exc
                 logger.warning("Cannot take the lease %s: %s", self.path, exc)
                 return False
             self.held = True
@@ -189,6 +225,11 @@ class Lease:
         logger.warning("Broke a stale consolidation lease (%s)", (seen or "").strip())
         shutil.rmtree(aside, ignore_errors=True)
         return True
+
+    def still_held(self) -> bool:
+        """True unless the lease was broken as stale and taken by another."""
+        owner = self._owner(self.path)
+        return self.held and owner is not None and f"token={self.token}" in owner
 
     def release(self) -> None:
         if not self.held:
@@ -277,6 +318,8 @@ def usage_from_qstat(data: Dict[str, Any]) -> Dict[str, Any]:
         cpu_percent = float(used["cpupercent"])
     except (KeyError, TypeError, ValueError):
         cpu_percent = None
+    ncpus = integer(used.get("ncpus")) or integer(requested.get("ncpus"))
+    cpu_time = seconds(used.get("cput"))
     return {
         "mem_requested_mb": _mb(mem_req),
         "mem_used_mb": _mb(mem_used),
@@ -289,7 +332,9 @@ def usage_from_qstat(data: Dict[str, Any]) -> Dict[str, Any]:
         "cpu_percent": cpu_percent,
         "mem_efficiency": efficiency.get("memory_efficiency", _pct(mem_used, mem_req)),
         "time_efficiency": efficiency.get("time_efficiency", _pct(wall_used, wall_req)),
-        "cpu_efficiency": efficiency.get("cpu_efficiency"),
+        # As for the joblog: CPU time / (walltime x CPUs). PBS's cpupercent,
+        # which the tracker stores as cpu_efficiency, is not divided by CPUs.
+        "cpu_efficiency": _pct(cpu_time, (wall_used or 0) * (ncpus or 0)),
         "jobfs_efficiency": efficiency.get(
             "jobfs_efficiency", _pct(jobfs_used, jobfs_req)
         ),
@@ -474,13 +519,20 @@ def consolidate(
     result = Result(snapshot=snapshot)
     _touch(runs_dir / ATTEMPT_MARKER)
 
+    problem = writable_problem(snapshot)
+    if problem:
+        result.skipped = problem
+        return result
     try:
-        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        prepare_dir(snapshot.parent)
     except OSError as exc:
         result.skipped = f"cannot create {snapshot.parent}: {exc}"
         return result
     lease = Lease(lease_path(snapshot))
     if not lease.acquire():
+        if lease.error is not None:
+            result.skipped = f"cannot take the lease: {lease.error}"
+            return result
         holder = lease.holder() or {}
         result.skipped = "another consolidation is running ({}@{})".format(
             holder.get("user", "?"), holder.get("host", "?")
@@ -525,6 +577,10 @@ def consolidate(
             conn.close()
 
         if changed and not dry_run:
+            if not lease.still_held():
+                # This round outlived LEASE_STALE_SECONDS and another took
+                # over; publishing now would drop that round's runs.
+                raise OSError(f"lost the lease {lease.path}; not publishing")
             _publish(private, snapshot)
             result.published = True
         if not dry_run:
@@ -681,29 +737,36 @@ def _settle_run_file(path: Path, code: int, stamp: str) -> None:
 
 
 def _publish(private: Path, snapshot: Path) -> None:
-    if snapshot.exists():
-        try:
+    try:
+        if snapshot.exists():
             shutil.copymode(snapshot, private)
-        except OSError:
-            pass
+        else:
+            os.chmod(private, private.stat().st_mode | stat.S_IRGRP)
+    except OSError:
+        pass
     with open(private, "rb") as fh:
         os.fsync(fh.fileno())
     os.replace(private, snapshot)
 
 
 def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -> int:
+    """Remove this user's run files that the snapshot has held since ``cutoff``.
+
+    Walks the run files that exist, not the snapshot, so the cost stays
+    proportional to what is on disk.
+    """
     removed = 0
-    for run_id, when in consolidated.items():
-        at = _parse_time(when)
+    for path in _run_files(runs_dir):
+        at = _parse_time(consolidated.get(path.name[: -len(runs.SUFFIX)]))
         if not at or at > cutoff:
             continue
         try:
-            runs.run_file_in(runs_dir, run_id).unlink()
+            path.unlink()
             removed += 1
         except FileNotFoundError:
             pass
         except OSError as exc:
-            logger.debug("Could not remove run file %s: %s", run_id, exc)
+            logger.debug("Could not remove run file %s: %s", path, exc)
     return removed
 
 
@@ -775,6 +838,8 @@ def maybe_start_in_background(runs_dir: Optional[Path] = None) -> bool:
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
                 close_fds=True,
+                # Not the user's cwd: `-m` would import a qxub checkout there.
+                cwd=str(runs_dir),
                 env={**os.environ, "QXUB_AUTO_CONSOLIDATE": "0"},
             )
         return True
