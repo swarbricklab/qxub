@@ -75,7 +75,7 @@ Per-run files fit the first column. A database consolidated from those files now
 
 Under `localflock` this only helps between processes on the same node, such as the per-user DB. **It does not prevent corruption of a DB written from several nodes.**
 
-### Phase 2: one file per run (with audit step 3b). This is the fix for live state.
+### Phase 2: one file per run (#133, merged). This is the fix for live state.
 
 - **One file per run, keyed on `QXUB_RUN_ID`:**
   ```
@@ -97,18 +97,20 @@ Under `localflock` this only helps between processes on the same node, such as t
   - `cancel` and `list` scan the spool for unfinished runs.
 - **Compatibility:** the existing `final_exit_code_*` files stay for one release.
 
-### Phase 3: occasional consolidation into a published snapshot
+### Phase 3: occasional consolidation into a published snapshot (#135)
 
 - **The consolidator** reads finished run files and builds the statistics DB:
   - It applies them to a **private copy** of `qxub-stats.db` (copy, insert, `PRAGMA integrity_check`).
+  - The snapshot lives in a directory of its own (`stats/` beside `shared_db.path`), created group-writable and setgid. Every publishing user needs write access to it, which the config directory beside it shouldn't grant.
   - Then it publishes the copy with `rename`. The DB is a few MB, so copying each round is cheap.
 - **Why copy instead of updating in place:** under `localflock`, a *reader* on another node can't see the writer's lock. It would treat the writer's rollback journal as left over from a crash and "roll it back", which corrupts the file even with a single writer.
   - Readers open the published file with `?immutable=1`, so they never touch journals.
   - Readers always see a complete snapshot.
 - **One consolidator at a time, without POSIX locks:**
-  - The consolidator takes a lease with `mkdir <spool_dir>/.consolidate.lease`, recording host, pid and start time.
+  - The consolidator takes a lease with `mkdir .qxub-stats.db.lease` next to the snapshot, recording a token, host, pid and start time. It sits with the snapshot, not in each user's spool, because every user publishes to the same file.
   - A lease older than a few hours is stale. A process breaks it by renaming it out of the way, and only one rename wins.
   - A process that doesn't get the lease skips this round.
+  - Just before publishing, a round checks the lease still holds its token. A round that outlived the stale timeout, and whose lease was taken over, doesn't publish, so it can't drop the other round's runs.
 - **Resource usage is collected here:**
   - PBS appends resource usage to the joblog only *after* the job script exits, so the job can never record it itself.
   - The consolidator parses joblogs, as `backfill_resources` does today. It also calls `qstat -fx` while PBS still remembers the job.
