@@ -142,8 +142,13 @@ qxub db status           # snapshot age, job count, run files waiting
 Earlier versions wrote every job to one team-wide database at
 `shared_db.path`. With many login nodes writing it on Lustre it became
 corrupt, so qxub no longer writes it: each user's job DB is
-`~/.config/qxub/qxub.db` again. To keep the history it holds, import it into
-the snapshot once:
+`~/.config/qxub/qxub.db` again.
+
+**After upgrading,** `qxtat list` and `qxtat summary` start from your own,
+possibly empty, job DB and show only jobs you submit from then on. They no
+longer show teammates' jobs or the old history. The finished jobs in that
+history are kept for `qxub resources` reports once you import them into the
+snapshot:
 
 ```bash
 qxub db recover --dry-run   # how many jobs it would add
@@ -153,7 +158,10 @@ qxub db recover             # reads shared_db.path, or: qxub db recover OLD.db
 The old file is only read. If it is too damaged to read straight through,
 qxub rebuilds a copy with the `sqlite3` command's `.recover`. That needs
 SQLite 3.29 or later; qxub's conda environment includes it. Jobs the snapshot already has are
-kept, so running it twice is harmless. Once it is recovered you can archive
+kept, so running it twice is harmless. Rows the corruption garbled (a job ID
+that isn't a PBS ID, a time that isn't a date, text in a number column) are
+left out, and a job still marked running with an exit code is stored as
+completed or failed from that code. Once it is recovered you can archive
 the old file; `shared_db.path` still decides where `stats/` goes by default.
 
 - `stats_db.path` - Where the snapshot is published (default:

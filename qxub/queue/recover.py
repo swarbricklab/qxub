@@ -11,15 +11,20 @@ snapshot with the same lease and publish steps as a consolidation round
 2. If SQLite can't read it all ("database disk image is malformed"), the
    ``sqlite3`` command's ``.recover`` rebuilds what it can into a new file,
    and the rows come from that.
-3. Only finished jobs, or jobs with resource usage, are added: jobs still
-   marked submitted or running there are stale or will arrive from run files.
-   A job the snapshot already has is never overwritten.
+3. Rows the corruption garbled are left out (``malformed``): a job ID that
+   isn't a PBS ID, a time that isn't ISO, or text in a numeric column.
+4. A job still marked submitted or running but with an exit code lost its
+   last status update; it is stored as completed or failed from that code.
+5. Only finished jobs, or jobs with resource usage, are added: other jobs
+   still marked submitted or running are stale or will arrive from run
+   files. A job the snapshot already has is never overwritten.
 
 Running it again adds nothing new, so it is safe to repeat.
 """
 
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -35,6 +40,9 @@ from .consolidate import _round, stats_db_path
 logger = logging.getLogger(__name__)
 
 FINISHED = ("completed", "failed", "cancelled")
+# 12345678.gadi-pbs, 123[].gadi-pbs, 123[4].gadi-pbs, or a bare number.
+PBS_JOB_ID = re.compile(r"\d+(\[\d*\])?(\.[A-Za-z0-9][A-Za-z0-9.-]*)?")
+TIME_COLUMNS = ("timestamp", "submitted_at", "started_at", "completed_at")
 RECOVERED_FROM = "recovered_from"
 
 
@@ -49,6 +57,8 @@ class RecoverResult:
     added: int = 0
     present: int = 0
     unfinished: int = 0
+    malformed: int = 0
+    status_from_exit: int = 0
     skipped: Optional[str] = None
     published: bool = False
     errors: List[str] = field(default_factory=list)
@@ -61,7 +71,8 @@ class RecoverResult:
             f"Snapshot {state}: {self.snapshot}\n"
             f"Read {self.read} job(s) from {self.source} ({self.method}): "
             f"{self.added} added, {self.present} already there, "
-            f"{self.unfinished} unfinished and left out"
+            f"{self.malformed} malformed and {self.unfinished} unfinished left out"
+            f"; {self.status_from_exit} marked completed/failed from their exit code"
         )
 
 
@@ -93,22 +104,26 @@ def recover(
     result.read = len(rows)
 
     def add(conn) -> bool:
-        wanted = [c for c in columns if c in _snapshot_columns(conn)]
+        types = _snapshot_columns(conn)
+        wanted = [c for c in columns if c in types]
         if "job_id" not in wanted:
             raise sqlite3.DatabaseError(f"{source} has no job_id column")
-        index = {c: columns.index(c) for c in wanted}
+        numeric = {c for c in wanted if types[c] in ("INTEGER", "REAL")}
         names = ", ".join(wanted)
         marks = ", ".join("?" * len(wanted))
-        for row in rows:
-            job_id = row[columns.index("job_id")]
-            if not job_id:
+        for raw in rows:
+            row = {c: v for c, v in zip(columns, raw) if c in types}
+            if not _well_formed(row, numeric):
+                result.malformed += 1
                 continue
-            if not _worth_keeping(dict(zip(columns, row))):
+            if _status_from_exit_code(row):
+                result.status_from_exit += 1
+            if not _worth_keeping(row):
                 result.unfinished += 1
                 continue
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO job_resources ({names}) VALUES ({marks})",
-                [row[index[c]] for c in wanted],
+                [row[c] for c in wanted],
             )
             if cur.rowcount:
                 result.added += 1
@@ -207,8 +222,45 @@ def _sqlite3_recover(copy: Path, rebuilt: Path, first_error: Exception) -> None:
         )
 
 
-def _snapshot_columns(conn) -> set:
-    return {r[1] for r in conn.execute("PRAGMA table_info(job_resources)")}
+def _snapshot_columns(conn) -> Dict[str, str]:
+    """Column name -> declared type of the snapshot's ``job_resources``."""
+    return {
+        r[1]: (r[2] or "").upper()
+        for r in conn.execute("PRAGMA table_info(job_resources)")
+    }
+
+
+def _well_formed(row: Dict[str, Any], numeric) -> bool:
+    """False for rows the corruption mixed up with other tables or pages."""
+    job_id = row.get("job_id")
+    if not isinstance(job_id, str) or not PBS_JOB_ID.fullmatch(job_id):
+        return False
+    if not isinstance(row.get("timestamp"), str):
+        return False
+    for column in TIME_COLUMNS:
+        value = row.get(column)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            return False
+        try:
+            datetime.fromisoformat(value)
+        except ValueError:
+            return False
+    return all(
+        row.get(c) is None
+        or (isinstance(row[c], (int, float)) and not isinstance(row[c], bool))
+        for c in numeric
+    )
+
+
+def _status_from_exit_code(row: Dict[str, Any]) -> bool:
+    """Finish a job whose exit code was recorded but whose status wasn't."""
+    code = row.get("exit_code")
+    if row.get("status") in FINISHED or not isinstance(code, int):
+        return False
+    row["status"] = "completed" if code == 0 else "failed"
+    return True
 
 
 def _worth_keeping(row: Dict[str, Any]) -> bool:

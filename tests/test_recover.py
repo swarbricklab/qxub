@@ -102,6 +102,7 @@ def test_recover_adds_finished_jobs_once(tmp_path):
             job("2.gadi-pbs", status="failed"),
             job("3.gadi-pbs", status="submitted"),
             job("4.gadi-pbs", status="running", mem_used_mb=10),
+            job("5[3].gadi-pbs"),
         ],
     )
     snapshot = tmp_path / "stats" / "qxub-stats.db"
@@ -109,14 +110,63 @@ def test_recover_adds_finished_jobs_once(tmp_path):
     result = rec.recover(source, snapshot, now=NOW)
     assert not result.errors and result.published
     assert result.method == "read directly"
-    assert (result.read, result.added, result.unfinished) == (4, 3, 1)
+    assert (result.read, result.added, result.unfinished) == (5, 4, 1)
     jobs = snapshot_jobs(snapshot)
-    assert set(jobs) == {"1.gadi-pbs", "2.gadi-pbs", "4.gadi-pbs"}
+    assert set(jobs) == {"1.gadi-pbs", "2.gadi-pbs", "4.gadi-pbs", "5[3].gadi-pbs"}
     assert jobs["1.gadi-pbs"]["mem_efficiency"] == 50.0
     assert "old.db" in rec.recovered_from(snapshot)
 
     again = rec.recover(source, snapshot, now=NOW)
-    assert (again.added, again.present, again.published) == (0, 3, False)
+    assert (again.added, again.present, again.published) == (0, 4, False)
+
+
+def test_recover_leaves_out_rows_the_corruption_garbled(tmp_path):
+    """Seen on Gadi: queue rows and shifted columns inside job_resources."""
+    source = old_db(tmp_path / "old.db", [job("1.gadi-pbs", mem_used_mb=5)])
+    conn = sqlite3.connect(source)
+    garbled = [
+        # a queue row: qx- id, tags as exit_code, a PBS id as mem_used_mb
+        ("qx-ab12", "2026-06-01T10:00:00", "completed", '["rule=x"]', "9.gadi-pbs"),
+        # an integer where the timestamp belongs
+        ("2.gadi-pbs", 2672, "completed", 0, 10),
+        # a time that isn't ISO
+        ("3.gadi-pbs", "Tue Jun  1 10:00", "completed", 0, 10),
+        # text in a numeric column
+        ("4.gadi-pbs", "2026-06-01T10:00:00", "completed", 0, "lots"),
+    ]
+    conn.executemany(
+        "INSERT INTO job_resources (job_id, timestamp, status, exit_code, mem_used_mb)"
+        " VALUES (?, ?, ?, ?, ?)",
+        garbled,
+    )
+    conn.commit()
+    conn.close()
+
+    result = rec.recover(source, tmp_path / "stats" / "qxub-stats.db", now=NOW)
+    assert (result.read, result.added, result.malformed) == (5, 1, 4)
+    assert set(snapshot_jobs(result.snapshot)) == {"1.gadi-pbs"}
+
+
+def test_recover_finishes_jobs_from_their_exit_code(tmp_path):
+    """Their last status update was lost; the exit code wasn't."""
+    source = old_db(
+        tmp_path / "old.db",
+        [
+            job("1.gadi-pbs", status="running", exit_code=0, mem_used_mb=5),
+            job("2.gadi-pbs", status="submitted", exit_code=137),
+            job("3.gadi-pbs", status="running", mem_used_mb=5),
+            job("4.gadi-pbs", status="cancelled", exit_code=271),
+        ],
+    )
+    result = rec.recover(source, tmp_path / "stats" / "qxub-stats.db", now=NOW)
+    assert result.status_from_exit == 2
+    status = {j: r["status"] for j, r in snapshot_jobs(result.snapshot).items()}
+    assert status == {
+        "1.gadi-pbs": "completed",
+        "2.gadi-pbs": "failed",
+        "3.gadi-pbs": "running",
+        "4.gadi-pbs": "cancelled",
+    }
 
 
 def test_recover_keeps_what_the_snapshot_already_has(tmp_path):
