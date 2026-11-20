@@ -425,6 +425,9 @@ def test_snapshot_directory_is_created_group_writable(area):
 def test_default_snapshot_has_its_own_directory(tmp_path, monkeypatch):
     monkeypatch.delenv("QXUB_STATS_DB", raising=False)
     monkeypatch.setenv("QXUB_DB_PATH", str(tmp_path / "config" / "qxub.db"))
+    # A site config (on Gadi, shared_db.path) must not leak in.
+    monkeypatch.setattr(cons, "_config_value", lambda key: None)
+    monkeypatch.setattr("qxub.queue.db.legacy_shared_db_path", lambda: None)
 
     assert cons.stats_db_path() == tmp_path / "config" / "stats" / "qxub-stats.db"
 

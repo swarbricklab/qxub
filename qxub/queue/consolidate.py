@@ -78,7 +78,8 @@ def stats_db_path() -> Path:
     """The published snapshot.
 
     ``QXUB_STATS_DB``, then ``stats_db.path`` from config, then
-    ``stats/qxub-stats.db`` beside the job database (``shared_db.path``).
+    ``stats/qxub-stats.db`` beside the old team DB (``shared_db.path``), or
+    beside this user's job DB when there is none.
     """
     env = os.environ.get("QXUB_STATS_DB")
     if env:
@@ -86,9 +87,13 @@ def stats_db_path() -> Path:
     configured = _config_value("stats_db.path")
     if configured:
         return Path(str(configured))
-    from .db import get_db_path  # pylint: disable=import-outside-toplevel
+    from .db import (  # pylint: disable=import-outside-toplevel
+        get_db_path,
+        legacy_shared_db_path,
+    )
 
-    return get_db_path().parent / STATS_DIR_NAME / STATS_DB_NAME
+    beside = legacy_shared_db_path() or get_db_path()
+    return beside.parent / STATS_DIR_NAME / STATS_DB_NAME
 
 
 def prepare_dir(directory: Path) -> None:
@@ -518,26 +523,62 @@ def consolidate(
     now = now or datetime.now()
     result = Result(snapshot=snapshot)
     _touch(runs_dir / ATTEMPT_MARKER)
+    consolidated: Dict[str, str] = {}
 
+    def add(conn) -> bool:
+        done = {
+            r[0]: r[1]
+            for r in conn.execute(
+                "SELECT run_id, consolidated_at FROM consolidated_runs"
+            )
+        }
+        changed = _add_runs(
+            conn, runs_dir, done, now, qstat, batch_size, result, dry_run
+        )
+        consolidated.update(
+            (r[0], r[1])
+            for r in conn.execute(
+                "SELECT run_id, consolidated_at FROM consolidated_runs"
+            )
+        )
+        return changed
+
+    if _round(snapshot, now, result, add, dry_run) and not dry_run:
+        try:
+            result.removed = _remove_consolidated(
+                runs_dir, consolidated, now - timedelta(days=grace_days)
+            )
+        except OSError as exc:
+            result.errors.append(str(exc))
+    return result
+
+
+def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
+    """Take the lease, apply ``add(conn)`` to a private copy, publish it.
+
+    ``add`` returns True if it changed anything; only then is a copy
+    published. Records a skip or an error on ``result``; returns True if the
+    round finished (published or unchanged).
+    """
     problem = writable_problem(snapshot)
     if problem:
         result.skipped = problem
-        return result
+        return False
     try:
         prepare_dir(snapshot.parent)
     except OSError as exc:
         result.skipped = f"cannot create {snapshot.parent}: {exc}"
-        return result
+        return False
     lease = Lease(lease_path(snapshot))
     if not lease.acquire():
         if lease.error is not None:
             result.skipped = f"cannot take the lease: {lease.error}"
-            return result
+            return False
         holder = lease.holder() or {}
         result.skipped = "another consolidation is running ({}@{})".format(
             holder.get("user", "?"), holder.get("host", "?")
         )
-        return result
+        return False
 
     private = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -549,15 +590,7 @@ def consolidate(
             conn.execute("PRAGMA journal_mode=MEMORY")
             conn.execute("BEGIN")
             _create_schema(conn)
-            done = {
-                r[0]: r[1]
-                for r in conn.execute(
-                    "SELECT run_id, consolidated_at FROM consolidated_runs"
-                )
-            }
-            changed = _add_runs(
-                conn, runs_dir, done, now, qstat, batch_size, result, dry_run
-            )
+            changed = add(conn)
             check = conn.execute("PRAGMA integrity_check").fetchone()[0]
             if check != "ok":
                 raise sqlite3.DatabaseError(f"integrity_check: {check}")
@@ -567,36 +600,27 @@ def consolidate(
                     (now.isoformat(timespec="seconds"),),
                 )
             conn.execute("COMMIT")
-            consolidated = {
-                r[0]: r[1]
-                for r in conn.execute(
-                    "SELECT run_id, consolidated_at FROM consolidated_runs"
-                )
-            }
         finally:
             conn.close()
 
         if changed and not dry_run:
             if not lease.still_held():
                 # This round outlived LEASE_STALE_SECONDS and another took
-                # over; publishing now would drop that round's runs.
+                # over; publishing now would drop that round's work.
                 raise OSError(f"lost the lease {lease.path}; not publishing")
             _publish(private, snapshot)
             result.published = True
-        if not dry_run:
-            result.removed = _remove_consolidated(
-                runs_dir, consolidated, now - timedelta(days=grace_days)
-            )
+        return True
     except (OSError, sqlite3.Error) as exc:
         result.errors.append(str(exc))
-        logger.warning("Consolidation into %s failed: %s", snapshot, exc)
+        logger.warning("Publishing %s failed: %s", snapshot, exc)
+        return False
     finally:
         try:
             private.unlink()
         except OSError:
             pass
         lease.release()
-    return result
 
 
 def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> bool:

@@ -1202,6 +1202,39 @@ class ResourceTracker:
                     writer.writerow(dict(zip(columns, row)))
 
 
+class SnapshotReader(ResourceTracker):
+    """The report queries of ``ResourceTracker``, over the published snapshot.
+
+    Opens ``qxub-stats.db`` read-only with ``immutable=1`` (see
+    ``qxub.queue.consolidate.open_snapshot``), so reports never write or lock
+    anything. Only the read methods make sense here.
+    """
+
+    def __init__(self, db_path: Path):  # pylint: disable=super-init-not-called
+        self.db_path = Path(db_path)
+
+    def _connect(self, timeout: float = _SQLITE_TIMEOUT):
+        from ..queue.consolidate import (  # pylint: disable=import-outside-toplevel
+            open_snapshot,
+        )
+
+        return _Closing(open_snapshot(self.db_path))
+
+
+class _Closing:
+    """``with`` that closes a read-only connection on the way out."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        return self.conn
+
+    def __exit__(self, *exc):
+        self.conn.close()
+        return False
+
+
 # Lazy global instance — avoids running _init_database() at import time,
 # which would fail fatally if the DB is corrupted or on a broken filesystem.
 _resource_tracker = None

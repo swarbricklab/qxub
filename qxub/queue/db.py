@@ -3,8 +3,11 @@ Unified database for qxub: queue, project job tracking, and metadata.
 
 DB path resolution (priority order):
 1. QXUB_DB_PATH environment variable (for testing/override)
-2. shared_db.path from config  (system → user → project precedence)
-3. ~/.config/qxub/qxub.db  (per-user fallback)
+2. ~/.config/qxub/qxub.db  (per user)
+
+The team-wide DB at ``shared_db.path`` is no longer written (Phase 4 of
+``docs/dev/sqlite-robustness.md``): statistics go to the published snapshot
+(``qxub.queue.consolidate``), and ``qxub db recover`` imports the old file.
 
 All tables live in a single SQLite file, in DELETE journal mode (WAL's
 mmap'd -shm file is unsafe on shared filesystems, #75). Connections come
@@ -47,35 +50,42 @@ def _warn_once(key: str, message: str, exc: Exception) -> None:
 
 
 def get_db_path() -> Path:
-    """Resolve the active qxub database path.
+    """Resolve this user's qxub database.
 
-    Priority:
     1. ``QXUB_DB_PATH`` environment variable (testing / manual override)
-    2. ``QXUB_SHARED_DB`` environment variable (manual override; jobs no longer
-       receive it, see ``qxub.queue.runs``)
-    3. ``shared_db.path`` from the loaded config hierarchy
-    4. ``~/.config/qxub/qxub.db`` per-user fallback
+    2. ``~/.config/qxub/qxub.db``
+
+    ``shared_db.path`` and ``QXUB_SHARED_DB`` are no longer used for writes:
+    every login node writing one file on Lustre corrupted it (#131). See
+    ``legacy_shared_db_path``.
     """
     env_override = os.environ.get("QXUB_DB_PATH")
     if env_override:
         return Path(env_override)
 
+    config_dir = Path.home() / ".config" / "qxub"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir / "qxub.db"
+
+
+def legacy_shared_db_path() -> Optional[Path]:
+    """The old team-wide DB (``QXUB_SHARED_DB``, then ``shared_db.path``).
+
+    Nothing writes it any more. It locates the statistics snapshot's default
+    directory and is the default source for ``qxub db recover``.
+    """
     shared_db_env = os.environ.get("QXUB_SHARED_DB")
     if shared_db_env:
         return Path(shared_db_env)
-
     try:
         from ..config import config_manager  # pylint: disable=import-outside-toplevel
 
         shared_path = config_manager.get_config_value("shared_db.path")
         if shared_path:
-            return Path(shared_path)
+            return Path(str(shared_path))
     except Exception:  # pylint: disable=broad-except
-        pass  # Config not loaded yet or key absent — use fallback
-
-    config_dir = Path.home() / ".config" / "qxub"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "qxub.db"
+        pass  # Config not loaded yet or key absent
+    return None
 
 
 # ---------------------------------------------------------------------------
