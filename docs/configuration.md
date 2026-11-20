@@ -134,8 +134,31 @@ qxub db consolidate      # add finished runs, remove old run files
 qxub db status           # snapshot age, job count, run files waiting
 ```
 
+`qxub resources` reports (`list`, `stats`, `inefficient`, `trends`,
+`export`) read the snapshot, so they show finished jobs up to the last round.
+
+### The old team job DB
+
+Earlier versions wrote every job to one team-wide database at
+`shared_db.path`. With many login nodes writing it on Lustre it became
+corrupt, so qxub no longer writes it: each user's job DB is
+`~/.config/qxub/qxub.db` again. To keep the history it holds, import it into
+the snapshot once:
+
+```bash
+qxub db recover --dry-run   # how many jobs it would add
+qxub db recover             # reads shared_db.path, or: qxub db recover OLD.db
+```
+
+The old file is only read. If it is too damaged to read straight through,
+qxub rebuilds a copy with the `sqlite3` command's `.recover` (SQLite 3.29 or
+later; `module load sqlite` if needed). Jobs the snapshot already has are
+kept, so running it twice is harmless. Once it is recovered you can archive
+the old file; `shared_db.path` still decides where `stats/` goes by default.
+
 - `stats_db.path` - Where the snapshot is published (default:
-  `stats/qxub-stats.db` beside `shared_db.path`). Every user who publishes
+  `stats/qxub-stats.db` beside `shared_db.path`, or beside your own job DB
+  if that isn't set). Every user who publishes
   needs write access to its directory: qxub creates it group-writable and
   setgid, and `qxub db status` warns if you can't write it. Give the
   snapshot a directory of its own, since everyone in the group can replace

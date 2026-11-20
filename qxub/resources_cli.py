@@ -13,16 +13,34 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .resources import resource_tracker
-from .resources.tracker import parse_date_filter
+from .resources.tracker import SnapshotReader, parse_date_filter
 
 console = Console()
 
 
 @click.group()
 def resources():
-    """View resource usage and efficiency statistics."""
+    """View resource usage and efficiency statistics.
+
+    Reports read the published statistics snapshot (see ``qxub db status``),
+    which holds finished jobs. Run ``qxub db consolidate`` to add recent ones.
+    """
     pass
+
+
+def _snapshot() -> SnapshotReader:
+    """The snapshot to report on; exits with a hint if there isn't one yet."""
+    from .queue.consolidate import stats_db_path
+
+    path = stats_db_path()
+    if not path.exists():
+        console.print(
+            f"📊 No statistics snapshot yet at {path}.\n"
+            "Run `qxub db consolidate` to build it from finished jobs.",
+            style="yellow",
+        )
+        raise SystemExit(0)
+    return SnapshotReader(path)
 
 
 @resources.command()
@@ -68,19 +86,7 @@ def resources():
     help="Output as CSV to stdout (redirect to file with > output.csv)",
 )
 def list(limit, tag, user, since, before, queue_name, status, output_csv):
-    """List recent jobs with resource efficiency."""
-    # Backfill resource data for completed jobs whose joblogs are now available
-    try:
-        filled = resource_tracker.backfill_resources()
-        if filled:
-            import logging
-
-            logging.getLogger(__name__).debug(
-                "Backfilled resources for %d job(s)", filled
-            )
-    except Exception:  # pylint: disable=broad-except
-        pass
-
+    """List recent finished jobs with resource efficiency."""
     # Parse date filter args, emitting a clear error for bad formats.
     since_dt = before_dt = None
     for label, raw in (("--since", since), ("--before", before)):
@@ -94,7 +100,7 @@ def list(limit, tag, user, since, before, queue_name, status, output_csv):
             else:
                 before_dt = parsed
 
-    jobs = resource_tracker.get_recent_jobs(
+    jobs = _snapshot().get_recent_jobs(
         limit,
         tags=tag if tag else None,
         user=user,
@@ -276,7 +282,7 @@ def list(limit, tag, user, since, before, queue_name, status, output_csv):
 @resources.command()
 def stats():
     """Show overall resource efficiency statistics."""
-    stats = resource_tracker.get_efficiency_stats()
+    stats = _snapshot().get_efficiency_stats()
 
     if not stats or stats.get("total_jobs", 0) == 0:
         console.print("📊 No resource data available for statistics", style="yellow")
@@ -310,7 +316,7 @@ def stats():
 @click.option("--limit", default=10, help="Number of jobs to show")
 def inefficient(threshold, limit):
     """Show jobs with low resource efficiency."""
-    jobs = resource_tracker.get_inefficient_jobs(threshold, limit)
+    jobs = _snapshot().get_inefficient_jobs(threshold, limit)
 
     if not jobs:
         console.print(
@@ -388,7 +394,7 @@ def inefficient(threshold, limit):
 @click.option("--days", default=7, help="Number of days to show trends for")
 def trends(days):
     """Show resource usage trends over time."""
-    trend_data = resource_tracker.get_resource_trends(days)
+    trend_data = _snapshot().get_resource_trends(days)
 
     if not trend_data:
         console.print(
@@ -428,13 +434,14 @@ def trends(days):
 @click.option("--limit", help="Maximum number of records to export")
 def export(output_path, limit):
     """Export resource data to CSV file."""
+    reader = _snapshot()
     try:
         output_file = Path(output_path)
-        resource_tracker.export_csv(output_file, limit)
+        reader.export_csv(output_file, limit)
         console.print(f"✅ Exported resource data to {output_path}", style="green")
 
         # Show summary
-        job_count = len(resource_tracker.get_recent_jobs(limit or 1000000))
+        job_count = len(reader.get_recent_jobs(limit or 1000000))
         console.print(f"📊 Exported {job_count} job records")
 
     except Exception as e:

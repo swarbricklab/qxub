@@ -2,7 +2,7 @@
 qxub.queue - Queue and Database Management Package
 
 Central module for:
-- Unified database path resolution (shared or per-user)
+- Per-user database path resolution
 - Unified job table: virtual ID as primary key, PBS ID nullable
 - project_jobs table for PBS-level job tracking
 - mark_running / mark_complete helpers used by job scripts
