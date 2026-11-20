@@ -19,9 +19,11 @@ Running it again adds nothing new, so it is safe to repeat.
 """
 
 import logging
+import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -160,12 +162,25 @@ def _read_table(path: Path) -> Tuple[List[str], List[tuple]]:
         conn.close()
 
 
+def sqlite3_cli() -> Optional[str]:
+    """The ``sqlite3`` command: the one beside this Python first, then PATH.
+
+    qxub's conda environment pins ``sqlite>=3.29`` (``.recover`` arrived in
+    3.29), and its ``bin`` may not be on PATH when qxub is run by full path.
+    """
+    beside = Path(sys.executable).parent / "sqlite3"
+    if beside.is_file() and os.access(beside, os.X_OK):
+        return str(beside)
+    return shutil.which("sqlite3")
+
+
 def _sqlite3_recover(copy: Path, rebuilt: Path, first_error: Exception) -> None:
-    exe = shutil.which("sqlite3")
+    exe = sqlite3_cli()
     if not exe:
         raise RuntimeError(
-            f"{first_error}, and the sqlite3 command isn't on PATH to run"
-            " .recover (try `module load sqlite`)"
+            f"{first_error}, and there is no sqlite3 command to run .recover."
+            " Install qxub's conda environment (it includes sqlite>=3.29)"
+            " or put a sqlite3 of 3.29 or later on PATH"
         )
     dump = subprocess.run(
         [exe, str(copy), ".recover"],

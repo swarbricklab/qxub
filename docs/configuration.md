@@ -151,8 +151,8 @@ qxub db recover             # reads shared_db.path, or: qxub db recover OLD.db
 ```
 
 The old file is only read. If it is too damaged to read straight through,
-qxub rebuilds a copy with the `sqlite3` command's `.recover` (SQLite 3.29 or
-later; `module load sqlite` if needed). Jobs the snapshot already has are
+qxub rebuilds a copy with the `sqlite3` command's `.recover`. That needs
+SQLite 3.29 or later; qxub's conda environment includes it. Jobs the snapshot already has are
 kept, so running it twice is harmless. Once it is recovered you can archive
 the old file; `shared_db.path` still decides where `stats/` goes by default.
 

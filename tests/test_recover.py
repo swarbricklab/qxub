@@ -180,11 +180,24 @@ def test_recover_rebuilds_a_malformed_db(tmp_path):
 def test_recover_without_sqlite3_cli_says_how_to_get_it(tmp_path, monkeypatch):
     source = big_old_db(tmp_path / "old.db")
     corrupt(source)
-    monkeypatch.setattr(rec.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rec, "sqlite3_cli", lambda: None)
 
     result = rec.recover(source, tmp_path / "stats" / "qxub-stats.db", now=NOW)
     assert result.added == 0
-    assert "module load sqlite" in result.errors[0]
+    assert "sqlite>=3.29" in result.errors[0]
+
+
+def test_sqlite3_cli_prefers_the_one_beside_python(tmp_path, monkeypatch):
+    fake = tmp_path / "bin" / "sqlite3"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(rec.sys, "executable", str(tmp_path / "bin" / "python"))
+    monkeypatch.setattr(rec.shutil, "which", lambda name: "/usr/bin/sqlite3")
+    assert rec.sqlite3_cli() == str(fake)
+
+    fake.unlink()
+    assert rec.sqlite3_cli() == "/usr/bin/sqlite3"
 
 
 def test_recover_missing_source_is_skipped(tmp_path):
