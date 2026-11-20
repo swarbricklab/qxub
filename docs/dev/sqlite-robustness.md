@@ -126,12 +126,13 @@ Under `localflock` this only helps between processes on the same node, such as t
 - **Whose runs:**
   - To start, each user consolidates only their own runs into the shared snapshot. That avoids deleting other users' files, which would need group-writable, setgid spool directories.
   - The lease still keeps it to one writer at a time.
-- **Lag:** statistics are as fresh as the last publish. That is fine for tuning allocations, and the stats commands should say how old the snapshot is.
+- **Lag:** statistics are as fresh as the last publish. That is fine for tuning allocations, and `qxub db status` says how old the snapshot is.
 
-### Phase 4: retire the shared live DB
+### Phase 4: retire the shared live DB (#136)
 
-- **Recover once:** recover what the current shared DB holds (`sqlite3 .recover` copes with its existing corruption) and load it into the first published snapshot.
-- **Stop writing it:** stop using `shared_db.path`/`QXUB_SHARED_DB` for writes.
+- **Recover once:** `qxub db recover` reads the old shared DB from a private copy (`immutable=1`). If the copy is malformed, `sqlite3 .recover` rebuilds it first. Finished jobs, and jobs with usage, are added to the snapshot through the same lease and publish round as consolidation. Jobs the snapshot already has are kept, so a rerun adds nothing.
+- **Stop writing it:** `get_db_path()` no longer returns `shared_db.path`/`QXUB_SHARED_DB`. Those only locate the old file and the snapshot's default `stats/` directory.
+- **Read the snapshot:** `qxub resources` reports read the published snapshot, read-only.
 - **Keep the per-user DB for now:** `~/.config/qxub/qxub.db` sees one user's login sessions, and Phase 1 covers same-node contention. Retire it later if the run files and the snapshot cover everything it does.
 
 ## Alternatives considered
