@@ -214,6 +214,13 @@ class ExecutionContext:
         logger.debug("Post-commands: %s", post)
 
 
+def _start_consolidation_if_due(run_path) -> None:
+    """Fold finished runs into the stats snapshot now and then (Phase 3)."""
+    from ..queue.consolidate import maybe_start_in_background
+
+    maybe_start_in_background(run_path.parent if run_path else None)
+
+
 def _run_record_fields(ctx_obj: dict, command, execution_context) -> dict:
     """What the run file records at submission (see ``qxub.queue.runs``)."""
     from datetime import datetime
@@ -362,6 +369,7 @@ def execute_unified(
     try:
         job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
     except QsubError as qsub_exc:
+        runs.discard(run_path)
         # qsub failed — mark entry as failed and re-raise
         if virtual_id:
             try:
@@ -374,6 +382,7 @@ def execute_unified(
 
         _sys.exit(qsub_exc.exit_code)
     except Exception as exc:
+        runs.discard(run_path)
         # Unexpected error — mark entry as failed and re-raise
         if virtual_id:
             try:
@@ -408,6 +417,8 @@ def execute_unified(
         )
     except Exception as e:
         logger.debug("Failed to log job submission: %s", e)
+
+    _start_consolidation_if_due(run_path)
 
     # Log execution to history system (must happen before terse mode early return)
     try:

@@ -336,6 +336,7 @@ def submit_job(
     try:
         job_id = qsub(submission_command, quiet=True)
     except QsubError:
+        runs.discard(run_path)
         if virtual_id:
             try:
                 update_queue_entry(virtual_id, status="failed")
@@ -372,6 +373,11 @@ def submit_job(
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Failed to log job submission: %s", exc)
+
+    # Fold finished runs into the stats snapshot now and then (Phase 3).
+    from ..queue.consolidate import maybe_start_in_background
+
+    maybe_start_in_background(run_path.parent if run_path else None)
 
     # ------------------------------------------------------------------
     # Return structured result
