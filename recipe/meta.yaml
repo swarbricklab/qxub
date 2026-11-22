@@ -31,6 +31,7 @@ requirements:
     - omegaconf
     - pyyaml
     - requests
+    - sqlite >=3.29  # sqlite3 CLI with .recover, for `qxub db recover`
 
 test:
   imports:
