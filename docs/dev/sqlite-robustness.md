@@ -1,6 +1,6 @@
 # Making the job database robust on shared filesystems
 
-Status: **draft for review**. Phase 1 is merged (#132). Revised after the Gadi tests in the #132 review, and to separate live state from resource statistics.
+Status: **implemented**. All four phases are merged (#132, #133, #135, #136) and released in 3.8.0 and 3.9.0. Revised after the Gadi tests in the #132 review, and to separate live state from resource statistics.
 
 ## Why
 
@@ -12,7 +12,7 @@ The job database (`qxub.db`) misbehaves on NCI Gadi when many jobs run at once. 
 | #69 | SIGBUS kills the Snakemake controller after ~50 jobs update the DB | `PRAGMA mmap_size=0` |
 | #75 | WAL's `-shm` file is always mmap'd → SIGBUS; DB corrupted four times | `journal_mode=DELETE` |
 | #83 | DB locked → `qxtat check` says "running" forever | Fall back to status files |
-| #107 | `exec` jobs missing from the DB since March; `cancel` can't see them | Open |
+| #107 | `exec` jobs missing from the DB since March; `cancel` can't see them | Run files (Phase 2) and per-user DB (Phase 4); to re-test on 3.9.0 |
 
 Each fix treated a symptom. The underlying problem stays: **many processes on many nodes write one SQLite file on a parallel filesystem.** SQLite's own guidance is that this is unsafe. It relies on POSIX byte-range locks being correct and coherent across clients, and on Lustre/GPFS/NFS that depends on mount options (`flock`, `localflock`, `noflock`) and on the filesystem's lock manager under load.
 
@@ -97,7 +97,7 @@ Under `localflock` this only helps between processes on the same node, such as t
   - `cancel` and `list` scan the spool for unfinished runs.
 - **Compatibility:** the existing `final_exit_code_*` files stay for one release.
 
-### Phase 3: occasional consolidation into a published snapshot (#135)
+### Phase 3: occasional consolidation into a published snapshot (#135, merged)
 
 - **The consolidator** reads finished run files and builds the statistics DB:
   - It applies them to a **private copy** of `qxub-stats.db` (copy, insert, `PRAGMA integrity_check`).
@@ -128,9 +128,12 @@ Under `localflock` this only helps between processes on the same node, such as t
   - The lease still keeps it to one writer at a time.
 - **Lag:** statistics are as fresh as the last publish. That is fine for tuning allocations, and `qxub db status` says how old the snapshot is.
 
-### Phase 4: retire the shared live DB (#136)
+### Phase 4: retire the shared live DB (#136, merged)
 
 - **Recover once:** `qxub db recover` reads the old shared DB from a private copy (`immutable=1`). If the copy is malformed, `sqlite3 .recover` rebuilds it first. Finished jobs, and jobs with usage, are added to the snapshot through the same lease and publish round as consolidation. Jobs the snapshot already has are kept, so a rerun adds nothing.
+  - Rows the corruption garbled are left out: a job ID that isn't a PBS ID, a time that isn't ISO, or text in a numeric column. On Gadi, about 200 of 2600 rows were mixed up with `queue` rows or shifted columns.
+  - A job still marked submitted or running that has an exit code lost its last status update. It is stored as completed or failed from the code.
+  - It needs a `sqlite3` CLI of 3.29 or later for `.recover`. Gadi's `/usr/bin/sqlite3` is 3.26, so qxub's environments pin `sqlite>=3.29`, and `recover` prefers the `sqlite3` beside its own Python.
 - **Stop writing it:** `get_db_path()` no longer returns `shared_db.path`/`QXUB_SHARED_DB`. Those only locate the old file and the snapshot's default `stats/` directory.
 - **Read the snapshot:** `qxub resources` reports read the published snapshot, read-only.
 - **Keep the per-user DB for now:** `~/.config/qxub/qxub.db` sees one user's login sessions, and Phase 1 covers same-node contention. Retire it later if the run files and the snapshot cover everything it does.
@@ -147,13 +150,14 @@ Under `localflock` this only helps between processes on the same node, such as t
 
 ## How #107 fits
 
-#107 shows submissions not reaching either DB since March. Phase 1's "warn once instead of swallowing" should surface why. Phase 2 gives `cancel` a correct view regardless, from the run files.
+#107 shows submissions not reaching either DB since March. Phase 1's "warn once instead of swallowing" should surface why. Phase 2 gives `cancel` a correct view regardless, from the run files, and since Phase 4 each user's submissions go to their own DB, which only their login sessions write. It needs a re-test on 3.9.0 before closing.
 
 ## Open questions
 
 1. ~~What does "flakes out" look like?~~ "disk I/O error" and "malformed" under cross-node writers, from the #132 review.
 2. ~~Mount options~~: `/g/data` and `/scratch` are `localflock`. Is the same true on the compute nodes and `gadi-dm-*`? The cross-host results behave as if it is.
-3. **Is the team-shared view needed?** Who uses cross-user `qxtat list`/`cancel`? This decides whether the spool must be readable across users.
-4. **Grace period before cleanup:** how long should finished run files stay after they are consolidated? A few days covers `qxtat check` and `history` on recent runs.
-5. **Cross-user consolidation:** is per-user consolidation enough, or should one user's consolidator also pick up teammates' runs? The latter needs group-writable, setgid spool directories.
-6. **Consolidation trigger:** is the opportunistic trigger enough, or do we want a self-resubmitting `copyq` job?
+3. ~~Is the team-shared view needed?~~ Not for live state. `qxtat list`/`summary`/`cancel` show your own jobs (Phase 4); teammates' finished jobs are in the shared snapshot.
+4. ~~Grace period before cleanup~~: 7 days after a run is consolidated (`GRACE_DAYS`).
+5. ~~Cross-user consolidation~~: per user. Each user consolidates their own run files into the shared snapshot, so no spool needs to be group-writable; only the snapshot's `stats/` directory is.
+6. **Consolidation trigger:** the opportunistic background round after a submission (at most every 6 h), plus `qxub db consolidate` by hand. Revisit a self-resubmitting `copyq` job only if snapshots go stale in practice.
+7. **Retire the per-user DB?** It now only holds one user's login-side state. Run files could replace it for `qxtat` and `cancel`; not needed yet.
