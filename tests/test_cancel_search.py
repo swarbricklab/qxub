@@ -79,25 +79,76 @@ def test_filter_cancels_only_what_matched(sandbox):
     assert set(sandbox.live_jobs()) == {keep}
 
 
+def backdate(sandbox, *job_ids):
+    long_ago = (datetime.now() - timedelta(days=30)).isoformat()
+    with job_db(sandbox) as conn:
+        for job_id in job_ids:
+            conn.execute(
+                "UPDATE job_resources SET submitted_at=? WHERE job_id=?",
+                (long_ago, job_id),
+            )
+
+
 def test_old_rows_the_scheduler_forgot_are_not_targeted(sandbox):
     live = submit(sandbox, "still_queued")
     old = submit(sandbox, "long_gone")
     young = submit(sandbox, "just_finished")
     sandbox.finish_job(old)
     sandbox.finish_job(young)
-    long_ago = (datetime.now() - timedelta(days=30)).isoformat()
-    with job_db(sandbox) as conn:
-        conn.execute(
-            "UPDATE job_resources SET submitted_at=? WHERE job_id=?", (long_ago, old)
-        )
+    backdate(sandbox, old)
 
     result = sandbox.run("cancel", "status", "-s", "submitted", "-n", "-q")
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.split() == [live]
+    # A dry run changes nothing, but says what it saw.
+    assert status_of(sandbox, old) == "submitted"
+    loud = sandbox.run("cancel", "status", "-s", "submitted", "-n")
+    assert "1 old job(s)" in loud.stdout and "dry run" in loud.stdout
+    assert status_of(sandbox, old) == "submitted"
+
+    result = sandbox.run("cancel", "status", "-s", "submitted", "-f")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "0 from the stats snapshot, 1 as unknown" in result.stdout
     assert status_of(sandbox, old) == "unknown"
     # Too recent to judge: qstat may simply not list it yet.
     assert status_of(sandbox, young) == "submitted"
-    assert status_of(sandbox, live) == "submitted"
+    assert [c["argv"] for c in sandbox.pbs_calls("qdel")] == [[live]]
+
+
+def test_tidying_covers_every_status_and_uses_the_snapshot(sandbox):
+    finished = submit(sandbox, "ended_long_ago")
+    lost = submit(sandbox, "lost_running")
+    for job_id in (finished, lost):
+        sandbox.finish_job(job_id)
+    backdate(sandbox, finished, lost)
+    with job_db(sandbox) as conn:
+        conn.execute(
+            "UPDATE job_resources SET status='running' WHERE job_id=?", (lost,)
+        )
+
+    # The run file is long gone, but consolidation kept the outcome.
+    snapshot = sandbox.root / "stats" / "qxub-stats.db"
+    snapshot.parent.mkdir()
+    with sqlite3.connect(snapshot) as conn:
+        create_job_resources_schema(conn)
+        conn.execute(
+            "INSERT INTO job_resources (job_id, timestamp, status, exit_code,"
+            " completed_at) VALUES (?, 'x', 'failed', 3, '2026-10-01T00:00:00')",
+            (finished,),
+        )
+    sandbox.env["QXUB_STATS_DB"] = str(snapshot)
+
+    # Asking about 'submitted' jobs tidies the 'running' row too.
+    result = sandbox.run("cancel", "status", "-s", "submitted", "-f")
+    assert "1 from the stats snapshot, 1 as unknown" in result.stdout
+    with job_db(sandbox) as conn:
+        row = conn.execute(
+            "SELECT status, exit_code, completed_at FROM job_resources"
+            " WHERE job_id=?",
+            (finished,),
+        ).fetchone()
+    assert row == ("failed", 3, "2026-10-01T00:00:00")
+    assert status_of(sandbox, lost) == "unknown"
 
 
 def test_nothing_is_cancelled_if_the_scheduler_cant_be_asked(sandbox):

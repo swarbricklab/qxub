@@ -60,7 +60,9 @@ UNFINISHED = ("initiated", "dispatched", "submitted", "running")
 STALE_AFTER = timedelta(minutes=10)
 
 
-def _still_queued_or_running(tracker, jobs: List[dict], quiet: bool):
+def _still_queued_or_running(
+    tracker, jobs: List[dict], quiet: bool, dry_run: bool = False
+):
     """The database rows whose job the scheduler still lists.
 
     Only those can be cancelled, so ``cancel status``/``filter`` never pick a
@@ -69,8 +71,9 @@ def _still_queued_or_running(tracker, jobs: List[dict], quiet: bool):
     stored gets the (possibly truncated) name from that listing.
 
     Unfinished rows that the scheduler no longer lists, and that are older
-    than :data:`STALE_AFTER`, are marked ``unknown``: no run file said how
-    they ended, and PBS has forgotten them.
+    than :data:`STALE_AFTER`, are finished: from the statistics snapshot if
+    it knows how the job ended, else as ``unknown``. No run file said how
+    they ended, and PBS has forgotten them. A dry run only reports them.
 
     Returns ``None`` (after saying why) if the scheduler can't be asked.
     """
@@ -96,12 +99,21 @@ def _still_queued_or_running(tracker, jobs: List[dict], quiet: bool):
             and (job.get("submitted_at") or "") < cutoff
         ):
             gone.append(job["job_id"])
-    if gone:
-        marked = tracker.mark_jobs_gone(gone)
-        if marked and not quiet:
+    if gone and dry_run:
+        if not quiet:
             click.echo(
-                f"ℹ️  Marked {marked} old job(s) as unknown: still 'submitted' or"
-                " 'running' in the database, but no longer queued or running"
+                f"ℹ️  {len(gone)} old job(s) are still 'submitted' or 'running' in"
+                " the database but no longer queued or running (left as they are"
+                " in a dry run)"
+            )
+    elif gone:
+        counts = tracker.settle_gone_jobs(gone)
+        if not quiet and any(counts.values()):
+            click.echo(
+                f"ℹ️  Finished {sum(counts.values())} old job(s) that were still"
+                " 'submitted' or 'running' in the database but no longer queued"
+                f" or running: {counts['from_snapshot']} from the stats snapshot,"
+                f" {counts['unknown']} as unknown"
             )
     return candidates
 
@@ -312,9 +324,12 @@ def cancel_by_status(status, dry_run, force, quiet, limit):
     # Get jobs from qxub database
     tracker = ResourceTracker()
     tracker.sync_from_run_files()
-    jobs = _still_queued_or_running(tracker, tracker.get_jobs_by_status(status), quiet)
+    jobs = _still_queued_or_running(
+        tracker, tracker.get_jobs_by_status(), quiet, dry_run
+    )
     if jobs is None:
         return 1
+    jobs = [job for job in jobs if job.get("status") == status]
     if limit:
         jobs = jobs[:limit]
 
@@ -418,7 +433,9 @@ def cancel_by_filter(
     """
     tracker = ResourceTracker()
     tracker.sync_from_run_files()
-    jobs = _still_queued_or_running(tracker, tracker.get_jobs_by_status(), quiet)
+    jobs = _still_queued_or_running(
+        tracker, tracker.get_jobs_by_status(), quiet, dry_run
+    )
     if jobs is None:
         return 1
 
