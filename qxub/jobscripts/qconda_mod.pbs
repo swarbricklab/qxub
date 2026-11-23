@@ -111,12 +111,27 @@ trap 'QXUB_SIGNAL=TERM; exit 143' TERM
 trap 'QXUB_SIGNAL=INT; exit 130' INT
 trap 'QXUB_SIGNAL=HUP; exit 129' HUP
 
+# A setup step failed: say what failed and how to fix it, on stderr (the
+# joblog) and in $err, which `qxub exec` and CI steps stream, then stop.
+# Without this a bad execdir was an opaque "exit code 1" (#109).
+qxub_setup_fail() {
+    printf '%s\n' "$@" >&2
+    if [ "$quiet" != "true" ] && [ -n "${err:-}" ]; then
+        { mkdir -p "${err%/*}" && printf '%s\n' "$@" >> "$err"; } 2>/dev/null || true
+    fi
+    { echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+      date -Iseconds >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"; } 2>/dev/null || true
+    exit 1
+}
+
 # ==================== MODULES (loaded first) ====================
 if [ -n "$mods" ]; then
     echo "📦 Loading modules: $mods"
     for module in $mods; do
         echo "🔄 Loading module: $module"
-        module load "$module"
+        module load "$module" || qxub_setup_fail \
+            "❌ ERROR: could not load module: $module" \
+            "   (check the name with: module avail $module)"
     done
     echo "✅ All modules loaded"
 fi
@@ -126,50 +141,42 @@ echo "🔄 Activating conda environment: $env"
 
 # Check if conda is available and properly initialized
 if ! command -v conda > /dev/null 2>&1; then
-    echo "❌ ERROR: conda command not found"
-    echo "💡 Possible solutions:"
-    echo "   1. Run 'conda init bash' to initialize conda in your shell"
-    echo "   2. Add conda to your PATH in ~/.bashrc"
-    echo "   3. Ensure conda storage volumes are mounted (e.g., -l storage=gdata/conda)"
-    echo "   4. Check that your conda installation path is accessible from compute nodes"
-    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    exit 1
+    qxub_setup_fail \
+        "❌ ERROR: conda command not found" \
+        "💡 Possible solutions:" \
+        "   1. Run 'conda init bash' to initialize conda in your shell" \
+        "   2. Add conda to your PATH in ~/.bashrc" \
+        "   3. Ensure conda storage volumes are mounted (e.g., -l storage=gdata/conda)" \
+        "   4. Check that your conda installation path is accessible from compute nodes"
 fi
 
 # Initialize conda shell integration
 echo "🔧 Initializing conda shell integration..."
 if ! eval "$(conda shell.bash hook)" 2>&1; then
-    echo "❌ ERROR: Failed to initialize conda shell integration"
-    echo "💡 Possible solutions:"
-    echo "   1. Run 'conda init bash' in your login shell to set up conda properly"
-    echo "   2. Check that conda is properly installed and accessible"
-    echo "   3. Verify that your ~/.bashrc contains conda initialization code"
-    echo "   4. Ensure conda storage volumes are mounted in your PBS job"
-    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    exit 1
+    qxub_setup_fail \
+        "❌ ERROR: Failed to initialize conda shell integration" \
+        "💡 Possible solutions:" \
+        "   1. Run 'conda init bash' in your login shell to set up conda properly" \
+        "   2. Check that conda is properly installed and accessible" \
+        "   3. Verify that your ~/.bashrc contains conda initialization code" \
+        "   4. Ensure conda storage volumes are mounted in your PBS job"
 fi
 
 # Capture conda activate output and check if environment exists
-if ! conda activate $env 2>&1; then
-    echo "❌ ERROR: Failed to activate conda environment: $env"
-    echo "💡 Possible solutions:"
-    echo "   1. Check that the environment exists: conda env list"
-    echo "   2. Create the environment: conda create -n $env"
-    echo "   3. Verify the environment name is spelled correctly"
-    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    exit 1
+if ! conda activate "$env" 2>&1; then
+    qxub_setup_fail \
+        "❌ ERROR: Failed to activate conda environment: $env" \
+        "💡 Possible solutions:" \
+        "   1. Check that the environment exists: conda env list" \
+        "   2. Create the environment: conda create -n $env" \
+        "   3. Verify the environment name is spelled correctly"
 fi
 
 # Verify that the environment was actually activated
 ACTIVATED_ENV_NAME=$(basename "$CONDA_DEFAULT_ENV")
 if [ "$ACTIVATED_ENV_NAME" != "$env" ]; then
-    echo "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
-    echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    exit 1
+    qxub_setup_fail \
+        "❌ ERROR: Conda environment activation failed - expected '$env', got '$CONDA_DEFAULT_ENV'"
 fi
 
 echo "✅ Successfully activated conda environment: $env"
@@ -177,12 +184,14 @@ echo "✅ Successfully activated conda environment: $env"
 # Create execution directory if requested
 if [ "$create_execdir" = "true" ]; then
     echo "📁 Creating execution directory: $cwd"
-    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+    mkdir -p "$cwd" || qxub_setup_fail "❌ ERROR: could not create the execution directory: $cwd"
 fi
 
 # Switch work directory
 echo "📂 Changing to working directory: $cwd"
-cd $cwd
+cd "$cwd" || qxub_setup_fail \
+    "❌ ERROR: execution directory does not exist or can't be entered: $cwd" \
+    "   (pass --create-execdir, or make sure it is created upstream)"
 
 # Export user-defined environment variables
 if [ -n "$user_vars" ]; then
@@ -203,8 +212,8 @@ if [ "$quiet" != "true" ]; then
     mkdir -p "$(dirname "$err")"
 
     # Test that we can write to the output locations
-    touch "$out" || { echo "❌ ERROR: Cannot write to $out"; exit 1; }
-    touch "$err" || { echo "❌ ERROR: Cannot write to $err"; exit 1; }
+    touch "$out" || qxub_setup_fail "❌ ERROR: cannot write the stdout file: $out"
+    touch "$err" || qxub_setup_fail "❌ ERROR: cannot write the stderr file: $err"
     echo "✅ Output files verified: $out and $err"
 else
     echo "🔇 Quiet mode: skipping output file creation"

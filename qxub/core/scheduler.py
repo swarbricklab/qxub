@@ -210,6 +210,21 @@ def qsub_var_value(value) -> str:
     return f"\"'{value}'\""
 
 
+def qsub_path_value(value) -> str:
+    """Quote a path for a ``qsub -v`` value.
+
+    :func:`qsub` runs the submission command through :func:`shlex.split`, so
+    an unquoted path with spaces was split into several arguments and
+    ``qsub`` refused the command. Paths without spaces or shell characters
+    are left as they are; a path with a comma also needs
+    :func:`qsub_var_value`.
+    """
+    value = str(value)
+    if "," in value:
+        return qsub_var_value(value)
+    return shlex.quote(value)
+
+
 class QsubError(Exception):
     """Raised when a ``qsub`` submission fails.
 
