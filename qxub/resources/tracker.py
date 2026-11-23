@@ -135,7 +135,10 @@ def create_job_resources_schema(conn) -> None:
             username TEXT,
 
             -- Path to PBS joblog for deferred resource backfill
-            joblog_path TEXT
+            joblog_path TEXT,
+
+            -- Scheduler job name (-N), so cancel can match it without PBS
+            job_name TEXT
         )
         """
     )
@@ -165,9 +168,14 @@ def create_job_resources_schema(conn) -> None:
         ("tags", "TEXT DEFAULT '[]'"),
         ("username", "TEXT"),
         ("joblog_path", "TEXT"),
+        ("job_name", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE job_resources ADD COLUMN {column} {column_type}")
+    # An old writer stored one status JSON-quoted ('"running"').
+    conn.execute(
+        "UPDATE job_resources SET status=TRIM(status, '\"') WHERE status LIKE '\"%'"
+    )
 
 
 class DatabaseError(Exception):
@@ -618,6 +626,7 @@ class ResourceTracker:
         joblog_path: Optional[str] = None,
         queue: Optional[str] = None,
         cpus_requested: Optional[int] = None,
+        job_name: Optional[str] = None,
     ) -> bool:
         """Log initial job submission.
 
@@ -643,8 +652,8 @@ class ResourceTracker:
                     """
                     INSERT OR REPLACE INTO job_resources
                     (job_id, timestamp, command, status, submitted_at, last_status_update,
-                     tags, username, joblog_path, queue, cpus_requested)
-                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?)
+                     tags, username, joblog_path, queue, cpus_requested, job_name)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -657,6 +666,7 @@ class ResourceTracker:
                         joblog_path,
                         queue,
                         cpus_requested,
+                        job_name,
                     ),
                 )
 
@@ -1118,7 +1128,8 @@ class ResourceTracker:
                 if status:
                     query = """
                         SELECT job_id, status, command, submitted_at, started_at,
-                               completed_at, last_status_update, exit_code
+                               completed_at, last_status_update, exit_code,
+                               job_name, tags
                         FROM job_resources
                         WHERE status=?
                         ORDER BY submitted_at DESC
@@ -1127,7 +1138,8 @@ class ResourceTracker:
                 else:
                     query = """
                         SELECT job_id, status, command, submitted_at, started_at,
-                               completed_at, last_status_update, exit_code
+                               completed_at, last_status_update, exit_code,
+                               job_name, tags
                         FROM job_resources
                         ORDER BY submitted_at DESC
                     """
@@ -1141,6 +1153,37 @@ class ResourceTracker:
         except Exception as e:
             logger.debug("Failed to get jobs by status: %s", e)
             return []
+
+    def mark_jobs_gone(self, job_ids: Sequence[str]) -> int:
+        """Mark unfinished jobs the scheduler no longer knows as ``unknown``.
+
+        For rows left ``submitted`` or ``running`` with no run file to say how
+        they ended (jobs from before run files, or whose last update was
+        lost). Only unfinished rows change. Returns how many did.
+        """
+        if not job_ids:
+            return 0
+        now = datetime.now().isoformat()
+        unfinished = "('initiated', 'dispatched', 'submitted', 'running')"
+        changed = 0
+        try:
+            with self._connect() as conn:
+                for job_id in job_ids:
+                    cur = conn.execute(
+                        "UPDATE job_resources SET status='unknown', last_status_update=?"
+                        f" WHERE job_id=? AND status IN {unfinished}",
+                        (now, job_id),
+                    )
+                    changed += cur.rowcount
+                    conn.execute(
+                        "UPDATE queue SET status='unknown', last_status_update=?"
+                        f" WHERE pbs_job_id=? AND status IN {unfinished}",
+                        (now, job_id),
+                    )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("mark_jobs_gone failed: %s", exc)
+            return 0
+        return changed
 
     def get_status_summary(self) -> Dict[str, int]:
         """Get counts of jobs by status."""

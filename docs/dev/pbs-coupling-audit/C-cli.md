@@ -52,6 +52,7 @@ There is **no scheduler/backend abstraction**: `platforms/core.py` has no schedu
 - **Category:** Direct helper call / PBS field names. **Severity: Med.**
 - **Problem:** Calls `get_job_resource_data(job_id)` once per DB job, which runs a `qstat -fx` subprocess each time. It then reads `job_data["metadata"]["Job_Name"]`. That's PBS-only, and slow (N subprocesses).
 - **Fix:** Store the job name in the tracker DB at submit time and filter in SQL. Fall back to `backend.job_info(id).name` if it's missing.
+- **Done (#143):** the name is stored in `job_resources.job_name` at submission and filtered from the DB. `cancel status` and `cancel filter` make one scheduler query, `core.scheduler.list_user_jobs()` (`qstat -w -u USER`), to keep only jobs still queued or running. Rows without a stored name use that listing's (possibly truncated) name. `list_user_jobs()` is the function to move behind `backend.list_jobs()`.
 
 ### M3 — `resources show` renders raw `qstat -fx` fields (resources_cli.py:444-521)
 - **Category:** Direct helper call / PBS output fields. **Severity: Med.**

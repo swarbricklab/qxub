@@ -9,44 +9,33 @@ matching with automatic database status updates.
 import logging
 
 logger = logging.getLogger(__name__)
+import json
 import re
 import subprocess
 import time
+from datetime import datetime, timedelta
 from typing import List
 
 import click
 
-from .core.scheduler import qdel
+from .core.scheduler import (
+    SchedulerQueryError,
+    list_user_jobs,
+    parse_qstat_user_listing,
+    qdel,
+    same_job,
+)
 from .resources import ResourceTracker
 
-# First token of a job row in `qstat -u` output: "12345", "12345.server",
-# "12345[].server" (array parent) or "12345[7].server" (subjob). Header,
-# separator and server-name lines never start with a digit.
-_QSTAT_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
+
+_PBS_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
 
 
 def _parse_qstat_user_listing(output: str) -> List[tuple]:
-    """Parse `qstat -w -u USER` output into (job_id, queue, state) tuples.
-
-    The listing looks like (PBS Pro; Torque is the same shape)::
-
-        server:
-                                                     Req'd  Req'd   Elap
-        Job ID          Username Queue Jobname SessID NDS TSK Memory Time  S Time
-        --------------- -------- ----- ------- ------ --- --- ------ ----- - -----
-        12345.server    alice    normal myjob   4321   1   4  16gb 01:00 R 00:10
-
-    Rows are recognised by a job-ID-shaped first token rather than by
-    skipping a fixed number of header lines. The state is the second-to-last
-    column (just before elapsed time), the queue is the third.
-    """
-    jobs = []
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) < 4 or not _QSTAT_JOB_ID_RE.match(parts[0]):
-            continue
-        jobs.append((parts[0], parts[2], parts[-2]))
-    return jobs
+    """``(job_id, queue, state)`` for each job in ``qstat -w -u`` output."""
+    return [
+        (job.job_id, job.queue, job.state) for job in parse_qstat_user_listing(output)
+    ]
 
 
 @click.group(name="cancel")
@@ -64,6 +53,66 @@ def _exit_with_subcommand_status(result, **_kwargs):
     """
     if isinstance(result, int) and result:
         click.get_current_context().exit(result)
+
+
+UNFINISHED = ("initiated", "dispatched", "submitted", "running")
+# Leave rows this young alone even if qstat doesn't list them yet.
+STALE_AFTER = timedelta(minutes=10)
+
+
+def _still_queued_or_running(tracker, jobs: List[dict], quiet: bool):
+    """The database rows whose job the scheduler still lists.
+
+    Only those can be cancelled, so ``cancel status``/``filter`` never pick a
+    row left ``submitted`` long ago. One scheduler query
+    (:func:`list_user_jobs`) for all rows. A row whose job name wasn't
+    stored gets the (possibly truncated) name from that listing.
+
+    Unfinished rows that the scheduler no longer lists, and that are older
+    than :data:`STALE_AFTER`, are marked ``unknown``: no run file said how
+    they ended, and PBS has forgotten them.
+
+    Returns ``None`` (after saying why) if the scheduler can't be asked.
+    """
+    try:
+        live = {same_job(j.job_id): j for j in list_user_jobs()}
+    except SchedulerQueryError as exc:
+        click.echo(
+            f"❌ Can't tell which jobs are still queued or running: {exc}", err=True
+        )
+        return None
+
+    cutoff = (datetime.now() - STALE_AFTER).isoformat()
+    candidates, gone = [], []
+    for job in jobs:
+        key = same_job(job["job_id"])
+        if key in live:
+            if not job.get("job_name"):
+                job = {**job, "job_name": live[key].name}
+            candidates.append(job)
+        elif (
+            job.get("status") in UNFINISHED
+            and _PBS_JOB_ID_RE.match(job["job_id"])
+            and (job.get("submitted_at") or "") < cutoff
+        ):
+            gone.append(job["job_id"])
+    if gone:
+        marked = tracker.mark_jobs_gone(gone)
+        if marked and not quiet:
+            click.echo(
+                f"ℹ️  Marked {marked} old job(s) as unknown: still 'submitted' or"
+                " 'running' in the database, but no longer queued or running"
+            )
+    return candidates
+
+
+def _tags_match(job: dict, wanted: List[str]) -> bool:
+    """True if the job has every ``KEY=VALUE`` tag in ``wanted``."""
+    try:
+        tags = set(json.loads(job.get("tags") or "[]"))
+    except (TypeError, ValueError):
+        return False
+    return all(tag in tags for tag in wanted)
 
 
 @cancel_cli.command(name="id")
@@ -170,6 +219,12 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
 @cancel_cli.command(name="name")
 @click.argument("job_name")
 @click.option("--pattern", "-p", is_flag=True, help="Treat job_name as a regex pattern")
+@click.option(
+    "--dry-run",
+    "-n",
+    is_flag=True,
+    help="Show what would be cancelled without doing it",
+)
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
 @click.option("--quiet", "-q", is_flag=True, help="Minimize output messages")
 @click.option(
@@ -178,7 +233,7 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
 @click.option(
     "--timeout", default=30, type=int, help="Maximum wait time in seconds (default: 30)"
 )
-def cancel_by_name(job_name, pattern, force, quiet, wait, timeout):
+def cancel_by_name(job_name, pattern, dry_run, force, quiet, wait, timeout):
     """Cancel jobs by PBS job name or pattern."""
     # Find jobs matching the name/pattern
     matching_jobs = _find_jobs_by_name(job_name, pattern, quiet)
@@ -198,6 +253,14 @@ def cancel_by_name(job_name, pattern, force, quiet, wait, timeout):
             click.echo(f"Found {len(matching_jobs)} job(s) with name '{job_name}':")
         for job_id, name in matching_jobs:
             click.echo(f"  • {job_id}: {name}")
+
+    if dry_run:
+        if quiet:
+            for job_id, _ in matching_jobs:
+                click.echo(job_id)
+        else:
+            click.echo(f"🔍 Dry run: Would cancel {len(matching_jobs)} job(s)")
+        return 0
 
     # Confirmation prompt
     if not force:
@@ -249,11 +312,15 @@ def cancel_by_status(status, dry_run, force, quiet, limit):
     # Get jobs from qxub database
     tracker = ResourceTracker()
     tracker.sync_from_run_files()
-    jobs = tracker.get_jobs_by_status(status, limit)
+    jobs = _still_queued_or_running(tracker, tracker.get_jobs_by_status(status), quiet)
+    if jobs is None:
+        return 1
+    if limit:
+        jobs = jobs[:limit]
 
     if not jobs:
         if not quiet:
-            click.echo(f"❌ No jobs found with status '{status}'")
+            click.echo(f"❌ No queued or running jobs found with status '{status}'")
         return 1
 
     # Extract job IDs
@@ -308,6 +375,13 @@ def cancel_by_status(status, dry_run, force, quiet, limit):
 @click.option("--job-name", help="Filter by job name pattern (regex)")
 @click.option("--job-id", help="Filter by job ID pattern (regex)")
 @click.option(
+    "--tag",
+    "tags",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Only jobs with this tag (from exec --tag/--tags); repeat to require several",
+)
+@click.option(
     "--before",
     help="Filter jobs submitted before time (e.g., '2h', '30m', '1d', '2023-10-22 14:30')",
 )
@@ -325,23 +399,32 @@ def cancel_by_status(status, dry_run, force, quiet, limit):
 @click.option("--quiet", "-q", is_flag=True, help="Minimize output messages")
 @click.option("--limit", type=int, help="Maximum number of jobs to cancel")
 def cancel_by_filter(
-    status, command, job_name, job_id, before, after, dry_run, force, quiet, limit
+    status,
+    command,
+    job_name,
+    job_id,
+    tags,
+    before,
+    after,
+    dry_run,
+    force,
+    quiet,
+    limit,
 ):
-    """Cancel qxub-tracked jobs using advanced filters."""
-    import re
-    from datetime import datetime, timedelta
+    """Cancel qxub-tracked jobs that are still queued or running, by filters.
 
-    from .core.scheduler import get_job_resource_data
-    from .resources import ResourceTracker
-
-    # Get all jobs and apply filters
+    Every filter works on the qxub database and one listing of your jobs
+    from the scheduler; no per-job scheduler queries.
+    """
     tracker = ResourceTracker()
     tracker.sync_from_run_files()
-    jobs = tracker.get_jobs_by_status(limit=None)  # Get all jobs first
+    jobs = _still_queued_or_running(tracker, tracker.get_jobs_by_status(), quiet)
+    if jobs is None:
+        return 1
 
     if not jobs:
         if not quiet:
-            click.echo("❌ No jobs found in qxub database")
+            click.echo("❌ No qxub jobs are queued or running")
         return 1
 
     # Apply filters
@@ -363,25 +446,31 @@ def cancel_by_filter(
         ]
         filter_descriptions.append(f"Command contains: '{command}'")
 
-    # Job name filter (need to get from PBS)
+    # Tag filter
+    if tags:
+        bad = [t for t in tags if "=" not in t]
+        if bad:
+            click.echo(f"❌ Tags must be KEY=VALUE: {', '.join(bad)}", err=True)
+            return 1
+        filtered_jobs = [job for job in filtered_jobs if _tags_match(job, list(tags))]
+        filter_descriptions.append(f"Tags: {', '.join(tags)}")
+
+    # Job name filter: the name stored at submission, else the scheduler's
     if job_name:
         try:
             name_pattern = re.compile(job_name, re.IGNORECASE)
-            jobs_with_names = []
-            for job in filtered_jobs:
-                job_data = get_job_resource_data(job["job_id"])
-                if job_data and "metadata" in job_data:
-                    pbs_job_name = job_data["metadata"].get("Job_Name", "")
-                    if pbs_job_name and name_pattern.search(pbs_job_name):
-                        jobs_with_names.append(job)
-            filtered_jobs = jobs_with_names
-            filter_descriptions.append(f"Job name matches: '{job_name}'")
         except re.error as e:
             if not quiet:
                 click.echo(
                     f"❌ Invalid regex pattern for job name '{job_name}': {e}", err=True
                 )
             return 1
+        filtered_jobs = [
+            job
+            for job in filtered_jobs
+            if job.get("job_name") and name_pattern.search(job["job_name"])
+        ]
+        filter_descriptions.append(f"Job name matches: '{job_name}'")
 
     # Job ID filter
     if job_id:
@@ -483,7 +572,8 @@ def cancel_by_filter(
                 if job.get("command", "")
                 else "N/A"
             )
-            click.echo(f"  • {job['job_id']}: {cmd_preview}")
+            name = f" [{job['job_name']}]" if job.get("job_name") else ""
+            click.echo(f"  • {job['job_id']}{name}: {cmd_preview}")
         if len(filtered_jobs) > 10:
             click.echo(f"  ... and {len(filtered_jobs) - 10} more")
 

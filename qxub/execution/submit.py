@@ -375,6 +375,7 @@ def submit_job(
             joblog_path=processed_params.get("joblog"),
             queue=processed_params.get("queue"),
             cpus_requested=ncpus_req if ncpus_req else None,
+            job_name=processed_params.get("name"),
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Failed to log job submission: %s", exc)

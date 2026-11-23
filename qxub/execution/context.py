@@ -421,6 +421,7 @@ def execute_unified(
             joblog_path=ctx_obj.get("joblog"),
             queue=ctx_obj.get("queue"),
             cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
+            job_name=ctx_obj.get("name"),
         )
     except Exception as e:
         logger.debug("Failed to log job submission: %s", e)
