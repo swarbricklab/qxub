@@ -21,15 +21,14 @@ Usage::
     print(result.virtual_id)   # "qx-550e8400-..."
 """
 
-import base64
 import logging
-
-logger = logging.getLogger(__name__)
 import os
-import sys
+import shlex
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -44,7 +43,7 @@ class SubmitResult:
         stdout_path:  Absolute path to the PBS stdout file.
         stderr_path:  Absolute path to the PBS stderr file.
         submission_command:
-                      The raw ``qsub -v ...`` command that was executed
+                      The scheduler command that was run, shell-quoted
                       (useful for debugging).
     """
 
@@ -54,6 +53,107 @@ class SubmitResult:
     stdout_path: Optional[str] = None
     stderr_path: Optional[str] = None
     submission_command: str = ""
+
+
+def exec_context_summary(context_type: str, context_value: Any) -> Dict[str, Any]:
+    """How the queue table records an execution context."""
+    if isinstance(context_value, dict):
+        value = (
+            f"{context_value.get('env', '')} "
+            f"+ {' '.join(context_value.get('modules', []))}"
+        )
+    elif isinstance(context_value, list):
+        value = " ".join(context_value)
+    else:
+        value = context_value
+    return {"type": context_type, "value": value}
+
+
+def dispatch(
+    spec,
+    *,
+    run_id: str,
+    run_path,
+    command: str,
+    tags: Sequence[str],
+    working_dir: str,
+    exec_context: Dict[str, Any],
+    backend=None,
+) -> Tuple[str, Optional[str]]:
+    """Submit ``spec`` and record it: the one submission path.
+
+    Creates the queue entry, submits through the platform's scheduler
+    backend, then records the job ID in the queue table and the resource
+    tracker. Returns ``(job_id, queue_entry_id)``; the entry ID is ``None``
+    if the queue entry couldn't be written.
+
+    If the scheduler refuses the job, the run file is removed, the queue
+    entry is marked failed and :class:`~qxub.backends.SubmitError` is raised.
+    """
+    from .. import backends
+    from ..queue import create_queue_entry, runs, update_queue_entry
+    from ..queue.consolidate import maybe_start_in_background
+    from ..resources.tracker import resource_tracker
+    from .context import _parse_cpus_from_resources
+
+    backend = backend or backends.get_backend()
+    cpus = _parse_cpus_from_resources(spec.resources)
+
+    virtual_id = None
+    try:
+        virtual_id = create_queue_entry(
+            command=command,
+            pbs_job_id=None,
+            tags=list(tags),
+            working_dir=working_dir,
+            exec_context=exec_context,
+            joblog_path=spec.job_log,
+            queue_name=spec.queue,
+            cpus_requested=cpus,
+            entry_id=run_id,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.debug("Failed to create queue entry: %s", exc)
+
+    try:
+        job_id = backend.submit(spec)
+    except BaseException:
+        runs.discard(run_path)
+        if virtual_id:
+            try:
+                update_queue_entry(virtual_id, status="failed")
+            except Exception:  # pylint: disable=broad-except
+                pass
+        raise
+
+    if virtual_id:
+        try:
+            update_queue_entry(
+                virtual_id,
+                pbs_job_id=job_id,
+                status="dispatched",
+                joblog_path=spec.job_log,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Failed to update queue entry: %s", exc)
+
+    try:
+        resource_tracker.log_job_submitted(
+            job_id=job_id,
+            command=command,
+            tags=list(tags),
+            joblog_path=spec.job_log,
+            queue=spec.queue,
+            cpus_requested=cpus,
+            job_name=spec.name,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.debug("Failed to log job submission: %s", exc)
+
+    # Fold finished runs into the stats snapshot now and then (Phase 3).
+    maybe_start_in_background(run_path.parent if run_path else None)
+
+    return job_id, virtual_id
 
 
 def submit_job(
@@ -84,9 +184,9 @@ def submit_job(
     """Submit a PBS job through qxub's full infrastructure.
 
     This is the programmatic equivalent of ``qxub exec --terse``.  It
-    resolves configuration, selects a template, creates a queue entry,
-    calls ``qsub``, updates the queue entry with the real PBS job ID,
-    and logs to the resource tracker and execution history.
+    resolves configuration, selects a template, and hands the job to
+    :func:`dispatch` (the same pipeline ``qxub exec`` uses), which submits it
+    through the platform's scheduler backend and records it.
 
     Unlike the CLI path, this function:
 
@@ -122,20 +222,16 @@ def submit_job(
         and file paths.
 
     Raises:
-        QsubError:    If the ``qsub`` command fails.
+        SubmitError:  If the scheduler refuses the job. ``QsubError`` is
+                      the same class, so existing handlers still work.
         ValueError:   If multiple execution contexts are specified.
     """
-    from ..config.handler import process_job_options
-    from ..core.scheduler import (
-        QsubError,
-        qsub,
-        qsub_path_value,
-        qsub_var_value,
-    )
+    from .. import backends
+    from ..config.handler import job_spec, process_job_options
     from ..core.templates import get_template
-    from ..queue import create_queue_entry, runs, update_queue_entry
+    from ..queue import runs
     from ..queue.db import new_virtual_id
-    from ..resources.tracker import resource_tracker
+    from .context import ExecutionContext
 
     # ------------------------------------------------------------------
     # Validate execution context (mutually exclusive)
@@ -229,49 +325,15 @@ def submit_job(
     # ------------------------------------------------------------------
     # Process config defaults + template vars + qsub options string
     # ------------------------------------------------------------------
-    processed_params, qsub_options = process_job_options(params, config_manager)
+    processed_params, _options = process_job_options(params, config_manager)
 
     # ------------------------------------------------------------------
-    # Build submission variables (same logic as ExecutionContext)
+    # Job variables (the same as ``qxub exec`` passes)
     # ------------------------------------------------------------------
-    cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
     exec_dir = processed_params.get("execdir") or os.getcwd()
-
-    base_vars = (
-        f'cmd_b64="{cmd_b64}"'
-        f",cwd={qsub_path_value(exec_dir)}"
-        f",out={qsub_path_value(processed_params['out'])}"
-        f",err={qsub_path_value(processed_params['err'])}"
-        f",quiet=true"
-        f",create_execdir=false"
-        f",qxub_python={qsub_path_value(sys.executable)}"
+    job_vars = ExecutionContext(context_type, context_value, template_type).job_env(
+        cmd_parts, processed_params, pre=pre, post=post, bind=bind
     )
-
-    # Context-specific variables
-    if context_type == "conda":
-        context_vars = f"env={context_value}"
-    elif context_type == "module":
-        mods_str = " ".join(context_value)
-        context_vars = f'mods="{mods_str}"'
-    elif context_type == "singularity":
-        context_vars = f"sif={qsub_path_value(context_value)}"
-        if bind:
-            context_vars += f",bind={qsub_var_value(bind)}"
-    else:
-        context_vars = ""
-
-    if context_vars:
-        submission_vars = f"{context_vars},{base_vars}"
-    else:
-        submission_vars = base_vars
-
-    # Pre/post hooks
-    if pre:
-        pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
-        submission_vars += f',pre_cmd_b64="{pre_b64}"'
-    if post:
-        post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
-        submission_vars += f',post_cmd_b64="{post_b64}"'
 
     # Run file: the job updates it instead of writing the job database
     # (docs/dev/sqlite-robustness.md, Phase 2).
@@ -283,7 +345,7 @@ def submit_job(
             "submitted_at": datetime.now().isoformat(timespec="seconds"),
             "user": os.environ.get("USER", ""),
             "submit_host": os.uname().nodename,
-            "command_b64": cmd_b64,
+            "command_b64": job_vars["cmd_b64"],
             "working_dir": exec_dir,
             "exec_context": {"type": context_type, "value": context_value},
             "queue": processed_params.get("queue"),
@@ -296,94 +358,24 @@ def submit_job(
             "err": processed_params.get("err"),
         },
     )
-    submission_vars += runs.submission_vars(run_id, run_path)
+    job_vars.update(runs.job_env(run_id, run_path))
 
-    # ------------------------------------------------------------------
-    # Build qsub command
-    # ------------------------------------------------------------------
-    submission_command = f"qsub -v {submission_vars} {qsub_options} {template}"
+    backend = backends.get_backend()
+    spec = job_spec(processed_params, template, job_vars)
+    submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Programmatic submission command: %s", submission_command)
 
-    # ------------------------------------------------------------------
-    # Pre-qsub: create queue entry (status = initiated)
-    # ------------------------------------------------------------------
-    exec_context_info = {
-        "type": context_type,
-        "value": (
-            context_value
-            if not isinstance(context_value, list)
-            else " ".join(context_value)
-        ),
-    }
-
-    tag_list = list(tags or [])
-
-    virtual_id = None
-    try:
-        ncpus = int(resources.get("ncpus", 0)) if resources else None
-        virtual_id = create_queue_entry(
-            command=cmd_str,
-            pbs_job_id=None,
-            tags=tag_list,
-            working_dir=exec_dir,
-            exec_context=exec_context_info,
-            joblog_path=processed_params.get("joblog"),
-            queue_name=processed_params.get("queue"),
-            cpus_requested=ncpus if ncpus else None,
-            entry_id=run_id,
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Failed to create queue entry: %s", exc)
-
-    # ------------------------------------------------------------------
-    # Submit to PBS (raises QsubError on failure — no sys.exit)
-    # ------------------------------------------------------------------
-    try:
-        job_id = qsub(submission_command, quiet=True)
-    except QsubError:
-        runs.discard(run_path)
-        if virtual_id:
-            try:
-                update_queue_entry(virtual_id, status="failed")
-            except Exception:  # pylint: disable=broad-except
-                pass
-        raise  # Let QsubError propagate to the caller
-
-    # ------------------------------------------------------------------
-    # Post-qsub: update queue entry (status → dispatched)
-    # ------------------------------------------------------------------
-    if virtual_id:
-        try:
-            update_queue_entry(
-                virtual_id,
-                pbs_job_id=job_id,
-                status="dispatched",
-                joblog_path=processed_params.get("joblog"),
-            )
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("Failed to update queue entry: %s", exc)
-
-    # ------------------------------------------------------------------
-    # Resource tracker + history logging
-    # ------------------------------------------------------------------
-    try:
-        ncpus_req = int(resources.get("ncpus", 0)) if resources else None
-        resource_tracker.log_job_submitted(
-            job_id=job_id,
-            command=cmd_str,
-            tags=tag_list,
-            joblog_path=processed_params.get("joblog"),
-            queue=processed_params.get("queue"),
-            cpus_requested=ncpus_req if ncpus_req else None,
-            job_name=processed_params.get("name"),
-        )
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("Failed to log job submission: %s", exc)
-
-    # Fold finished runs into the stats snapshot now and then (Phase 3).
-    from ..queue.consolidate import maybe_start_in_background
-
-    maybe_start_in_background(run_path.parent if run_path else None)
+    # Raises SubmitError (also known as QsubError) if the job is refused
+    job_id, virtual_id = dispatch(
+        spec,
+        run_id=run_id,
+        run_path=run_path,
+        command=cmd_str,
+        tags=list(tags or []),
+        working_dir=exec_dir,
+        exec_context=exec_context_summary(context_type, context_value),
+        backend=backend,
+    )
 
     # ------------------------------------------------------------------
     # Return structured result

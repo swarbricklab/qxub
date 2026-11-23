@@ -48,6 +48,7 @@ Efficiency maths reads PBS resource names: `mem`, `walltime`, `cpupercent` (`:65
 ## B. Building the submit command and moving data into the job
 
 **B1. `execution/context.py:260`: hand-built `qsub` command line. High.**
+*Done (5b): `PbsBackend.submit(JobSpec)` builds the `qsub` argv; the execution layer no longer builds a command string.*
 The live CLI path builds the full command with an f-string: `f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'`. The same pattern appears at `execution/core.py:287`, `execution/executors.py:52-54` and `execution/submit.py:275`.
 *Suggest:* replace all four with `scheduler.submit(JobSpec, rendered_script)`. The execution layer should never see argv.
 
@@ -57,6 +58,7 @@ All job inputs (`cmd_b64`, `cwd`, `out`, `err`, `env`, `mods`, `sif`, `bind`, `p
 *Suggest:* render the parameters into the job script itself (a heredoc or `export` lines inside the script), or write a sidecar `job.env` / `job.json` next to the script. Either removes the dependence on scheduler env-passing and on quoting rules.
 
 **B3. `config/handler.py:304-316` (`build_qsub_options`): opaque PBS flag string. High.**
+*Done (5b): `config.handler.job_spec()` builds a `JobSpec`. `build_qsub_options` remains only as a log string derived from the backend.*
 This builder is outside scope but is consumed here as `ctx_obj["options"]` / `qsub_options`. It emits `-N -q -P -l k=v -o <joblog> -M -m` as a single string, so the execution layer forwards PBS flags without seeing them.
 *Suggest:* pass a structured `JobSpec(name, queue/partition, account, resources, stdout, stderr, mail)` and give each backend a `render_directives(JobSpec)`.
 
@@ -70,10 +72,12 @@ The CPU count is pulled out of PBS resource strings. A Slurm-style `--cpus-per-t
 *Suggest:* `JobSpec.cpus: int` as the source of truth, with resource strings rendered from it.
 
 **B6. `execution/context.py:326-339`: PBS error handling. Med.**
+*Partly done (5b): failures raise `backends.SubmitError` (`QsubError` is an alias); the error kinds are still to do.*
 The code catches `QsubError` and calls `sys.exit(qsub_exc.exit_code)`, so the CLI exits with whatever the PBS client returned. The comment says "exit with the PBS exit code".
 *Suggest:* use a backend-neutral `SubmissionError(kind, backend_exit_code, stderr)` and map its kinds to CLI exit codes.
 
 **B7. Four overlapping submission paths. Med.**
+*Done (5b): one pipeline, `execution.submit.dispatch`. `executors.py` and `core.submit_and_monitor_job` are deleted, and `submit_job` now passes the same job variables as `qxub exec`.*
 Sites: `execution/context.py:220` (`execute_unified`, the only one `exec_cli.py:15` uses), `execution/core.py:236` (`submit_and_monitor_job`), `execution/executors.py:21-58` (`_handle_terse_execution`) and `execution/submit.py:57` (`submit_job`).
 They have drifted apart:
 - `core.build_submission_variables` expands `${var}`; the others do not.

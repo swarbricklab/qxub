@@ -22,7 +22,7 @@ from .. import backends
 
 # Kept importable from here for callers outside qxub (e.g. the Snakemake
 # executor plugin) and for older code; they live with the PBS backend now.
-from ..backends import LiveJob, SchedulerQueryError  # noqa: F401
+from ..backends import LiveJob, SchedulerQueryError, SubmitError  # noqa: F401
 from ..backends.pbs import parse_qstat_fx_output, parse_qstat_user_listing
 from ..resources import time_to_seconds
 
@@ -240,18 +240,8 @@ def same_job(job_id: str) -> str:
     return backends.get_backend().same_job(job_id)
 
 
-class QsubError(Exception):
-    """Raised when a ``qsub`` submission fails.
-
-    Attributes:
-        exit_code:  The process exit code returned by the ``qsub`` command.
-        stderr:     The stderr output captured from the ``qsub`` process.
-    """
-
-    def __init__(self, message: str, exit_code: int = 1, stderr: str = ""):
-        super().__init__(message)
-        self.exit_code = exit_code
-        self.stderr = stderr
+# Submission failures. The old name stays for callers that catch it.
+QsubError = SubmitError
 
 
 def qsub(cmd, quiet=False):

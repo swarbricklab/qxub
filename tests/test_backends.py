@@ -14,8 +14,14 @@ import pytest
 from click.testing import CliRunner
 
 from qxub import backends, cancel_cli
-from qxub.backends import LiveJob, SchedulerBackend, SchedulerQueryError
-from qxub.backends.pbs import PbsBackend, parse_qstat_full_listing
+from qxub.backends import (
+    JobSpec,
+    LiveJob,
+    SchedulerBackend,
+    SchedulerQueryError,
+    SubmitError,
+)
+from qxub.backends.pbs import PbsBackend, parse_qstat_full_listing, qsub_argv
 from qxub.core import scheduler
 from qxub.queue import consolidate as cons
 
@@ -53,6 +59,17 @@ class FakeBackend(SchedulerBackend):
 
     def looks_like_job_id(self, value):
         return value.startswith("fake-")
+
+    def submit_command(self, spec):
+        return ["fake-submit", spec.name, spec.script]
+
+    def submit(self, spec):
+        self.calls.append(("submit", spec))
+        if self.fail:
+            raise SubmitError(self.fail, exit_code=3, stderr=self.fail)
+        job_id = f"fake-{len(self.jobs) + 1}"
+        self.jobs.append(LiveJob(job_id, spec.queue or "", "Q", spec.name))
+        return job_id
 
 
 @pytest.fixture
@@ -267,3 +284,116 @@ def test_cancel_id_shows_why_it_failed(fake_backend):
 
     assert result.exit_code == 1
     assert "Could not cancel fake-9: no such job" in result.output
+
+
+# -- submission ----------------------------------------------------------------
+
+
+def test_qsub_argv_renders_a_job_spec():
+    spec = JobSpec(
+        script="/t/job.pbs",
+        name="j",
+        queue="normal",
+        account="ab12",
+        resources=["ncpus=2", "mem=4GB"],
+        job_log="/logs/my job.log",
+        mail_to="me@example.org",
+        env={"cmd_b64": "ZWNobw==", "bind": "/a,/b", "odd": "it's,here", "p": "/x y"},
+        native_args=["-W umask=0027"],
+    )
+
+    assert qsub_argv(spec) == [
+        "qsub",
+        "-v",
+        "cmd_b64=ZWNobw==,bind='/a,/b',odd=\"it's,here\",p=/x y",
+        "-N", "j", "-q", "normal", "-P", "ab12",
+        "-l", "ncpus=2", "-l", "mem=4GB",
+        "-o", "/logs/my job.log",
+        "-M", "me@example.org", "-m", "ae",
+        "-W", "umask=0027",
+        "/t/job.pbs",
+    ]  # fmt: skip
+    assert qsub_argv(JobSpec(script="s", name="n")) == ["qsub", "-N", "n", "s"]
+
+
+def test_rejected_job_exits_2(fake_pbs, monkeypatch):
+    monkeypatch.setenv("FAKE_QSUB_EXIT", "166")
+    monkeypatch.setenv("FAKE_QSUB_STDERR", "qsub: Illegal attribute or resource value")
+
+    with pytest.raises(SubmitError) as excinfo:
+        PbsBackend().submit(JobSpec(script="s", name="n"))
+
+    assert excinfo.value.exit_code == 2
+    assert "Illegal attribute" in excinfo.value.stderr
+    assert issubclass(scheduler.QsubError, SubmitError)
+
+
+@pytest.fixture
+def submit_env(fake_backend, monkeypatch, tmp_path):
+    """Run submissions from a scratch directory with no platform."""
+    from qxub.config import site
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(site, "current_platform", lambda: None)
+    return fake_backend
+
+
+def test_submit_job_goes_through_the_backend(submit_env):
+    from qxub.execution import submit_job
+    from qxub.resources import ResourceTracker
+
+    result = submit_job(
+        ["echo", "hi"],
+        env="myenv",
+        queue="normal",
+        project="ab12",
+        name="greet",
+        resources={"ncpus": 2, "mem": "4GB"},
+    )
+
+    (spec,) = [c[1] for c in submit_env.calls if c[0] == "submit"]
+    assert result.job_id == "fake-1"
+    assert (spec.name, spec.queue, spec.account) == ("greet", "normal", "ab12")
+    assert spec.resources == ["ncpus=2", "mem=4GB"]
+    assert spec.env["env"] == "myenv"
+    assert spec.env["QXUB_RUN_ID"] == result.virtual_id
+    assert result.submission_command == "fake-submit greet " + spec.script
+    assert ResourceTracker().get_job_status("fake-1")["status"] == "submitted"
+
+
+def test_refused_submit_job_raises_and_removes_the_run_file(submit_env):
+    from qxub.execution import QsubError, submit_job
+
+    submit_env.fail = "queue is closed"
+    with pytest.raises(QsubError, match="queue is closed"):
+        submit_job(["echo", "hi"], queue="normal", project="ab12")
+
+    (spec,) = [c[1] for c in submit_env.calls if c[0] == "submit"]
+    from pathlib import Path
+
+    assert not Path(spec.env["QXUB_RUN_FILE"]).exists()
+
+
+def test_exec_submits_through_the_backend(submit_env):
+    from qxub.exec_cli import exec_cli
+
+    result = CliRunner().invoke(
+        exec_cli, ["--terse", "-P", "ab12", "-q", "normal", "--", "echo", "hi"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.strip().splitlines()[-1] == "fake-1"
+    (spec,) = [c[1] for c in submit_env.calls if c[0] == "submit"]
+    assert spec.account == "ab12"
+
+
+def test_exec_shows_why_the_scheduler_refused(submit_env):
+    from qxub.exec_cli import exec_cli
+
+    submit_env.fail = "queue is closed"
+    result = CliRunner().invoke(
+        exec_cli, ["--terse", "-P", "ab12", "-q", "normal", "--", "echo", "hi"]
+    )
+
+    assert result.exit_code == 3
+    assert "queue is closed" in result.output

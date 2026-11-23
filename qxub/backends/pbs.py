@@ -1,13 +1,15 @@
-"""PBS Pro (and Torque) backend: ``qstat`` and ``qdel``.
+"""PBS Pro (and Torque) backend: ``qsub``, ``qstat`` and ``qdel``.
 
-All of qxub's ``qstat``/``qdel`` calls live here. The parsers are plain
-functions so they can be tested on captured output.
+All of qxub's ``qsub``/``qstat``/``qdel`` calls live here, apart from
+interactive sessions. The parsers are plain functions so they can be tested
+on captured output.
 """
 
 import getpass
 import logging
 import os
 import re
+import shlex
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
@@ -21,7 +23,7 @@ from ..resources import (
     size_to_bytes,
     time_to_seconds,
 )
-from .base import LiveJob, SchedulerBackend, SchedulerQueryError
+from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,47 @@ QSTAT_CHUNK = 100
 JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
 
 
+# qsub's exit code when PBS rejects the job's options; qxub exits 2 for it.
+QSUB_INVALID_REQUEST = 166
+
+
 def _current_user() -> str:
     return os.environ.get("USER") or getpass.getuser()
+
+
+def qsub_var(value: Any) -> str:
+    """A value for one ``qsub -v`` item.
+
+    ``qsub -v`` splits its list on commas, so a value containing one is
+    wrapped in quotes that reach PBS (``bind='/a,/b'``).
+    """
+    value = str(value)
+    if "," not in value:
+        return value
+    quote = '"' if "'" in value else "'"
+    return f"{quote}{value}{quote}"
+
+
+def qsub_argv(spec: JobSpec) -> List[str]:
+    """The ``qsub`` command line for ``spec``."""
+    argv = ["qsub"]
+    if spec.env:
+        argv += ["-v", ",".join(f"{k}={qsub_var(v)}" for k, v in spec.env.items())]
+    argv += ["-N", spec.name]
+    if spec.queue:
+        argv += ["-q", spec.queue]
+    if spec.account:
+        argv += ["-P", spec.account]
+    for resource in spec.resources:
+        argv += ["-l", resource]
+    if spec.job_log:
+        argv += ["-o", str(spec.job_log)]
+    if spec.mail_to:
+        argv += ["-M", spec.mail_to, "-m", spec.mail_events or "ae"]
+    for arg in spec.native_args:
+        argv += shlex.split(arg)
+    argv.append(str(spec.script))
+    return argv
 
 
 class PbsBackend(SchedulerBackend):
@@ -100,6 +141,27 @@ class PbsBackend(SchedulerBackend):
         if result.returncode == 0:
             return True, ""
         return False, result.stderr.strip() or f"qdel exited {result.returncode}"
+
+    def submit_command(self, spec: JobSpec) -> List[str]:
+        return qsub_argv(spec)
+
+    def submit(self, spec: JobSpec) -> str:
+        argv = qsub_argv(spec)
+        logger.info("Submitting: %s", shlex.join(argv))
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, check=False)
+        except OSError as exc:
+            raise SubmitError(f"cannot run qsub: {exc}", exit_code=1) from exc
+        if result.returncode != 0:
+            exit_code = (
+                2 if result.returncode == QSUB_INVALID_REQUEST else result.returncode
+            )
+            raise SubmitError(
+                f"qsub failed (exit {exit_code}): {result.stderr.strip()}",
+                exit_code=exit_code,
+                stderr=result.stderr,
+            )
+        return result.stdout.strip()
 
     def looks_like_job_id(self, value: str) -> bool:
         return bool(JOB_ID_RE.match(value or ""))

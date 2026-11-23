@@ -334,29 +334,36 @@ def select_auto_queue(params):
     return params
 
 
-def build_qsub_options(params):
-    """Build qsub options string from parameters."""
+def job_spec(params, script="", env=None):
+    """The :class:`~qxub.backends.JobSpec` for processed job options."""
+    from ..backends import JobSpec
     from .site import default_directives
 
-    options = "-N {name} -q {queue} ".format_map(params)
-    if params.get("project"):
-        options += f"-P {params['project']} "
-    if params.get("resources"):
-        options += " ".join([f"-l {resource}" for resource in params["resources"]])
-    # qsub() splits the command with shlex: a joblog with spaces needs quoting
-    options += f" -o {shlex.quote(str(params['joblog']))}"
+    return JobSpec(
+        script=str(script),
+        name=params["name"],
+        queue=params.get("queue"),
+        account=params.get("project") or None,
+        resources=list(params.get("resources") or []),
+        job_log=str(params["joblog"]) if params.get("joblog") else None,
+        mail_to=params.get("email") or None,
+        mail_events=params.get("email_opts") or "ae",  # default: abort + end
+        env=dict(env or {}),
+        # Site-wide scheduler arguments from the platform, e.g. -W umask=0027
+        native_args=default_directives(),
+    )
 
-    # Email notifications via PBS -M and -m
-    if params.get("email"):
-        options += f" -M {params['email']}"
-        email_opts = params.get("email_opts", "ae")  # default: abort + end
-        options += f" -m {email_opts}"
 
-    # Site-wide scheduler arguments from the platform, e.g. -W umask=0027
-    for directive in default_directives():
-        options += f" {directive}"
+def build_qsub_options(params):
+    """The scheduler options for ``params``, as one string (for logs).
 
-    return options
+    Submission uses :func:`job_spec` and the platform's backend; this string
+    is only kept for messages and for callers outside qxub.
+    """
+    from ..backends import get_backend
+
+    argv = get_backend().submit_command(job_spec(params))
+    return shlex.join(argv[1:-1])
 
 
 def adjust_cpus_for_gpus(params):

@@ -191,12 +191,14 @@ def test_job_scripts_never_open_the_job_database(script):
 # -- every submission path passes the submitting Python ------------------------
 
 
-def test_build_submission_variables_passes_qxub_python():
-    from qxub.execution.core import build_submission_variables
+def test_job_env_passes_qxub_python():
+    from qxub.execution.context import create_default_context
 
-    variables = build_submission_variables(("true",), "/w", Path("o"), Path("e"), True)
+    env = create_default_context().job_env(
+        ("true",), {"out": "o", "err": "e", "execdir": "/w", "quiet": True}
+    )
 
-    assert f"qxub_python={sys.executable}" in variables.split(",")
+    assert env["qxub_python"] == sys.executable
 
 
 def test_submit_job_api_passes_qxub_python(sandbox):
