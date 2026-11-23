@@ -36,9 +36,8 @@ class TestImportCompatibility:
     def test_scheduling_imports(self):
         """Test scheduling imports work."""
         # Current imports that should always work
-        from qxub.core.scheduler import job_status_from_files, qdel, qsub
+        from qxub.core.scheduler import job_status_from_files, qdel
 
-        assert callable(qsub)
         assert callable(qdel)
         assert callable(job_status_from_files)
 

@@ -127,54 +127,6 @@ def format_walltime(hours: float) -> str:
     return f"{hours_int:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def compare_memory(mem1_str: str, mem2_str: str) -> Optional[int]:
-    """
-    Compare two memory size strings.
-
-    Returns:
-        -1 if mem1 < mem2
-         0 if mem1 == mem2
-         1 if mem1 > mem2
-         None if either cannot be parsed
-    """
-    mem1_bytes = parse_memory_size(mem1_str)
-    mem2_bytes = parse_memory_size(mem2_str)
-
-    if mem1_bytes is None or mem2_bytes is None:
-        return None
-
-    if mem1_bytes < mem2_bytes:
-        return -1
-    elif mem1_bytes > mem2_bytes:
-        return 1
-    else:
-        return 0
-
-
-def compare_walltime(time1_str: str, time2_str: str) -> Optional[int]:
-    """
-    Compare two walltime strings.
-
-    Returns:
-        -1 if time1 < time2
-         0 if time1 == time2
-         1 if time1 > time2
-         None if either cannot be parsed
-    """
-    time1_hours = parse_walltime(time1_str)
-    time2_hours = parse_walltime(time2_str)
-
-    if time1_hours is None or time2_hours is None:
-        return None
-
-    if time1_hours < time2_hours:
-        return -1
-    elif time1_hours > time2_hours:
-        return 1
-    else:
-        return 0
-
-
 def evaluate_condition(condition: str, resources: dict) -> bool:
     """
     Evaluate a resource condition for queue selection.

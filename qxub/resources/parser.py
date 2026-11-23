@@ -125,32 +125,6 @@ def time_to_seconds(time_str: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def seconds_to_time(seconds: int) -> str:
-    """
-    Convert seconds to HH:MM:SS format.
-
-    Args:
-        seconds: Time in seconds
-
-    Returns:
-        Time string in HH:MM:SS format
-
-    Examples:
-        >>> seconds_to_time(1800)
-        '00:30:00'
-        >>> seconds_to_time(6330)
-        '01:45:30'
-    """
-    if seconds < 0:
-        return "00:00:00"
-
-    hours = seconds // 3600
-    minutes = (seconds % 3600) // 60
-    secs = seconds % 60
-
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
 def parse_exec_host(exec_host: str) -> Dict[str, Any]:
     """
     Parse PBS exec_host string.

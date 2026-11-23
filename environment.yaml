@@ -6,7 +6,6 @@ channels:
 dependencies:
     - python=3.10
     - click
-    - tailer=0.4.1
     - rich
     - omegaconf
     - sqlite>=3.29  # sqlite3 CLI with .recover, for `qxub db recover`

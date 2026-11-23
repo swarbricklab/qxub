@@ -6,7 +6,7 @@ CLI arguments suitable for remote execution via SSH.
 """
 
 import shlex
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from ..execution import ExecutionContext
 
@@ -219,67 +219,3 @@ def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
             parts.extend(["--var", shlex.quote(str(var))])
     if options.get("vars"):
         parts.extend(["--vars", shlex.quote(str(options["vars"]))])
-
-
-def parse_options_from_ctx(ctx_obj: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
-    """
-    Extract options dict and qsub_options from context object.
-
-    The context object (ctx.obj) contains processed parameters and qsub options.
-    This extracts the relevant parts for command serialization.
-
-    Args:
-        ctx_obj: Click context object dictionary
-
-    Returns:
-        Tuple of (options dict, qsub_options list)
-    """
-    options = {}
-    qsub_options = ctx_obj.get("options", [])
-
-    # Extract standard options from ctx.obj
-    option_keys = [
-        "queue",
-        "name",
-        "project",
-        "out",
-        "err",
-        "execdir",
-        "create_execdir",
-        "email",
-        "email_opts",
-        "array",
-        "mem",
-        "runtime",
-        "cpus",
-        "disk",
-        "volumes",
-        "template",
-        "pre",
-        "post",
-        "bind",
-        "dry",
-        "quiet",
-        "terse",
-        "verbose",
-    ]
-
-    for key in option_keys:
-        if key in ctx_obj:
-            options[key] = ctx_obj[key]
-
-    # Parse PBS resources from qsub_options list
-    # qsub_options format: ['-l', 'walltime=1:00:00', '-l', 'mem=4GB', ...]
-    resources = []
-    i = 0
-    while i < len(qsub_options):
-        if qsub_options[i] == "-l" and i + 1 < len(qsub_options):
-            resources.append(qsub_options[i + 1])
-            i += 2
-        else:
-            i += 1
-
-    if resources:
-        options["resources"] = resources
-
-    return options, qsub_options

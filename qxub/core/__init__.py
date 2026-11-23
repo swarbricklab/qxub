@@ -7,7 +7,6 @@ from .scheduler import (
     monitor_job_single_thread,
     print_status,
     qdel,
-    qsub,
 )
 from .templates import get_template
 
@@ -15,7 +14,6 @@ __all__ = [
     # Scheduler functions
     "monitor_job_single_thread",
     "print_status",
-    "qsub",
     "qdel",
     "get_job_resource_data",
     "job_status_from_files",

@@ -46,7 +46,6 @@ from .parser import (
     parse_exec_vnode,
     parse_joblog_resources,
     parse_timestamp,
-    seconds_to_time,
     size_to_bytes,
     time_to_seconds,
 )
@@ -54,8 +53,6 @@ from .tracker import ResourceTracker, resource_tracker
 
 # Import all public APIs for convenient access
 from .utils import (
-    compare_memory,
-    compare_walltime,
     evaluate_condition,
     format_memory_size,
     format_walltime,
@@ -71,15 +68,12 @@ __all__ = [
     "parse_walltime",
     "format_memory_size",
     "format_walltime",
-    "compare_memory",
-    "compare_walltime",
     "evaluate_condition",
     "suggest_resource_adjustment",
     # Parser functions (for advanced usage)
     "size_to_bytes",
     "bytes_to_human",
     "time_to_seconds",
-    "seconds_to_time",
     "parse_exec_host",
     "parse_exec_vnode",
     "parse_timestamp",

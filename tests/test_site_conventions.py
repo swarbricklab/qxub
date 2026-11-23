@@ -192,9 +192,9 @@ def test_job_scripts_never_open_the_job_database(script):
 
 
 def test_job_env_passes_qxub_python():
-    from qxub.execution.context import create_default_context
+    from qxub.execution.context import ExecutionContext
 
-    env = create_default_context().job_env(
+    env = ExecutionContext("default", None, "default").job_env(
         ("true",), {"out": "o", "err": "e", "execdir": "/w", "quiet": True}
     )
 

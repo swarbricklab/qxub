@@ -411,31 +411,3 @@ def execute_unified(
                 f"⚠️  Job cleanup failed - you may need to manually run: qdel {job_id}"
             )
             sys.exit(1)
-
-
-# Convenience functions for creating execution contexts
-def create_conda_context(env: str) -> ExecutionContext:
-    """Create a conda execution context."""
-    return ExecutionContext("conda", env, "conda")
-
-
-def create_module_context(modules: List[str]) -> ExecutionContext:
-    """Create a module execution context."""
-    return ExecutionContext("module", modules, "module")
-
-
-def create_singularity_context(container: str) -> ExecutionContext:
-    """Create a singularity execution context."""
-    return ExecutionContext("singularity", container, "singularity")
-
-
-def create_default_context() -> ExecutionContext:
-    """Create a default execution context."""
-    return ExecutionContext("default", None, "default")
-
-
-def create_conda_module_context(env: str, modules: List[str]) -> ExecutionContext:
-    """Create a combined conda + module execution context."""
-    return ExecutionContext(
-        "conda_module", {"env": env, "modules": modules}, "conda_module"
-    )
