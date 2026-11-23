@@ -44,7 +44,9 @@ def test_qsub_failure_exit_code_and_message_are_passed_through(sandbox, mode):
     result = sandbox.run("exec", mode, "-P", "ab12", "--", "echo", "hi")
 
     assert result.returncode == 38
-    assert "violates queue" in result.stdout + result.stderr
+    assert "violates queue" in result.stderr
+    # `id=$(qx --terse ...)` must not capture the error as a job ID.
+    assert "violates queue" not in result.stdout
     assert len(sandbox.pbs_calls("qsub")) == 1
 
 
@@ -156,6 +158,42 @@ def test_multi_path_bind_reaches_qsub_as_one_variable(sandbox):
     variables = call["argv"][call["argv"].index("-v") + 1]
     # PBS only keeps commas inside a -v value when the value is quoted.
     assert variables.startswith("sif=/c/t.sif,bind='/a,/b',")
+
+
+def qsub_variables(call) -> dict:
+    """The ``-v`` list as PBS splits it: on commas outside quotes."""
+    import csv
+
+    text = call["argv"][call["argv"].index("-v") + 1]
+    (fields,) = csv.reader([text], quotechar="'")
+    return dict(f.split("=", 1) for f in fields)
+
+
+@pytest.mark.parametrize(
+    "context",
+    [[], ["--mod", "python3"], ["--env", "myenv"], ["--sif", "/c/my image.sif"]],
+)
+def test_paths_with_spaces_reach_qsub_whole(sandbox, context):
+    """#140 review: an unquoted cwd was split by shlex and qsub refused it."""
+    execdir = sandbox.cwd / "exec dir with spaces"
+    execdir.mkdir()
+    out = sandbox.cwd / "log dir" / "job.out"
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--execdir", str(execdir),
+        "--out", str(out), *context, "--", "pwd",
+    )  # fmt: skip
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    (call,) = sandbox.pbs_calls("qsub")
+    assert call["argv"][-1].endswith(".pbs")
+    # The default joblog is inside the execdir and goes to -o (#140 retest).
+    joblog = call["argv"][call["argv"].index("-o") + 1]
+    assert joblog.startswith(str(execdir) + "/"), call["argv"]
+    variables = qsub_variables(call)
+    assert variables["cwd"] == str(execdir)
+    assert variables["out"] == str(out)
+    if "--sif" in context:
+        assert variables["sif"] == "/c/my image.sif"
 
 
 def test_fake_pbs_is_first_on_path(sandbox):

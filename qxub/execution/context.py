@@ -18,7 +18,7 @@ from typing import List, Optional, Union
 
 import click
 
-from ..core.scheduler import QsubError, qsub, qsub_var_value
+from ..core.scheduler import QsubError, qsub, qsub_path_value, qsub_var_value
 from ..history import history_manager
 from ..queue import create_queue_entry, runs, update_queue_entry
 from ..queue.db import new_virtual_id
@@ -114,7 +114,14 @@ class ExecutionContext:
         # Default to current working directory if execdir is None
         exec_dir = ctx_obj["execdir"] or os.getcwd()
         create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
-        base_vars = f'cmd_b64="{cmd_b64}",cwd={exec_dir},out={out},err={err},quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},qxub_version={qxub_version},qxub_path={qxub_exe},qxub_python={sys.executable},qxub_submit_host={submitting_host}'
+        base_vars = (
+            f'cmd_b64="{cmd_b64}",cwd={qsub_path_value(exec_dir)},'
+            f"out={qsub_path_value(out)},err={qsub_path_value(err)},"
+            f'quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},'
+            f"qxub_version={qxub_version},qxub_path={qsub_path_value(qxub_exe)},"
+            f"qxub_python={qsub_path_value(sys.executable)},"
+            f"qxub_submit_host={submitting_host}"
+        )
 
         # Context-specific variables
         if self.context_type == "conda":
@@ -127,7 +134,7 @@ class ExecutionContext:
             mods_str = " ".join(self.context_value["modules"])
             context_vars = f'env={env_name},mods="{mods_str}"'
         elif self.context_type == "singularity":
-            context_vars = f"sif={self.context_value}"
+            context_vars = f"sif={qsub_path_value(self.context_value)}"
             if bind:
                 context_vars += f",bind={qsub_var_value(bind)}"
         else:  # default
@@ -159,7 +166,7 @@ class ExecutionContext:
             submission_vars += ",qxub_notify=true"
             # Pass output directory for notification context
             out_dir = str(Path(ctx_obj.get("out", "")).parent)
-            submission_vars += f',qxub_notify_outdir="{out_dir}"'
+            submission_vars += f",qxub_notify_outdir={qsub_path_value(out_dir)}"
 
         return submission_vars
 
@@ -377,7 +384,7 @@ def execute_unified(
             except Exception:
                 pass
         # In CLI mode, display the error and exit with the PBS exit code
-        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc))
+        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc), err=True)
         import sys as _sys
 
         _sys.exit(qsub_exc.exit_code)

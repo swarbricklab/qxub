@@ -126,7 +126,12 @@ def submit_job(
         ValueError:   If multiple execution contexts are specified.
     """
     from ..config.handler import process_job_options
-    from ..core.scheduler import QsubError, qsub, qsub_var_value
+    from ..core.scheduler import (
+        QsubError,
+        qsub,
+        qsub_path_value,
+        qsub_var_value,
+    )
     from ..core.templates import get_template
     from ..queue import create_queue_entry, runs, update_queue_entry
     from ..queue.db import new_virtual_id
@@ -234,12 +239,12 @@ def submit_job(
 
     base_vars = (
         f'cmd_b64="{cmd_b64}"'
-        f",cwd={exec_dir}"
-        f",out={processed_params['out']}"
-        f",err={processed_params['err']}"
+        f",cwd={qsub_path_value(exec_dir)}"
+        f",out={qsub_path_value(processed_params['out'])}"
+        f",err={qsub_path_value(processed_params['err'])}"
         f",quiet=true"
         f",create_execdir=false"
-        f",qxub_python={sys.executable}"
+        f",qxub_python={qsub_path_value(sys.executable)}"
     )
 
     # Context-specific variables
@@ -249,7 +254,7 @@ def submit_job(
         mods_str = " ".join(context_value)
         context_vars = f'mods="{mods_str}"'
     elif context_type == "singularity":
-        context_vars = f"sif={context_value}"
+        context_vars = f"sif={qsub_path_value(context_value)}"
         if bind:
             context_vars += f",bind={qsub_var_value(bind)}"
     else:

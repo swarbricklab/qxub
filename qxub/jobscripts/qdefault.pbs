@@ -83,6 +83,19 @@ trap 'QXUB_SIGNAL=TERM; exit 143' TERM
 trap 'QXUB_SIGNAL=INT; exit 130' INT
 trap 'QXUB_SIGNAL=HUP; exit 129' HUP
 
+# A setup step failed: say what failed and how to fix it, on stderr (the
+# joblog) and in $err, which `qxub exec` and CI steps stream, then stop.
+# Without this a bad execdir was an opaque "exit code 1" (#109).
+qxub_setup_fail() {
+    printf '%s\n' "$@" >&2
+    if [ "$quiet" != "true" ] && [ -n "${err:-}" ]; then
+        { mkdir -p "${err%/*}" && printf '%s\n' "$@" >> "$err"; } 2>/dev/null || true
+    fi
+    { echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+      date -Iseconds >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"; } 2>/dev/null || true
+    exit 1
+}
+
 # Error handler function
 error_handler() {
     local exit_code=$?
@@ -112,23 +125,23 @@ trap error_handler ERR
 
 # Check required variables
 if [ -z "$cmd" ]; then
-    echo "❌ ERROR: No command provided"
-    exit 1
+    qxub_setup_fail "❌ ERROR: no command was given"
 fi
 
 if [ -z "$cwd" ]; then
-    echo "❌ ERROR: No working directory provided"
-    exit 1
+    qxub_setup_fail "❌ ERROR: no execution directory was given (cwd is empty)"
 fi
 
 # Create execution directory if requested
 if [ "$create_execdir" = "true" ]; then
     echo "📁 Creating execution directory: $cwd"
-    mkdir -p "$cwd" || { echo "❌ ERROR: Failed to create directory $cwd"; exit 1; }
+    mkdir -p "$cwd" || qxub_setup_fail "❌ ERROR: could not create the execution directory: $cwd"
 fi
 
 # Change to execution directory
-cd "$cwd" || { echo "❌ ERROR: Failed to change to directory $cwd"; exit 1; }
+cd "$cwd" || qxub_setup_fail \
+    "❌ ERROR: execution directory does not exist or can't be entered: $cwd" \
+    "   (pass --create-execdir, or make sure it is created upstream)"
 
 # Export user-defined environment variables
 if [ -n "$user_vars" ]; then
@@ -154,10 +167,8 @@ else
     mkdir -p "$out_dir" "$err_dir"
 
     # Test write permissions
-    if ! touch "$out" "$err"; then
-        echo "❌ ERROR: Cannot write to output files $out and $err"
-        exit 1
-    fi
+    touch "$out" "$err" || qxub_setup_fail \
+        "❌ ERROR: cannot write the output files: $out and $err"
 
     exec_prefix="exec 1>\"$out\" 2>\"$err\""
 fi
