@@ -780,6 +780,30 @@ class ResourceTracker:
             logger.debug("Failed to update job status for %s: %s", job_id, e)
             return False
 
+    def job_ids_starting_with(self, prefix: str) -> List[str]:
+        """Job IDs in the DB that start with ``prefix`` (either table).
+
+        Lets callers match ``12345`` to a stored ``12345.gadi-pbs``. Returns
+        an empty list if the DB can't be read.
+        """
+        if not prefix:
+            return []
+        pattern = (
+            prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+        try:
+            with self._connect(timeout=_STATUS_READ_TIMEOUT) as conn:
+                rows = conn.execute(
+                    "SELECT pbs_job_id FROM queue WHERE pbs_job_id LIKE ? ESCAPE '\\' "
+                    "UNION SELECT job_id FROM job_resources "
+                    "WHERE job_id LIKE ? ESCAPE '\\'",
+                    (pattern, pattern),
+                ).fetchall()
+            return [r[0] for r in rows if r[0]]
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug("Failed to look up job IDs like %s: %s", prefix, e)
+            return []
+
     def update_job_exit_code(self, job_id: str, exit_code: int) -> bool:
         """Update the exit code for a job."""
         try:
@@ -910,9 +934,9 @@ class ResourceTracker:
 
         Returns the number of jobs successfully backfilled.
         """
-        from .parser import (
+        from .parser import (  # pylint: disable=import-outside-toplevel
             parse_joblog_resources,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         # ---- Phase 1: discover joblog paths for jobs that lack them ----------
         try:

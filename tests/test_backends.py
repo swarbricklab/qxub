@@ -237,3 +237,33 @@ def test_consolidation_and_resource_lookups_use_the_backend(fake_backend):
     assert scheduler.get_job_resource_data("fake-1") == {"exit_status": 3, "done": True}
     assert scheduler.get_job_resource_data("fake-2") is None
     assert scheduler.qdel("fake-9", quiet=True) is False
+
+
+class ShortIdBackend(FakeBackend):
+    """Like PBS: ``fake-1`` and ``fake-1.server`` are the same job."""
+
+    def same_job(self, job_id):
+        return job_id.split(".", 1)[0]
+
+
+def test_cancel_id_marks_the_db_row_for_a_short_id(fake_backend, monkeypatch):
+    from qxub.resources import ResourceTracker
+
+    backend = ShortIdBackend(jobs=[LiveJob("fake-1", "normal", "R", "a")])
+    monkeypatch.setattr(backends, "get_backend", lambda platform=None: backend)
+    tracker = ResourceTracker()
+    for job_id in ("fake-1.server", "fake-10.server"):
+        tracker.log_job_submitted(job_id, command="sleep 60")
+
+    result = CliRunner().invoke(cancel_cli.cancel_cli, ["id", "fake-1", "-f"])
+
+    assert result.exit_code == 0, result.output
+    assert tracker.get_job_status("fake-1.server")["status"] == "cancelled"
+    assert tracker.get_job_status("fake-10.server")["status"] == "submitted"
+
+
+def test_cancel_id_shows_why_it_failed(fake_backend):
+    result = CliRunner().invoke(cancel_cli.cancel_cli, ["id", "fake-9", "-f"])
+
+    assert result.exit_code == 1
+    assert "Could not cancel fake-9: no such job" in result.output
