@@ -198,7 +198,9 @@ if [ -n "$pre_cmd" ]; then
     echo "✅ Pre-command completed"
 fi
 
-# Run singularity command
+# Run singularity command. The image path is quoted for the inner shell;
+# $sing_options and $cmd are meant to be split there.
+printf -v sif_q '%q' "$sif_file"
 echo "🚀 Running Singularity container: $sif_file"
 echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
 
@@ -207,10 +209,10 @@ if [ "$quiet" = "true" ]; then
     echo "================== COMMAND OUTPUT START =================="
     if [ -n "$sing_options" ]; then
         echo "⚙️  With options: $sing_options"
-        bash -c "singularity exec $sing_options $sif_file $cmd"
+        bash -c "singularity exec $sing_options $sif_q $cmd"
         MAIN_EXIT_CODE=$?
     else
-        bash -c "singularity exec $sif_file $cmd"
+        bash -c "singularity exec $sif_q $cmd"
         MAIN_EXIT_CODE=$?
     fi
     echo "=================== COMMAND OUTPUT END ==================="
@@ -218,10 +220,10 @@ else
     # Normal mode: redirect to separate out/err files
     if [ -n "$sing_options" ]; then
         echo "⚙️  With options: $sing_options"
-        bash -c "singularity exec $sing_options $sif_file $cmd" > "$out" 2> "$err"
+        bash -c "singularity exec $sing_options $sif_q $cmd" > "$out" 2> "$err"
         MAIN_EXIT_CODE=$?
     else
-        bash -c "singularity exec $sif_file $cmd" > "$out" 2> "$err"
+        bash -c "singularity exec $sif_q $cmd" > "$out" 2> "$err"
         MAIN_EXIT_CODE=$?
     fi
 fi

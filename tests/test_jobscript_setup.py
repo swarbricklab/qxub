@@ -36,9 +36,13 @@ fi
 """
 
 FAKE_SINGULARITY = """#!/bin/bash
-# singularity exec [--bind X] IMAGE CMD...
+# singularity exec [--bind X] IMAGE CMD...: the image must be one argument
 shift
 [ "$1" = --bind ] && shift 2
+case "$1" in
+    *://*) ;;
+    *) [ -e "$1" ] || { echo "FATAL: could not open image $1" >&2; exit 255; } ;;
+esac
 shift
 "$@"
 """
@@ -154,6 +158,18 @@ def test_missing_singularity_image_is_named(job, tmp_path):
     assert result.returncode == 1
     assert f"Singularity image not found: {tmp_path / 'nope.sif'}" in result.err_file
     assert not (tmp_path / "ran").exists()
+
+
+def test_singularity_image_path_with_spaces_reaches_singularity(job, tmp_path):
+    """#140 retest: the inner ``bash -c`` split the image path."""
+    image = tmp_path / "img dir" / "my image.sif"
+    image.parent.mkdir()
+    image.write_text("")
+    for quiet in ("false", "true"):
+        result = job("qsing", sif=str(image), quiet=quiet)
+        assert result.returncode == 0, result.stdout + result.stderr + result.err_file
+        assert (tmp_path / "ran").exists()
+        (tmp_path / "ran").unlink()
 
 
 def test_singularity_uri_is_not_checked_as_a_file(job, tmp_path):

@@ -44,7 +44,9 @@ def test_qsub_failure_exit_code_and_message_are_passed_through(sandbox, mode):
     result = sandbox.run("exec", mode, "-P", "ab12", "--", "echo", "hi")
 
     assert result.returncode == 38
-    assert "violates queue" in result.stdout + result.stderr
+    assert "violates queue" in result.stderr
+    # `id=$(qx --terse ...)` must not capture the error as a job ID.
+    assert "violates queue" not in result.stdout
     assert len(sandbox.pbs_calls("qsub")) == 1
 
 
@@ -184,6 +186,9 @@ def test_paths_with_spaces_reach_qsub_whole(sandbox, context):
     assert result.returncode == 0, result.stdout + result.stderr
     (call,) = sandbox.pbs_calls("qsub")
     assert call["argv"][-1].endswith(".pbs")
+    # The default joblog is inside the execdir and goes to -o (#140 retest).
+    joblog = call["argv"][call["argv"].index("-o") + 1]
+    assert joblog.startswith(str(execdir) + "/"), call["argv"]
     variables = qsub_variables(call)
     assert variables["cwd"] == str(execdir)
     assert variables["out"] == str(out)

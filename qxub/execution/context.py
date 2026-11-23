@@ -384,7 +384,7 @@ def execute_unified(
             except Exception:
                 pass
         # In CLI mode, display the error and exit with the PBS exit code
-        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc))
+        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc), err=True)
         import sys as _sys
 
         _sys.exit(qsub_exc.exit_code)

@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 import os
+import shlex
 from pathlib import Path
 
 import click
@@ -342,7 +343,8 @@ def build_qsub_options(params):
         options += f"-P {params['project']} "
     if params.get("resources"):
         options += " ".join([f"-l {resource}" for resource in params["resources"]])
-    options += f" -o {params['joblog']}"
+    # qsub() splits the command with shlex: a joblog with spaces needs quoting
+    options += f" -o {shlex.quote(str(params['joblog']))}"
 
     # Email notifications via PBS -M and -m
     if params.get("email"):
