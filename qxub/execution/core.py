@@ -21,6 +21,7 @@ from ..core.scheduler import (
     monitor_job_single_thread,
     print_status,
     qsub,
+    qsub_path_value,
     qsub_var_value,
 )
 from ..history import history_manager
@@ -207,9 +208,10 @@ def build_submission_variables(
 
     # Build base submission variables
     submission_vars = (
-        f'cmd_b64="{cmd_b64}",cwd={execdir},'
-        f"out={out},err={err},quiet={str(quiet).lower()},"
-        f"qxub_python={sys.executable}"
+        f'cmd_b64="{cmd_b64}",cwd={qsub_path_value(execdir)},'
+        f"out={qsub_path_value(out)},err={qsub_path_value(err)},"
+        f"quiet={str(quiet).lower()},"
+        f"qxub_python={qsub_path_value(sys.executable)}"
     )
 
     # Add context-specific variables
