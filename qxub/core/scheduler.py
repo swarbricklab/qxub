@@ -7,7 +7,6 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 import logging
 
 logger = logging.getLogger(__name__)
-import getpass
 import os
 import re
 import shlex
@@ -15,19 +14,17 @@ import subprocess
 import sys
 import threading
 import time
-from typing import List, NamedTuple, Optional
+from typing import List, Optional
 
 import click
 
-from ..resources import (
-    bytes_to_human,
-    calculate_efficiency,
-    parse_exec_host,
-    parse_exec_vnode,
-    parse_timestamp,
-    size_to_bytes,
-    time_to_seconds,
-)
+from .. import backends
+
+# Kept importable from here for callers outside qxub (e.g. the Snakemake
+# executor plugin) and for older code; they live with the PBS backend now.
+from ..backends import LiveJob, SchedulerQueryError  # noqa: F401
+from ..backends.pbs import parse_qstat_fx_output, parse_qstat_user_listing
+from ..resources import time_to_seconds
 
 
 def print_status(message, final=False):
@@ -229,79 +226,18 @@ def qsub_path_value(value) -> str:
     return shlex.quote(value)
 
 
-# First token of a job row in `qstat -u` output: "12345", "12345.server",
-# "12345[].server" (array parent) or "12345[7].server" (subjob). Header,
-# separator and server-name lines never start with a digit.
-_QSTAT_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
-
-
-class LiveJob(NamedTuple):
-    """A job the scheduler still lists (queued, running, held, ...)."""
-
-    job_id: str
-    queue: str
-    state: str
-    name: str
-
-
-def parse_qstat_user_listing(output: str) -> List[LiveJob]:
-    """Parse ``qstat -w -u USER`` output.
-
-    The listing looks like (PBS Pro; Torque is the same shape)::
-
-        server:
-                                                     Req'd  Req'd   Elap
-        Job ID          Username Queue Jobname SessID NDS TSK Memory Time  S Time
-        --------------- -------- ----- ------- ------ --- --- ------ ----- - -----
-        12345.server    alice    normal myjob   4321   1   4  16gb 01:00 R 00:10
-
-    Rows are recognised by a job-ID-shaped first token rather than by
-    skipping a fixed number of header lines. The state is the second-to-last
-    column (just before elapsed time), the queue the third and the name the
-    fourth. PBS truncates long names in this listing, so the name is only a
-    fallback for jobs whose name qxub didn't store.
-    """
-    jobs = []
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) < 4 or not _QSTAT_JOB_ID_RE.match(parts[0]):
-            continue
-        jobs.append(LiveJob(parts[0], parts[2], parts[-2], parts[3]))
-    return jobs
-
-
-class SchedulerQueryError(Exception):
-    """The scheduler couldn't be asked which jobs it still has."""
-
-
 def list_user_jobs(user: Optional[str] = None) -> List[LiveJob]:
     """The jobs the scheduler still lists for ``user`` (default: you).
 
-    One ``qstat -w -u USER`` call. This is the only place ``cancel`` asks PBS
-    which jobs exist, so it is the one to move behind the platform
-    abstraction (#65). Raises :class:`SchedulerQueryError` if it fails.
+    Asks the platform's scheduler backend. Raises
+    :class:`SchedulerQueryError` if it fails.
     """
-    user = user or os.environ.get("USER") or getpass.getuser()
-    try:
-        result = subprocess.run(
-            ["qstat", "-w", "-u", user],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise SchedulerQueryError(f"cannot run qstat: {exc}") from exc
-    if result.returncode != 0:
-        raise SchedulerQueryError(
-            f"qstat -w -u {user} failed (exit {result.returncode}): "
-            f"{result.stderr.strip()}"
-        )
-    return parse_qstat_user_listing(result.stdout)
+    return backends.get_backend().list_jobs(user)
 
 
 def same_job(job_id: str) -> str:
     """A key that matches ``12345`` with ``12345.gadi-pbs``."""
-    return job_id.split(".", 1)[0]
+    return backends.get_backend().same_job(job_id)
 
 
 class QsubError(Exception):
@@ -356,38 +292,26 @@ def qsub(cmd, quiet=False):
 
 
 def qdel(job_id, quiet=False):
-    """
-    Deletes a PBS job using qdel command
+    """Cancel a job through the platform's scheduler backend.
 
     Args:
-        job_id (str): The PBS job id to delete
+        job_id (str): The job ID to cancel
         quiet (bool): whether to suppress output
 
     Returns:
-        bool: True if deletion was successful, False otherwise
+        bool: True if the scheduler accepted the cancellation
     """
     logger.debug("Deleting job %s", job_id)
-
-    try:
-        # pylint: disable=W1510
-        result = subprocess.run(
-            ["qdel", job_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        if result.returncode == 0:
-            if not quiet:
-                click.echo(f"🗑️  Job {job_id} deleted successfully")
-            logger.info("Job %s deleted successfully", job_id)
-            return True
-
+    ok, reason = backends.get_backend().cancel(job_id)
+    if ok:
         if not quiet:
-            click.echo(f"Failed to delete job {job_id}: {result.stderr.strip()}")
-        logger.warning("Failed to delete job %s: %s", job_id, result.stderr.strip())
-        return False
-    except Exception as e:  # pylint: disable=broad-except
-        if not quiet:
-            click.echo(f"Error deleting job {job_id}: {e}")
-        logger.error("Error deleting job %s: %s", job_id, e)
-        return False
+            click.echo(f"🗑️  Job {job_id} deleted successfully")
+        logger.info("Job %s deleted successfully", job_id)
+        return True
+    if not quiet:
+        click.echo(f"Failed to delete job {job_id}: {reason}")
+    logger.warning("Failed to delete job %s: %s", job_id, reason)
+    return False
 
 
 def get_default_status_dir():
@@ -555,13 +479,9 @@ def _check_pbs_job_log_for_exit(job_id, log_dir):
 
 def get_job_resource_data(job_id):
     """
-    Get comprehensive resource data for a completed job from qstat -fx.
+    Everything the scheduler knows about a job, or ``None``.
 
-    Args:
-        job_id: The PBS job ID
-
-    Returns:
-        dict: Complete job resource information, or None if not available
+    Asks the platform's scheduler backend (PBS: ``qstat -fx``).
 
     The returned dictionary contains:
         - exit_status: Job exit code
@@ -570,208 +490,11 @@ def get_job_resource_data(job_id):
         - execution: Dict of execution environment info
         - timing: Dict of job timing information
         - metadata: Dict of job metadata (name, owner, etc.)
+        - efficiency: Dict of calculated efficiencies
     """
     logger.debug("Getting resource data for job %s", job_id)
-
-    # Use standard qstat -fx format for full resource information
-    qstat_result = subprocess.run(
-        ["qstat", "-fx", job_id],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
-
-    if qstat_result.returncode != 0:
-        logger.debug("qstat failed for job %s: %s", job_id, qstat_result.stderr)
-        return None
-
-    output = qstat_result.stdout.strip()
-    if not output:
-        logger.debug("Empty qstat output for job %s", job_id)
-        return None
-
-    return parse_qstat_fx_output(output)
-
-
-def parse_qstat_fx_output(qstat_output):
-    """
-    Parse qstat -fx output to extract comprehensive job resource information.
-
-    Args:
-        qstat_output: Raw output from qstat -fx command
-
-    Returns:
-        dict: Parsed job resource data
-    """
-    if not qstat_output:
-        return None
-
-    data = {
-        "exit_status": None,
-        "resources_requested": {},
-        "resources_used": {},
-        "execution": {},
-        "timing": {},
-        "metadata": {},
-    }
-
-    # Parse line by line
-    for line in qstat_output.split("\n"):
-        line = line.strip()
-        if not line or "=" not in line:
-            continue
-
-        # Split on first '=' to handle values with '=' in them
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-
-        # Parse different categories of information
-        if key == "Exit_status":
-            try:
-                data["exit_status"] = int(value)
-            except ValueError:
-                logger.warning("Could not parse exit status: %s", value)
-
-        elif key.startswith("Resource_List."):
-            # Requested resources
-            resource_key = key[14:]  # Remove 'Resource_List.' prefix
-            data["resources_requested"][resource_key] = value
-
-        elif key.startswith("resources_used."):
-            # Used resources
-            resource_key = key[15:]  # Remove 'resources_used.' prefix
-            data["resources_used"][resource_key] = value
-
-        elif key in [
-            "exec_host",
-            "exec_vnode",
-            "queue",
-            "session_id",
-            "project",
-            "group_list",
-        ]:
-            # Execution environment
-            data["execution"][key] = value
-
-        elif key in ["qtime", "stime", "etime", "mtime", "ctime", "obittime"]:
-            # Timing information
-            data["timing"][key] = value
-
-        elif key in ["Job_Id", "Job_Name", "Job_Owner", "job_state"]:
-            # Job metadata
-            data["metadata"][key] = value
-
-    # Post-process resource data for easier consumption
-    data = _enhance_resource_data(data)
-
-    return data
-
-
-def _enhance_resource_data(data):
-    """
-    Enhance parsed resource data with calculated fields and conversions.
-
-    Args:
-        data: Raw parsed data from parse_qstat_fx_output
-
-    Returns:
-        dict: Enhanced data with calculated efficiency metrics
-    """
-    if not data:
-        return data
-
-    # Convert resource values to standardized formats
-    requested = data["resources_requested"]
-    used = data["resources_used"]
-
-    # Parse timing information
-    timing = data["timing"]
-    for time_key in list(timing.keys()):  # Convert to list to avoid iteration issues
-        if timing[time_key]:
-            parsed_time = parse_timestamp(timing[time_key])
-            if parsed_time:
-                timing[f"{time_key}_parsed"] = parsed_time.isoformat()
-
-    # Calculate derived timing metrics
-    if "qtime_parsed" in timing and "stime_parsed" in timing:
-        try:
-            from datetime import datetime
-
-            qtime = datetime.fromisoformat(timing["qtime_parsed"])
-            stime = datetime.fromisoformat(timing["stime_parsed"])
-            timing["queue_wait_seconds"] = int((stime - qtime).total_seconds())
-        except Exception:
-            pass
-
-    if "stime_parsed" in timing and "mtime_parsed" in timing:
-        try:
-            from datetime import datetime
-
-            stime = datetime.fromisoformat(timing["stime_parsed"])
-            mtime = datetime.fromisoformat(timing["mtime_parsed"])
-            timing["execution_seconds"] = int((mtime - stime).total_seconds())
-        except Exception:
-            pass
-
-    # Parse execution environment
-    execution = data["execution"]
-    if "exec_host" in execution:
-        execution["exec_host_parsed"] = parse_exec_host(execution["exec_host"])
-    if "exec_vnode" in execution:
-        execution["exec_vnode_parsed"] = parse_exec_vnode(execution["exec_vnode"])
-
-    # Calculate resource efficiency metrics
-    efficiency = {}
-
-    # Memory efficiency
-    if "mem" in requested and "mem" in used:
-        try:
-            mem_requested_bytes = size_to_bytes(requested["mem"])
-            mem_used_bytes = size_to_bytes(used["mem"])
-            efficiency["memory_efficiency"] = calculate_efficiency(
-                mem_used_bytes, mem_requested_bytes
-            )
-            efficiency["memory_requested_human"] = bytes_to_human(mem_requested_bytes)
-            efficiency["memory_used_human"] = bytes_to_human(mem_used_bytes)
-        except Exception as e:
-            logger.warning("Could not calculate memory efficiency: %s", e)
-
-    # Time efficiency
-    if "walltime" in requested and "walltime" in used:
-        try:
-            time_requested_seconds = time_to_seconds(requested["walltime"])
-            time_used_seconds = time_to_seconds(used["walltime"])
-            efficiency["time_efficiency"] = calculate_efficiency(
-                time_used_seconds, time_requested_seconds
-            )
-        except Exception as e:
-            logger.warning("Could not calculate time efficiency: %s", e)
-
-    # CPU efficiency (from cpupercent if available)
-    if "cpupercent" in used:
-        try:
-            efficiency["cpu_efficiency"] = float(used["cpupercent"])
-        except Exception:
-            pass
-
-    # Jobfs efficiency
-    if "jobfs" in requested and "jobfs" in used:
-        try:
-            jobfs_requested_bytes = size_to_bytes(requested["jobfs"])
-            jobfs_used_bytes = size_to_bytes(used["jobfs"])
-            efficiency["jobfs_efficiency"] = calculate_efficiency(
-                jobfs_used_bytes, jobfs_requested_bytes
-            )
-            efficiency["jobfs_requested_human"] = bytes_to_human(jobfs_requested_bytes)
-            efficiency["jobfs_used_human"] = bytes_to_human(jobfs_used_bytes)
-        except Exception as e:
-            logger.warning("Could not calculate jobfs efficiency: %s", e)
-
-    data["efficiency"] = efficiency
-
-    return data
+    backend = backends.get_backend()
+    return backend.find_details(backend.job_details([job_id]), job_id)
 
 
 def _format_completion_message(job_id, exit_status, status_dir):

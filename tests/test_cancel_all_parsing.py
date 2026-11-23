@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from click.testing import CliRunner  # noqa: E402
 
 from qxub import cancel_cli  # noqa: E402
+from qxub.backends import pbs  # noqa: E402
 
 # PBS Pro `qstat -w -u` output in the layout Gadi produces (leading blank line
 # included). The Queue column shows execution queues, e.g. `normal-exec`.
@@ -25,8 +26,12 @@ Job ID                         Username        Queue           Jobname         S
 """
 
 
+def _listing(output):
+    return [(j.job_id, j.queue, j.state) for j in pbs.parse_qstat_user_listing(output)]
+
+
 def test_parse_skips_headers_and_reads_state_and_queue():
-    jobs = cancel_cli._parse_qstat_user_listing(QSTAT_W_U)
+    jobs = _listing(QSTAT_W_U)
     assert jobs == [
         ("153392916.gadi-pbs", "normal-exec", "R"),
         ("153392917.gadi-pbs", "express-exec", "Q"),
@@ -37,14 +42,14 @@ def test_parse_skips_headers_and_reads_state_and_queue():
 
 
 def test_parse_empty_listing():
-    assert cancel_cli._parse_qstat_user_listing("") == []
-    assert cancel_cli._parse_qstat_user_listing("\ngadi-pbs:\n") == []
+    assert _listing("") == []
+    assert _listing("\ngadi-pbs:\n") == []
 
 
 def _run_cancel_all(args):
     completed = mock.Mock(stdout=QSTAT_W_U, returncode=0)
     with (
-        mock.patch.object(cancel_cli.subprocess, "run", return_value=completed) as run,
+        mock.patch.object(pbs.subprocess, "run", return_value=completed) as run,
         mock.patch.object(cancel_cli, "cancel_by_id") as cancel_by_id,
     ):
         CliRunner().invoke(
