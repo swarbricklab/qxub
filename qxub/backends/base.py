@@ -4,13 +4,14 @@ Each scheduler (PBS Pro, and later Slurm, a local runner and others) gets
 one :class:`SchedulerBackend`. The platform definition's ``type`` picks
 which one (see :func:`qxub.backends.get_backend`).
 
-This first version covers queries and cancellation only. Submission still
-goes through ``qxub.core.scheduler.qsub``; it moves here once jobs are
-described by a neutral ``JobSpec`` rather than PBS option strings (step 5 of
+A job to submit is described by a :class:`JobSpec`; the backend turns it
+into its own command line. Resources are still ``key=value`` strings in PBS
+``-l`` form; a typed ``ResourceSpec`` replaces them next (step 4 of
 ``docs/dev/pbs-coupling-audit/README.md``).
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 
@@ -29,6 +30,45 @@ class LiveJob(NamedTuple):
 
 class SchedulerQueryError(Exception):
     """The scheduler couldn't be asked which jobs it still has."""
+
+
+class SubmitError(Exception):
+    """The scheduler refused a job, or couldn't be asked to take it.
+
+    Attributes:
+        exit_code: What the CLI should exit with.
+        stderr:    The scheduler's own message, if any.
+    """
+
+    def __init__(self, message: str, exit_code: int = 1, stderr: str = ""):
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.stderr = stderr
+
+
+@dataclass
+class JobSpec:
+    """A job to submit, in terms that don't depend on the scheduler.
+
+    ``env`` holds the variables the job script reads (``cmd_b64``, ``out``,
+    ``QXUB_RUN_ID``, ...), in the order they should be passed.
+    """
+
+    script: str
+    name: str
+    queue: Optional[str] = None
+    #: The account or project the job is charged to (PBS ``-P``).
+    account: Optional[str] = None
+    #: Resource requests, for now as PBS ``-l`` ``key=value`` strings.
+    resources: List[str] = field(default_factory=list)
+    #: Where the scheduler writes its own log of the job (PBS ``-o``).
+    job_log: Optional[str] = None
+    mail_to: Optional[str] = None
+    #: When to send mail, in the scheduler's own letters (PBS ``-m ae``).
+    mail_events: Optional[str] = None
+    env: Dict[str, str] = field(default_factory=dict)
+    #: Extra scheduler arguments the platform adds to every job.
+    native_args: List[str] = field(default_factory=list)
 
 
 class SchedulerBackend(ABC):
@@ -79,6 +119,17 @@ class SchedulerBackend(ABC):
 
         Used to tell scheduler jobs from rows qxub records for other things
         (``qxi_...`` interactive sessions, ``qx-...`` run IDs).
+        """
+
+    @abstractmethod
+    def submit_command(self, spec: JobSpec) -> List[str]:
+        """The command line that would submit ``spec`` (for dry runs)."""
+
+    @abstractmethod
+    def submit(self, spec: JobSpec) -> str:
+        """Submit ``spec`` and return the scheduler's job ID.
+
+        Raises :class:`SubmitError` if the job isn't accepted.
         """
 
     def same_job(self, job_id: str) -> str:

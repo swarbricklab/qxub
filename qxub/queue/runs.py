@@ -123,11 +123,6 @@ def exit_code(record: Dict[str, str]) -> Optional[int]:
         return None
 
 
-def submission_vars(run_id: str, path: Optional[Path]) -> str:
-    """``qsub -v`` additions that tell the job where its run file is."""
-    path = path or run_file(run_id)
-    from ..core.scheduler import (  # pylint: disable=import-outside-toplevel
-        qsub_path_value,
-    )
-
-    return f",QXUB_RUN_ID={run_id},QXUB_RUN_FILE={qsub_path_value(path)}"
+def job_env(run_id: str, path: Optional[Path]) -> Dict[str, str]:
+    """Job variables that tell the job where its run file is."""
+    return {"QXUB_RUN_ID": run_id, "QXUB_RUN_FILE": str(path or run_file(run_id))}

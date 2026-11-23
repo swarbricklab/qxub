@@ -8,21 +8,28 @@ and execute_default functions.
 
 import base64
 import logging
-import shutil
-
-logger = logging.getLogger(__name__)
 import os
+import shlex
+import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import click
 
-from ..core.scheduler import QsubError, qsub, qsub_path_value, qsub_var_value
+logger = logging.getLogger(__name__)
+
+from .. import backends
+from ..backends import SubmitError
+from ..config.handler import job_spec
 from ..history import history_manager
-from ..queue import create_queue_entry, runs, update_queue_entry
+from ..queue import runs
 from ..queue.db import new_virtual_id
-from ..resources import resource_tracker
+from .submit import dispatch, exec_context_summary
+
+
+def _b64(text: str) -> str:
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
 
 def _parse_cpus_from_resources(resources: list) -> Optional[int]:
@@ -80,7 +87,7 @@ class ExecutionContext:
 
         return get_template(self.template_type)
 
-    def build_submission_vars(
+    def job_env(
         self,
         command: tuple,
         ctx_obj: dict,
@@ -88,87 +95,65 @@ class ExecutionContext:
         post: str = None,
         bind: str = None,
         user_vars: tuple = None,
-    ) -> str:
-        """Build the submission variables string for qsub.
+    ) -> Dict[str, str]:
+        """The variables the job script reads, in the order they are passed.
 
         Args:
             command: Command tuple to execute
-            ctx_obj: Click context object with job options
+            ctx_obj: Job options (``out``, ``err``, ``execdir``, ``quiet``, ...)
             pre: Pre-command to run before main command
             post: Post-command to run after main command
             bind: Singularity bind mounts
             user_vars: User-defined environment variables (KEY=VALUE tuples)
         """
-        cmd_str = " ".join(command)
-        cmd_b64 = base64.b64encode(cmd_str.encode("utf-8")).decode("ascii")
-
-        # Capture submitting host's qxub version and executable path
         from .. import __version__ as qxub_version
 
-        qxub_exe = shutil.which("qxub") or "unknown"
-        submitting_host = os.uname().nodename
-
-        # Base submission variables
-        out = Path(ctx_obj["out"])
-        err = Path(ctx_obj["err"])
-        # Default to current working directory if execdir is None
-        exec_dir = ctx_obj["execdir"] or os.getcwd()
-        create_execdir = str(ctx_obj.get("create_execdir", False)).lower()
-        base_vars = (
-            f'cmd_b64="{cmd_b64}",cwd={qsub_path_value(exec_dir)},'
-            f"out={qsub_path_value(out)},err={qsub_path_value(err)},"
-            f'quiet={str(ctx_obj["quiet"]).lower()},create_execdir={create_execdir},'
-            f"qxub_version={qxub_version},qxub_path={qsub_path_value(qxub_exe)},"
-            f"qxub_python={qsub_path_value(sys.executable)},"
-            f"qxub_submit_host={submitting_host}"
-        )
+        env: Dict[str, str] = {}
 
         # Context-specific variables
         if self.context_type == "conda":
-            context_vars = f"env={self.context_value}"
+            env["env"] = self.context_value
         elif self.context_type == "module":
-            mods_str = " ".join(self.context_value)
-            context_vars = f'mods="{mods_str}"'
+            env["mods"] = " ".join(self.context_value)
         elif self.context_type == "conda_module":
-            env_name = self.context_value["env"]
-            mods_str = " ".join(self.context_value["modules"])
-            context_vars = f'env={env_name},mods="{mods_str}"'
+            env["env"] = self.context_value["env"]
+            env["mods"] = " ".join(self.context_value["modules"])
         elif self.context_type == "singularity":
-            context_vars = f"sif={qsub_path_value(self.context_value)}"
+            env["sif"] = str(self.context_value)
             if bind:
-                context_vars += f",bind={qsub_var_value(bind)}"
-        else:  # default
-            context_vars = ""
+                env["bind"] = bind
 
-        # Combine base and context variables
-        if context_vars:
-            submission_vars = f"{context_vars},{base_vars}"
-        else:
-            submission_vars = base_vars
-
-        # Add pre/post commands if provided
+        env.update(
+            {
+                "cmd_b64": _b64(" ".join(command)),
+                # Default to current working directory if execdir is None
+                "cwd": str(ctx_obj.get("execdir") or os.getcwd()),
+                "out": str(ctx_obj["out"]),
+                "err": str(ctx_obj["err"]),
+                "quiet": str(bool(ctx_obj.get("quiet"))).lower(),
+                "create_execdir": str(ctx_obj.get("create_execdir", False)).lower(),
+                # The submitting host's qxub, for the job to report back with
+                "qxub_version": qxub_version,
+                "qxub_path": shutil.which("qxub") or "unknown",
+                "qxub_python": sys.executable,
+                "qxub_submit_host": os.uname().nodename,
+            }
+        )
         if pre:
-            pre_b64 = base64.b64encode(pre.encode("utf-8")).decode("ascii")
-            submission_vars += f',pre_cmd_b64="{pre_b64}"'
+            env["pre_cmd_b64"] = _b64(pre)
         if post:
-            post_b64 = base64.b64encode(post.encode("utf-8")).decode("ascii")
-            submission_vars += f',post_cmd_b64="{post_b64}"'
-
-        # Add user-defined environment variables if provided
+            env["post_cmd_b64"] = _b64(post)
         if user_vars:
-            # Join KEY=VALUE pairs with semicolons and base64 encode to avoid shell escaping issues
-            vars_str = ";".join(user_vars)
-            vars_b64 = base64.b64encode(vars_str.encode("utf-8")).decode("ascii")
-            submission_vars += f',user_vars_b64="{vars_b64}"'
+            # KEY=VALUE pairs joined with semicolons, base64-encoded so no
+            # shell or scheduler quoting is needed
+            env["user_vars_b64"] = _b64(";".join(user_vars))
 
-        # Check if Slack/Discord notifications are configured
+        # Slack/Discord notifications, if configured
         if ctx_obj.get("notify") and self._has_push_notifications(ctx_obj):
-            submission_vars += ",qxub_notify=true"
-            # Pass output directory for notification context
-            out_dir = str(Path(ctx_obj.get("out", "")).parent)
-            submission_vars += f",qxub_notify_outdir={qsub_path_value(out_dir)}"
+            env["qxub_notify"] = "true"
+            env["qxub_notify_outdir"] = str(Path(ctx_obj.get("out", "")).parent)
 
-        return submission_vars
+        return env
 
     def _has_push_notifications(self, ctx_obj: dict) -> bool:
         """Check if Slack/Discord notifications are configured."""
@@ -219,13 +204,6 @@ class ExecutionContext:
         logger.debug("Command: %s", command)
         logger.debug("Pre-commands: %s", pre)
         logger.debug("Post-commands: %s", post)
-
-
-def _start_consolidation_if_due(run_path) -> None:
-    """Fold finished runs into the stats snapshot now and then (Phase 3)."""
-    from ..queue.consolidate import maybe_start_in_background
-
-    maybe_start_in_background(run_path.parent if run_path else None)
 
 
 def _run_record_fields(ctx_obj: dict, command, execution_context) -> dict:
@@ -289,10 +267,8 @@ def execute_unified(
     # Log debug information
     execution_context.log_debug_info(ctx_obj, command, template, pre, post)
 
-    # Build submission variables
-    submission_vars = execution_context.build_submission_vars(
-        command, ctx_obj, pre, post, bind, user_vars
-    )
+    # The variables the job script reads
+    job_vars = execution_context.job_env(command, ctx_obj, pre, post, bind, user_vars)
 
     # The run ID names this run's record file, which the job updates instead
     # of writing the job database (docs/dev/sqlite-robustness.md, Phase 2).
@@ -303,10 +279,11 @@ def execute_unified(
             run_id,
             _run_record_fields(ctx_obj, command, execution_context),
         )
-    submission_vars += runs.submission_vars(run_id, run_path)
+    job_vars.update(runs.job_env(run_id, run_path))
 
-    # Build final submission command
-    submission_command = f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'
+    backend = backends.get_backend()
+    spec = job_spec(ctx_obj, template, job_vars)
+    submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Submission command: %s", submission_command)
 
     # Progress message: Job command constructed (skip for terse mode)
@@ -335,98 +312,24 @@ def execute_unified(
             logger.debug("Failed to log execution history: %s", e)
         return
 
-    # ------------------------------------------------------------------
-    # Pre-qsub: create queue entry with virtual ID (status = initiated)
-    # ------------------------------------------------------------------
     cmd_str = " ".join(command)
-    tags = ctx_obj.get("tags") or []
-    if isinstance(execution_context.context_value, dict):
-        ctx_value_str = (
-            f"{execution_context.context_value.get('env', '')} "
-            f"+ {' '.join(execution_context.context_value.get('modules', []))}"
-        )
-    elif isinstance(execution_context.context_value, list):
-        ctx_value_str = " ".join(execution_context.context_value)
-    else:
-        ctx_value_str = execution_context.context_value
-    exec_context_info = {
-        "type": execution_context.context_type,
-        "value": (ctx_value_str),
-    }
-
-    virtual_id = None
     try:
-        virtual_id = create_queue_entry(
+        job_id, _entry_id = dispatch(
+            spec,
+            run_id=run_id,
+            run_path=run_path,
             command=cmd_str,
-            pbs_job_id=None,
-            tags=tags,
+            tags=ctx_obj.get("tags") or [],
             working_dir=ctx_obj.get("execdir") or os.getcwd(),
-            exec_context=exec_context_info,
-            joblog_path=ctx_obj.get("joblog"),
-            queue_name=ctx_obj.get("queue"),
-            cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
-            entry_id=run_id,
+            exec_context=exec_context_summary(
+                execution_context.context_type, execution_context.context_value
+            ),
+            backend=backend,
         )
-    except Exception as e:
-        logger.debug("Failed to create queue entry: %s", e)
-
-    # ------------------------------------------------------------------
-    # Submit job to PBS
-    # ------------------------------------------------------------------
-    try:
-        job_id = qsub(submission_command, quiet=ctx_obj["quiet"])
-    except QsubError as qsub_exc:
-        runs.discard(run_path)
-        # qsub failed — mark entry as failed and re-raise
-        if virtual_id:
-            try:
-                update_queue_entry(virtual_id, status="failed")
-            except Exception:
-                pass
-        # In CLI mode, display the error and exit with the PBS exit code
-        click.echo(qsub_exc.stderr if qsub_exc.stderr else str(qsub_exc), err=True)
-        import sys as _sys
-
-        _sys.exit(qsub_exc.exit_code)
-    except Exception as exc:
-        runs.discard(run_path)
-        # Unexpected error — mark entry as failed and re-raise
-        if virtual_id:
-            try:
-                update_queue_entry(virtual_id, status="failed")
-            except Exception:
-                pass
-        raise exc
-
-    # ------------------------------------------------------------------
-    # Post-qsub: fill in real PBS job ID (status → dispatched)
-    # ------------------------------------------------------------------
-    if virtual_id:
-        try:
-            update_queue_entry(
-                virtual_id,
-                pbs_job_id=job_id,
-                status="dispatched",
-                joblog_path=ctx_obj.get("joblog"),
-            )
-        except Exception as e:
-            logger.debug("Failed to update queue entry: %s", e)
-
-    # Log job submission for status and resource tracking (do this before terse return)
-    try:
-        resource_tracker.log_job_submitted(
-            job_id=job_id,
-            command=cmd_str,
-            tags=tags,
-            joblog_path=ctx_obj.get("joblog"),
-            queue=ctx_obj.get("queue"),
-            cpus_requested=_parse_cpus_from_resources(ctx_obj.get("resources", [])),
-            job_name=ctx_obj.get("name"),
-        )
-    except Exception as e:
-        logger.debug("Failed to log job submission: %s", e)
-
-    _start_consolidation_if_due(run_path)
+    except SubmitError as exc:
+        # In CLI mode, show the scheduler's message and exit with its code
+        click.echo(exc.stderr if exc.stderr else str(exc), err=True)
+        sys.exit(exc.exit_code)
 
     # Log execution to history system (must happen before terse mode early return)
     try:
@@ -466,9 +369,6 @@ def execute_unified(
 
     # Start concurrent monitoring of job and log files
     # Stream log files to STDOUT/STDERR as appropriate
-    import sys
-    from pathlib import Path
-
     out = Path(ctx_obj["out"])
     err = Path(ctx_obj["err"])
 

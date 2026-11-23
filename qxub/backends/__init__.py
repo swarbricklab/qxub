@@ -12,7 +12,7 @@ definition decides which scheduler qxub talks to::
 import logging
 from typing import Dict, Optional, Type
 
-from .base import LiveJob, SchedulerBackend, SchedulerQueryError
+from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
 from .pbs import PbsBackend
 
 logger = logging.getLogger(__name__)
@@ -62,10 +62,12 @@ def get_backend(platform=None) -> SchedulerBackend:
 
 __all__ = [
     "BACKENDS",
+    "JobSpec",
     "LiveJob",
     "PbsBackend",
     "SchedulerBackend",
     "SchedulerQueryError",
+    "SubmitError",
     "backend_for_type",
     "get_backend",
 ]
