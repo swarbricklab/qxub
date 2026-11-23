@@ -74,14 +74,14 @@ def status_cli(ctx):
     "--status", help="Filter by status (submitted, running, completed, failed)"
 )
 @click.option("--limit", default=20, help="Maximum number of jobs to show")
-@click.option(
-    "--all", "show_all", is_flag=True, help="Show all jobs (ignore 7-day limit)"
-)
+@click.option("--all", "show_all", is_flag=True, help="Show all jobs (ignore --limit)")
 @click.option("--id-only", is_flag=True, help="Output only job IDs (useful for piping)")
 def list(status, limit, show_all, id_only):
     """List recent jobs with their status."""
 
     resource_tracker.sync_from_run_files()
+    if show_all:
+        limit = None
     if status:
         jobs = resource_tracker.get_jobs_by_status(status=status, limit=limit)
         title = f"Jobs with status: {status}"
