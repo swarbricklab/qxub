@@ -141,6 +141,18 @@ class QxubSandbox:
         self.env["FAKE_QDEL_EXIT"] = str(exit_code)
         self.env["FAKE_QDEL_STDERR"] = stderr
 
+    def finish_job(self, job_id: str) -> None:
+        """The scheduler forgets ``job_id``, as when it ends."""
+        path = self.pbs_state / "live.json"
+        live = json.loads(path.read_text()) if path.exists() else {}
+        live.pop(job_id, None)
+        path.write_text(json.dumps(live))
+
+    def live_jobs(self) -> dict:
+        """Jobs the fake scheduler still lists: ``{job_id: {name, queue, state}}``."""
+        path = self.pbs_state / "live.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
     def set_qstat(self, job_id: str, text: str) -> None:
         """Set what ``qstat -fx job_id`` prints."""
         qstat_dir = self.pbs_state / "qstat"

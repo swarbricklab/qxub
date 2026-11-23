@@ -152,7 +152,7 @@ def summary():
     table.add_column("Count", justify="right", style="bold")
 
     # Order statuses for better display
-    status_order = ["submitted", "running", "completed", "failed"]
+    status_order = ["submitted", "running", "completed", "failed", "cancelled"]
 
     for status in status_order:
         if status in status_counts:
@@ -483,6 +483,7 @@ def _format_status(status):
         "running": "🔵 Running",
         "completed": "✅ Completed",
         "failed": "❌ Failed",
+        "cancelled": "🚫 Cancelled",
         "unknown": "❓ Unknown",
     }
     return status_map.get(status, f"❓ {status}")

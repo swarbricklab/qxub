@@ -7,11 +7,15 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 import logging
 
 logger = logging.getLogger(__name__)
+import getpass
+import os
+import re
 import shlex
 import subprocess
 import sys
 import threading
 import time
+from typing import List, NamedTuple, Optional
 
 import click
 
@@ -223,6 +227,81 @@ def qsub_path_value(value) -> str:
     if "," in value:
         return qsub_var_value(value)
     return shlex.quote(value)
+
+
+# First token of a job row in `qstat -u` output: "12345", "12345.server",
+# "12345[].server" (array parent) or "12345[7].server" (subjob). Header,
+# separator and server-name lines never start with a digit.
+_QSTAT_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
+
+
+class LiveJob(NamedTuple):
+    """A job the scheduler still lists (queued, running, held, ...)."""
+
+    job_id: str
+    queue: str
+    state: str
+    name: str
+
+
+def parse_qstat_user_listing(output: str) -> List[LiveJob]:
+    """Parse ``qstat -w -u USER`` output.
+
+    The listing looks like (PBS Pro; Torque is the same shape)::
+
+        server:
+                                                     Req'd  Req'd   Elap
+        Job ID          Username Queue Jobname SessID NDS TSK Memory Time  S Time
+        --------------- -------- ----- ------- ------ --- --- ------ ----- - -----
+        12345.server    alice    normal myjob   4321   1   4  16gb 01:00 R 00:10
+
+    Rows are recognised by a job-ID-shaped first token rather than by
+    skipping a fixed number of header lines. The state is the second-to-last
+    column (just before elapsed time), the queue the third and the name the
+    fourth. PBS truncates long names in this listing, so the name is only a
+    fallback for jobs whose name qxub didn't store.
+    """
+    jobs = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or not _QSTAT_JOB_ID_RE.match(parts[0]):
+            continue
+        jobs.append(LiveJob(parts[0], parts[2], parts[-2], parts[3]))
+    return jobs
+
+
+class SchedulerQueryError(Exception):
+    """The scheduler couldn't be asked which jobs it still has."""
+
+
+def list_user_jobs(user: Optional[str] = None) -> List[LiveJob]:
+    """The jobs the scheduler still lists for ``user`` (default: you).
+
+    One ``qstat -w -u USER`` call. This is the only place ``cancel`` asks PBS
+    which jobs exist, so it is the one to move behind the platform
+    abstraction (#65). Raises :class:`SchedulerQueryError` if it fails.
+    """
+    user = user or os.environ.get("USER") or getpass.getuser()
+    try:
+        result = subprocess.run(
+            ["qstat", "-w", "-u", user],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError as exc:
+        raise SchedulerQueryError(f"cannot run qstat: {exc}") from exc
+    if result.returncode != 0:
+        raise SchedulerQueryError(
+            f"qstat -w -u {user} failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    return parse_qstat_user_listing(result.stdout)
+
+
+def same_job(job_id: str) -> str:
+    """A key that matches ``12345`` with ``12345.gadi-pbs``."""
+    return job_id.split(".", 1)[0]
 
 
 class QsubError(Exception):
