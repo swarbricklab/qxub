@@ -19,7 +19,6 @@ import click
 
 from . import backends
 from .backends import SchedulerQueryError
-from .core.scheduler import qdel
 from .resources import ResourceTracker
 
 
@@ -176,16 +175,17 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
     success_count = 0
     failed_jobs = []
     tracker = ResourceTracker()
+    backend = backends.get_backend()
 
     for job_id in all_job_ids:
         if not quiet:
             click.echo(f"🗑️  Cancelling job {job_id}...")
 
-        # Send qdel command
-        if qdel(job_id, quiet=True):
+        ok, reason = backend.cancel(job_id)
+        if ok:
             success_count += 1
-            # Update database status
-            tracker.update_job_status(job_id, "cancelled")
+            for db_id in _db_job_ids(tracker, backend, job_id):
+                tracker.update_job_status(db_id, "cancelled")
 
             if wait:
                 # Wait for deletion confirmation
@@ -201,6 +201,8 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
                 click.echo(f"✅ Job {job_id} cancellation initiated")
         else:
             failed_jobs.append(job_id)
+            if not quiet:
+                click.echo(f"❌ Could not cancel {job_id}: {reason}", err=True)
 
     # Summary
     if not quiet:
@@ -212,6 +214,21 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
             )
 
     return 0 if len(failed_jobs) == 0 else 1
+
+
+def _db_job_ids(tracker, backend, job_id: str) -> List[str]:
+    """The DB rows for ``job_id``, under any spelling of it.
+
+    ``cancel id 12345`` must also mark the stored ``12345.gadi-pbs`` row.
+    Falls back to ``job_id`` itself if the DB has no matching row.
+    """
+    key = backend.same_job(job_id)
+    found = [
+        db_id
+        for db_id in tracker.job_ids_starting_with(key)
+        if backend.same_job(db_id) == key
+    ]
+    return found or [job_id]
 
 
 @cancel_cli.command(name="name")
