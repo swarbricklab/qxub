@@ -65,7 +65,6 @@ USAGE_WAIT = timedelta(days=2)
 ABANDON_DAYS = 30
 # Runs per round, so one round stays well inside the lease.
 BATCH_SIZE = 2000
-QSTAT_CHUNK = 100
 
 ATTEMPT_MARKER = ".consolidate.attempted"
 LAST_LOG = ".consolidate.last.log"
@@ -349,58 +348,23 @@ def usage_from_qstat(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def query_qstat(job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-    """``qstat -fx`` for many jobs, ``QSTAT_CHUNK`` per call. Never raises.
+    """What the scheduler remembers about many jobs. Never raises.
 
-    Returns parsed data by job ID, for the jobs PBS still remembers.
+    Asks the platform's scheduler backend in batches (PBS: ``qstat -fx``,
+    100 jobs per call). Returns parsed data by job ID, for the jobs the
+    scheduler still remembers.
     """
-    ids = list(dict.fromkeys(job_ids))
-    found: Dict[str, Dict[str, Any]] = {}
-    for start in range(0, len(ids), QSTAT_CHUNK):
-        chunk = ids[start : start + QSTAT_CHUNK]
-        try:
-            # Unknown IDs make qstat exit non-zero, but it still prints the rest.
-            out = subprocess.run(
-                ["qstat", "-fx", *chunk],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            ).stdout
-        except (OSError, subprocess.SubprocessError) as exc:
-            logger.debug("qstat -fx failed: %s", exc)
-            continue
-        for job_id, text in _qstat_blocks(out):
-            data = _qstat_parse(text)
-            if data:
-                found[job_id] = data
-    return found
+    from .. import backends  # pylint: disable=import-outside-toplevel
 
-
-def _qstat_blocks(output: str):
-    """Split ``qstat -fx`` output into ``(job_id, text)`` per job."""
-    job_id, lines = None, []
-    for line in output.splitlines():
-        if line.startswith("Job Id:"):
-            if job_id:
-                yield job_id, "\n".join(lines)
-            job_id, lines = line.split(":", 1)[1].strip(), []
-        elif job_id:
-            lines.append(line)
-    if job_id:
-        yield job_id, "\n".join(lines)
-
-
-def _qstat_parse(text: str) -> Optional[Dict[str, Any]]:
-    from ..core.scheduler import (
-        parse_qstat_fx_output,
-    )  # pylint: disable=import-outside-toplevel
-
-    return parse_qstat_fx_output(text)
+    return backends.get_backend().job_details(job_ids)
 
 
 def _qstat_finished(data: Optional[Dict[str, Any]]) -> bool:
-    state = ((data or {}).get("metadata") or {}).get("job_state")
-    return state == "F"
+    if not data:
+        return False
+    from .. import backends  # pylint: disable=import-outside-toplevel
+
+    return backends.get_backend().is_finished(data)
 
 
 # -- the snapshot ---------------------------------------------------------------------

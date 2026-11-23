@@ -117,7 +117,8 @@ See `docs/platforms/nci_gadi.yaml` for complete NCI Gadi definition.
 ```yaml
 platform:
   name: string          # Unique platform identifier
-  type: string          # Scheduler type (pbs_pro, slurm, k8s, etc.)
+  type: string          # Scheduler type; picks the backend in qxub/backends
+                        # (pbs_pro, pbs, torque; others fall back to PBS with a warning)
   host: string          # Hostname for remote execution
   description: string   # Optional human-readable description
 ```

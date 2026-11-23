@@ -31,33 +31,38 @@ There is **no scheduler/backend abstraction**: `platforms/core.py` has no schedu
 - **Category:** Direct subprocess / architecture. **Severity: High.**
 - **Problem:** `from .core.scheduler import qdel` and `qdel(job_id, quiet=True)`. Every `cancel` subcommand (`name`, `status`, `filter`, `all`) funnels into this, so cancellation only works on PBS.
 - **Fix:** Use `backend.cancel(job_id) -> bool`, or `cancel_many` (Slurm `scancel`, SGE `qdel`, LSF `bkill`, local `kill`, k8s `kubectl delete job`).
+- **Done (#65):** `qdel` in `core.scheduler` now calls `backends.get_backend().cancel(job_id)`, which returns `(ok, reason)`. Only `PbsBackend` runs `qdel`.
 
 ### H3 — `cancel all` parses `qstat -u` text output and filters on PBS state letters (cancel_cli.py:471-515)
 - **Category:** Direct subprocess / output parsing / job states. **Severity: High.**
 - **Problem:** Builds `["qstat", "-u", user, "-q", queue]`. It skips 2 header lines and takes `parts[0]` as the job ID and `parts[4]` as the state. It filters against `--status` with `click.Choice(["Q","R","H"])` (476-481). This won't work on other schedulers.
 - **Likely bug on PBS Pro too (unverified):** `qstat -u` switches to the wide format, where `S` is column 9, not 4. That format has a 4-line header, so `[2:]` would also yield the `Job ID ...` and `-----` lines as "jobs".
 - **Fix:** Use `backend.list_jobs(user=, queue=, states={JobState.PENDING,...}) -> list[JobInfo]`, with a neutral `--state pending|running|held`.
+- **Partly done (#65):** the listing comes from `backend.list_jobs(user)` (PBS: `qstat -w -u`, parsed by job-ID-shaped rows since #121). The `--status Q/R/H` choices are still PBS state letters; a neutral `JobState` is later work.
 
 ### H4 — `cancel name` parses `qstat -f` (cancel_cli.py:556-610)
 - **Category:** Direct subprocess / output parsing. **Severity: High.**
 - **Problem:** Runs `qstat -f` and scans for `Job Id:` and `Job_Name =` lines. These keys are PBS-only. The query also isn't limited to the current user.
 - **Fix:** Use `backend.list_jobs(user=current, name=..., name_regex=...)`. Slurm `squeue --me -o "%i %j"`, LSF `bjobs -J`, SGE `qstat -xml`.
+- **Done (#65):** uses `backend.list_jobs(full_names=True)`. `PbsBackend` still runs `qstat -f`, but now keeps only your jobs (by `Job_Owner`).
 
 ### M1 — `--wait` polls `qstat <id>` exit code (cancel_cli.py:613-641)
 - **Category:** Direct subprocess / polling. **Severity: Med.**
 - **Problem:** Treats a non-zero `qstat job_id` return as "deleted". On a non-PBS host the call raises `FileNotFoundError`, which is caught; the loop breaks and reports a timeout. Slurm `squeue -j` returns 0 with empty output for finished jobs, so the logic would be wrong there even with the command swapped.
 - **Fix:** Use `backend.wait_until_gone(job_id, timeout)`, or poll `backend.job_state(job_id)` until terminal/unknown.
+- **Done (#65):** polls `backend.list_jobs()` until the job is no longer listed. If the scheduler can't be asked, it stops waiting and reports a timeout.
 
 ### M2 — `cancel filter --job-name` uses `qstat -fx` metadata key `Job_Name` (cancel_cli.py:293, 324-336)
 - **Category:** Direct helper call / PBS field names. **Severity: Med.**
 - **Problem:** Calls `get_job_resource_data(job_id)` once per DB job, which runs a `qstat -fx` subprocess each time. It then reads `job_data["metadata"]["Job_Name"]`. That's PBS-only, and slow (N subprocesses).
 - **Fix:** Store the job name in the tracker DB at submit time and filter in SQL. Fall back to `backend.job_info(id).name` if it's missing.
-- **Done (#143):** the name is stored in `job_resources.job_name` at submission and filtered from the DB. `cancel status` and `cancel filter` make one scheduler query, `core.scheduler.list_user_jobs()` (`qstat -w -u USER`), to keep only jobs still queued or running. Rows without a stored name use that listing's (possibly truncated) name. `list_user_jobs()` is the function to move behind `backend.list_jobs()`.
+- **Done (#143):** the name is stored in `job_resources.job_name` at submission and filtered from the DB. `cancel status` and `cancel filter` make one scheduler query, `core.scheduler.list_user_jobs()` (`qstat -w -u USER`), to keep only jobs still queued or running. Rows without a stored name use that listing's (possibly truncated) name. `list_user_jobs()` is the function to move behind `backend.list_jobs()`; done in #65.
 
 ### M3 — `resources show` renders raw `qstat -fx` fields (resources_cli.py:444-521)
 - **Category:** Direct helper call / PBS output fields. **Severity: Med.**
 - **Problem:** "Get fresh data from PBS" via `get_job_resource_data` (448-452). It displays `exec_host`, `ncpus`, `cpupercent`, `walltime`, `jobfs` and `queue_wait_seconds` from the PBS-parsed dict (462-518).
 - **Fix:** Use `backend.job_accounting(job_id) -> JobAccounting` (normalized: `mem_req/used`, `runtime_req/used`, `cpus_req`, `cpu_efficiency`, `local_disk_req/used`, `host`, `queue`, `wait_s`, `exit`). Slurm: `sacct`; LSF: `bacct`; SGE: `qacct`. Rows the backend can't supply should show "n/a".
+- **Partly done (#65):** the data comes from `backend.job_details()`, so only `PbsBackend` runs `qstat -fx`. The fields shown are still PBS names; a neutral `JobUsage` is later work.
 
 ### M4 — In-job self-accounting uses `$PBS_JOBID` and `qstat -f` (interactive_cli.py:360, 369-370, 283-295)
 - **Category:** PBS env vars / direct subprocess. **Severity: Med.**

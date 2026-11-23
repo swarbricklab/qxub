@@ -111,8 +111,9 @@ def fake_pbs(sandbox, monkeypatch):
     return sandbox
 
 
-def finished_job(exit_status: int) -> str:
+def finished_job(exit_status: int, job_id: str = "1000.gadi-pbs") -> str:
     text = (FIXTURES / "qstat_fx_finished.txt").read_text()
+    text = text.replace("Job Id: 1000.gadi-pbs", f"Job Id: {job_id}")
     return text.replace("Exit_status = 0", f"Exit_status = {exit_status}")
 
 
@@ -147,7 +148,7 @@ def test_status_file_exit_code_wins_over_qstat_zero(fake_pbs, status_root):
     status_root.mkdir(parents=True)
     (status_root / "job_id").write_text("1001.gadi-pbs\n")
     (status_root / "exit_code").write_text("7\n")
-    fake_pbs.set_qstat("1001.gadi-pbs", finished_job(0))
+    fake_pbs.set_qstat("1001.gadi-pbs", finished_job(0, "1001.gadi-pbs"))
 
     info = interactive_cli._process_session_completion(SESSION)
 
@@ -160,7 +161,7 @@ def test_walltime_kill_overrides_status_file(fake_pbs, status_root):
     status_root.mkdir(parents=True)
     (status_root / "job_id").write_text("1002.gadi-pbs\n")
     (status_root / "exit_code").write_text("0\n")
-    fake_pbs.set_qstat("1002.gadi-pbs", finished_job(-29))
+    fake_pbs.set_qstat("1002.gadi-pbs", finished_job(-29, "1002.gadi-pbs"))
 
     info = interactive_cli._process_session_completion(SESSION)
 

@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from qxub.backends.pbs import parse_qstat_fx_output
 from qxub.queue import consolidate as cons
 from qxub.queue import runs
 
@@ -143,7 +144,7 @@ def test_usage_comes_from_one_batched_qstat_when_there_is_no_joblog(area):
     def qstat(job_ids):
         calls.append(list(job_ids))
         return {
-            j: cons._qstat_parse(QSTAT.format(job_id=j, state="F", code=0))
+            j: parse_qstat_fx_output(QSTAT.format(job_id=j, state="F", code=0))
             for j in job_ids
         }
 
@@ -220,7 +221,7 @@ def test_job_pbs_reports_finished_is_settled_from_qstat(area):
     run(
         area,
         qstat=lambda ids: {
-            "1.gadi-pbs": cons._qstat_parse(
+            "1.gadi-pbs": parse_qstat_fx_output(
                 QSTAT.format(job_id="1.gadi-pbs", state="F", code=271)
             )
         },
@@ -239,7 +240,7 @@ def test_runs_in_progress_are_left_alone(area):
     result = run(
         area,
         qstat=lambda ids: {
-            "1.gadi-pbs": cons._qstat_parse(
+            "1.gadi-pbs": parse_qstat_fx_output(
                 QSTAT.format(job_id="1.gadi-pbs", state="R", code="")
             )
         },

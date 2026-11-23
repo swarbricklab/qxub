@@ -11,31 +11,16 @@ import logging
 logger = logging.getLogger(__name__)
 import json
 import re
-import subprocess
 import time
 from datetime import datetime, timedelta
 from typing import List
 
 import click
 
-from .core.scheduler import (
-    SchedulerQueryError,
-    list_user_jobs,
-    parse_qstat_user_listing,
-    qdel,
-    same_job,
-)
+from . import backends
+from .backends import SchedulerQueryError
+from .core.scheduler import qdel
 from .resources import ResourceTracker
-
-
-_PBS_JOB_ID_RE = re.compile(r"^\d+(\[\d*\])?(\.\S+)?$")
-
-
-def _parse_qstat_user_listing(output: str) -> List[tuple]:
-    """``(job_id, queue, state)`` for each job in ``qstat -w -u`` output."""
-    return [
-        (job.job_id, job.queue, job.state) for job in parse_qstat_user_listing(output)
-    ]
 
 
 @click.group(name="cancel")
@@ -67,7 +52,7 @@ def _still_queued_or_running(
 
     Only those can be cancelled, so ``cancel status``/``filter`` never pick a
     row left ``submitted`` long ago. One scheduler query
-    (:func:`list_user_jobs`) for all rows. A row whose job name wasn't
+    (``list_jobs`` on the scheduler backend) for all rows. A row whose job name wasn't
     stored gets the (possibly truncated) name from that listing.
 
     Unfinished rows that the scheduler no longer lists, and that are older
@@ -77,8 +62,9 @@ def _still_queued_or_running(
 
     Returns ``None`` (after saying why) if the scheduler can't be asked.
     """
+    backend = backends.get_backend()
     try:
-        live = {same_job(j.job_id): j for j in list_user_jobs()}
+        live = {backend.same_job(j.job_id): j for j in backend.list_jobs()}
     except SchedulerQueryError as exc:
         click.echo(
             f"❌ Can't tell which jobs are still queued or running: {exc}", err=True
@@ -88,14 +74,14 @@ def _still_queued_or_running(
     cutoff = (datetime.now() - STALE_AFTER).isoformat()
     candidates, gone = [], []
     for job in jobs:
-        key = same_job(job["job_id"])
+        key = backend.same_job(job["job_id"])
         if key in live:
             if not job.get("job_name"):
                 job = {**job, "job_name": live[key].name}
             candidates.append(job)
         elif (
             job.get("status") in UNFINISHED
-            and _PBS_JOB_ID_RE.match(job["job_id"])
+            and backend.looks_like_job_id(job["job_id"])
             and (job.get("submitted_at") or "") < cutoff
         ):
             gone.append(job["job_id"])
@@ -638,27 +624,20 @@ def cancel_all(user, queue, status, force, quiet):
     if not user:
         user = os.environ.get("USER", os.environ.get("USERNAME", ""))
 
-    # -w: don't truncate job IDs (e.g. "153392916.gadi-*"), which qdel would
-    # reject. Filter by queue here: `qstat -q` prints queue summaries, not jobs.
-    qstat_cmd = ["qstat", "-w", "-u", user]
-
-    # qstat lists the queue a job is *in*, which on sites with routing queues
-    # differs from the one it was submitted to (Gadi: `copyq` -> `copyq-exec`).
-    # Accept either so `--queue copyq` works as users expect.
+    # The scheduler lists the queue a job is *in*, which on sites with
+    # routing queues differs from the one it was submitted to (Gadi: `copyq`
+    # -> `copyq-exec`). Accept either so `--queue copyq` works as users expect.
     accepted_queues = {queue, f"{queue}-exec"} if queue else None
 
-    # Get job list
     try:
-        result = subprocess.run(qstat_cmd, capture_output=True, text=True, check=True)
         matching_jobs = [
-            job_id
-            for job_id, job_queue, job_state in _parse_qstat_user_listing(result.stdout)
-            if (accepted_queues is None or job_queue in accepted_queues)
-            and (status is None or job_state == status)
+            job.job_id
+            for job in backends.get_backend().list_jobs(user)
+            if (accepted_queues is None or job.queue in accepted_queues)
+            and (status is None or job.state == status)
         ]
-
-    except subprocess.CalledProcessError:
-        click.echo(f"❌ Failed to get job list for user '{user}'", err=True)
+    except SchedulerQueryError as exc:
+        click.echo(f"❌ Failed to get job list for user '{user}': {exc}", err=True)
         return 1
 
     if not matching_jobs:
@@ -704,85 +683,55 @@ def _find_jobs_by_name(
     job_name: str, pattern: bool = False, quiet: bool = False
 ) -> List[tuple]:
     """
-    Find PBS jobs by name or pattern.
+    Find your queued or running jobs by name or pattern.
+
+    Asks the scheduler for whole names (PBS: ``qstat -f``), because the
+    short listing truncates them.
 
     Returns:
         List of (job_id, job_name) tuples
     """
+    if pattern:
+        try:
+            regex = re.compile(job_name)
+        except re.error as e:
+            if not quiet:
+                click.echo(f"❌ Invalid regex pattern '{job_name}': {e}", err=True)
+            return []
+
     try:
-        # Get all jobs for current user
-        result = subprocess.run(
-            ["qstat", "-f"], capture_output=True, text=True, check=True
-        )
-
-        jobs = []
-        current_job_id = None
-        current_job_name = None
-
-        for line in result.stdout.split("\n"):
-            line = line.strip()
-
-            # Look for job ID line
-            if line.startswith("Job Id:"):
-                current_job_id = line.split(":", 1)[1].strip()
-                current_job_name = None
-
-            # Look for job name line
-            elif line.startswith("Job_Name"):
-                if "=" in line:
-                    current_job_name = line.split("=", 1)[1].strip()
-
-                    # Check if this job matches our criteria
-                    if current_job_id and current_job_name:
-                        if pattern:
-                            try:
-                                if re.search(job_name, current_job_name):
-                                    jobs.append((current_job_id, current_job_name))
-                            except re.error as e:
-                                if not quiet:
-                                    click.echo(
-                                        f"❌ Invalid regex pattern '{job_name}': {e}",
-                                        err=True,
-                                    )
-                                return []
-                        else:
-                            if current_job_name == job_name:
-                                jobs.append((current_job_id, current_job_name))
-
-        return jobs
-
-    except subprocess.CalledProcessError as e:
+        live = backends.get_backend().list_jobs(full_names=True)
+    except SchedulerQueryError as e:
         if not quiet:
             click.echo(f"❌ Failed to query jobs: {e}", err=True)
         return []
 
+    return [
+        (job.job_id, job.name)
+        for job in live
+        if job.name and (regex.search(job.name) if pattern else job.name == job_name)
+    ]
+
 
 def _wait_for_deletion(job_id: str, timeout: int, quiet: bool = False) -> bool:
     """
-    Wait for job deletion to be confirmed by checking job status.
+    Wait until the scheduler no longer lists the job.
 
     Returns:
         True if job is confirmed deleted, False if timeout
     """
+    backend = backends.get_backend()
+    key = backend.same_job(job_id)
     start_time = time.time()
 
     while time.time() - start_time < timeout:
         try:
-            # Check if job still exists
-            result = subprocess.run(
-                ["qstat", job_id], capture_output=True, text=True, check=False
-            )
-
-            if result.returncode != 0:
-                # Job not found - deletion confirmed
+            if all(backend.same_job(j.job_id) != key for j in backend.list_jobs()):
                 return True
-
-            # Job still exists, wait a bit
-            time.sleep(1)
-
-        except Exception as e:
+        except SchedulerQueryError as e:
             if not quiet:
                 logger.debug(f"Error checking job status during deletion wait: {e}")
             break
+        time.sleep(1)
 
     return False
