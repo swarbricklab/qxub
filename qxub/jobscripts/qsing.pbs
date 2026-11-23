@@ -147,7 +147,7 @@ cd "$cwd" || qxub_setup_fail \
 case "$sif_file" in
     *://*) ;;
     "") qxub_setup_fail "❌ ERROR: no Singularity image was given" ;;
-    *) [ -f "$sif_file" ] || qxub_setup_fail \
+    *) [ -e "$sif_file" ] || qxub_setup_fail \
            "❌ ERROR: Singularity image not found: $sif_file" \
            "   (check the path; relative paths are from $cwd)" ;;
 esac
