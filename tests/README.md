@@ -35,6 +35,9 @@ machine's own qxub setup, so a run on a Gadi login node behaves as in CI:
   `PBS_*` and `PROJECT` are removed, and `HOSTNAME` never matches a platform.
 - `qxub` on `PATH` is this checkout's CLI, run by the interpreter under test,
   so tests that run `qxub …` work without it installed.
+- `PYTHONPATH` starts with the repository root, so every Python the tests
+  start (the shim, sandbox runs) imports this checkout's qxub, not an
+  installed one the interpreter can also see.
 
 ## Test Scripts
 
