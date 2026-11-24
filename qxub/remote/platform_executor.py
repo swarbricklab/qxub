@@ -14,8 +14,7 @@ import select
 import subprocess
 import sys
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -527,51 +526,3 @@ class PlatformRemoteExecutor:
                 except subprocess.TimeoutExpired:
                     process.kill()
             return 130, False, "".join(stdout_buf)  # Standard exit code for SIGINT
-
-    def test_connection(self) -> tuple[bool, str]:
-        """
-        Test SSH connection to remote host.
-
-        Returns:
-            Tuple of (success, error_message)
-        """
-        test_cmd = [
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            self.hostname,
-            "echo connection_test",
-        ]
-
-        logger.debug(f"Testing SSH connection: {' '.join(test_cmd)}")
-
-        try:
-            result = subprocess.run(
-                test_cmd, capture_output=True, timeout=15, text=True
-            )
-
-            if result.returncode == 0 and "connection_test" in result.stdout:
-                logger.debug(f"SSH connection test successful to {self.hostname}")
-                return True, ""
-            else:
-                error_msg = (
-                    f"SSH connection failed (exit code {result.returncode}): "
-                    f"{result.stderr.strip()}"
-                )
-                logger.warning(error_msg)
-                return False, error_msg
-
-        except subprocess.TimeoutExpired:
-            error_msg = f"SSH connection timed out after 15 seconds"
-            logger.warning(f"{error_msg} for {self.hostname}")
-            return False, error_msg
-        except FileNotFoundError:
-            error_msg = "SSH command not found. Please install OpenSSH client."
-            logger.error(error_msg)
-            return False, error_msg
-        except Exception as e:
-            error_msg = f"SSH connection test failed: {e}"
-            logger.warning(error_msg)
-            return False, error_msg

@@ -402,7 +402,6 @@ def _persist_completion(job_id: str, status: str, exit_code) -> None:
 
     Persists the resolved status and exit code so that subsequent calls
     (and other tools like ``qxub status list``) see the final state.
-    Also backfills resource efficiency data from the PBS joblog.
 
     All DB operations are wrapped in try/except — a locked or unavailable
     database must never prevent the caller from reporting the correct status.

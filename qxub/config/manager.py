@@ -607,52 +607,6 @@ class ConfigManager:
         OmegaConf.save(config, user_config_file)
         return user_config_file
 
-    def resolve_options(
-        self, cli_args: Dict[str, Any], alias_name: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Resolve final options from config hierarchy + alias + CLI args.
-
-        Precedence: CLI Args > Alias > User Config > System Config > Built-in Defaults
-        """
-        # Start with config defaults
-        resolved = self.get_defaults().copy()
-
-        # Apply alias if specified
-        if alias_name:
-            alias_def = self.get_alias(alias_name)
-            if not alias_def:
-                raise click.ClickException(f"Alias '{alias_name}' not found")
-
-            # Merge alias into resolved options
-            for key, value in alias_def.items():
-                if key == "subcommand":
-                    # Don't merge subcommand into general options
-                    continue
-                elif key in ["conda", "module", "sing"]:
-                    # Merge subcommand-specific options
-                    if key not in resolved:
-                        resolved[key] = {}
-                    resolved[key].update(value)
-                else:
-                    # General options
-                    resolved[key] = value
-
-        # Apply CLI arguments (highest precedence)
-        for key, value in cli_args.items():
-            if value is not None:  # Only override if explicitly set
-                resolved[key] = value
-
-        # Resolve templates
-        template_vars = self.get_template_variables(
-            name=resolved.get("name"),
-            project=resolved.get("project"),
-            queue=resolved.get("queue"),
-        )
-        resolved = self.resolve_templates(resolved, template_vars)
-
-        return resolved
-
     def save_alias(self, alias_name: str, alias_definition: Dict[str, Any]):
         """Save an alias to the user configuration."""
         user_config_file = self._get_user_config_dir() / "config.yaml"
@@ -722,11 +676,6 @@ class ConfigManager:
         """Get the default platform name from config."""
         return self.get_config_value("default_platform")
 
-    def get_platform_preferences(self) -> Dict[str, Any]:
-        """Get platform-specific preferences."""
-        platform_prefs = self.get_config_value("platform_preferences")
-        return platform_prefs if platform_prefs is not None else {}
-
     def get_queue_preferences(self) -> Dict[str, Any]:
         """Get queue selection preferences."""
         queue_prefs = self.get_config_value("queue_preferences")
@@ -788,21 +737,6 @@ class ConfigManager:
         """
         defaults = self.get_defaults()
         return defaults.get("platform")
-
-    def has_remote_config(self, platform_name: str) -> bool:
-        """
-        Check if a platform has remote execution configuration.
-
-        Args:
-            platform_name: Name of the platform
-
-        Returns:
-            True if platform has remote section, False otherwise
-        """
-        platform_config = self.get_platform_config(platform_name)
-        if not platform_config:
-            return False
-        return "remote" in platform_config and platform_config["remote"] is not None
 
     def validate(self) -> List[str]:
         """Validate configuration and return list of issues."""

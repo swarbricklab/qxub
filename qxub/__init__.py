@@ -9,17 +9,6 @@ v2.3 adds parallel job execution with --terse output and 'qxub monitor' for pipe
 
 # __init__.py
 
-# Suppress system Python requests/urllib3 version warnings
-import warnings
-
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="requests")
-try:
-    from requests.exceptions import RequestsDependencyWarning
-
-    warnings.filterwarnings("ignore", category=RequestsDependencyWarning)
-except ImportError:
-    pass
-
 __version__ = "3.9.2"
 
 # Library-standard NullHandler: prevents "No handler found" warnings and
@@ -82,12 +71,9 @@ __all__ = [
     "ResourceTracker",
     "ResourceMapper",
     "HistoryManager",
-    "history_logger",
     "ConfigManager",
     "config_manager",
     "ShortcutManager",
-    "get_config",
-    "set_config",
 ]
 
 # Backwards-compatibility lazy imports: heavy subpackages are only loaded
@@ -97,11 +83,8 @@ _COMPAT_IMPORTS = {
     "config_manager": (".config", "config_manager"),
     "ConfigManager": (".config", "ConfigManager"),
     "ShortcutManager": (".config", "ShortcutManager"),
-    "get_config": (".config", "get_config"),
-    "set_config": (".config", "set_config"),
     # history
     "HistoryManager": (".history", "HistoryManager"),
-    "history_logger": (".history", "history_logger"),
     # resources
     "ResourceTracker": (".resources", "ResourceTracker"),
     "ResourceMapper": (".resources", "ResourceMapper"),

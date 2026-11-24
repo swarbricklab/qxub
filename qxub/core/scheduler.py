@@ -5,26 +5,16 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 """
 
 import logging
-
-logger = logging.getLogger(__name__)
-import os
-import re
-import shlex
-import subprocess
 import sys
-import threading
 import time
-from typing import List, Optional
 
 import click
 
 from .. import backends
-
-# Kept importable from here for callers outside qxub (e.g. the Snakemake
-# executor plugin) and for older code; they live with the PBS backend now.
-from ..backends import LiveJob, SchedulerQueryError, SubmitError  # noqa: F401
-from ..backends.pbs import parse_qstat_fx_output, parse_qstat_user_listing
+from ..backends import SubmitError
 from ..resources import time_to_seconds
+
+logger = logging.getLogger(__name__)
 
 
 def print_status(message, final=False):
@@ -109,132 +99,6 @@ class SimpleSpinner:
             pass
 
 
-class JobSpinner:  # pylint: disable=too-many-instance-attributes
-    """Context manager for displaying a spinner during job operations."""
-
-    def __init__(self, message="", quiet=False, show_message=False, coordinator=None):
-        self.message = message
-        self.quiet = (
-            quiet or self._is_remote_ssh()
-        )  # Disable spinner in remote SSH contexts
-        self.show_message = show_message  # Default to False (no messages)
-        self.coordinator = coordinator
-        self.spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-        self.spinning = False
-        self.thread = None
-        self.original_line_len = 0
-
-    def _is_remote_ssh(self):
-        """Detect if we're running in a remote SSH session where spinners don't work well."""
-        import os
-
-        # Check for SSH environment variables that indicate remote execution
-        ssh_indicators = [
-            os.environ.get("SSH_CLIENT"),
-            os.environ.get("SSH_CONNECTION"),
-            os.environ.get("SSH_TTY"),
-        ]
-
-        # If any SSH indicator is present, we're likely in an SSH session
-        return any(ssh_indicators)
-
-    def _spin(self):
-        """Run the spinner animation"""
-        i = 0
-        while self.spinning:
-            # Check if any event requires stopping the spinner
-            if self.coordinator and self.coordinator.should_stop_spinner():
-                self._clear_spinner()
-                self.coordinator.signal_spinner_cleared()
-                break
-
-            char = self.spinner_chars[i % len(self.spinner_chars)]
-            try:
-                with open("/dev/tty", "w") as tty:
-                    if self.show_message:
-                        line = f"{self.message} {char}"
-                        print(f"\r{line}", end="", flush=True, file=tty)
-                        self.original_line_len = len(line)
-                    else:
-                        print(f"\r{char}", end="", flush=True, file=tty)
-                        self.original_line_len = 1
-            except (OSError, IOError):
-                # Fallback to /dev/null if /dev/tty not available
-                with open("/dev/null", "w") as devnull:
-                    if self.show_message:
-                        line = f"{self.message} {char}"
-                        print(f"\r{line}", end="", flush=True, file=devnull)
-                    else:
-                        print(f"\r{char}", end="", flush=True, file=devnull)
-            time.sleep(0.1)
-            i += 1
-
-    def _clear_spinner(self):
-        """Clear the spinner line"""
-        clear_line = " " * (self.original_line_len + 5)
-        try:
-            with open("/dev/tty", "w") as tty:
-                print(f"\r{clear_line}\r", end="", flush=True, file=tty)
-        except (OSError, IOError):
-            # Fallback to /dev/null if /dev/tty not available
-            with open("/dev/null", "w") as devnull:
-                print(f"\r{clear_line}\r", end="", flush=True, file=devnull)
-
-    def __enter__(self):
-        if not self.quiet:
-            self.spinning = True
-            self.thread = threading.Thread(target=self._spin)
-            self.thread.daemon = True
-            self.thread.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if not self.quiet and self.spinning:
-            self.spinning = False
-            if self.thread:
-                self.thread.join(timeout=0.2)
-            # Clear the spinner line completely if not already cleared
-            if self.coordinator and not self.coordinator.spinner_cleared.is_set():
-                self._clear_spinner()
-                self.coordinator.signal_spinner_cleared()
-
-
-def qsub_var_value(value) -> str:
-    """Quote a ``qsub -v`` value so that commas inside it survive.
-
-    ``qsub -v`` splits its argument on commas, so PBS needs a value that
-    contains commas wrapped in quotes that reach ``qsub`` itself, as in
-    ``qsub -v "bind='/a,/b'"``. The submission command is a string that
-    :func:`qsub` runs through :func:`shlex.split`, so the outer double quotes
-    are removed there and the inner single quotes are passed on to PBS.
-    """
-    return f"\"'{value}'\""
-
-
-def qsub_path_value(value) -> str:
-    """Quote a path for a ``qsub -v`` value.
-
-    :func:`qsub` runs the submission command through :func:`shlex.split`, so
-    an unquoted path with spaces was split into several arguments and
-    ``qsub`` refused the command. Paths without spaces or shell characters
-    are left as they are; a path with a comma also needs
-    :func:`qsub_var_value`.
-    """
-    value = str(value)
-    if "," in value:
-        return qsub_var_value(value)
-    return shlex.quote(value)
-
-
-def list_user_jobs(user: Optional[str] = None) -> List[LiveJob]:
-    """The jobs the scheduler still lists for ``user`` (default: you).
-
-    Asks the platform's scheduler backend. Raises
-    :class:`SchedulerQueryError` if it fails.
-    """
-    return backends.get_backend().list_jobs(user)
-
-
 def same_job(job_id: str) -> str:
     """A key that matches ``12345`` with ``12345.gadi-pbs``."""
     return backends.get_backend().same_job(job_id)
@@ -242,43 +106,6 @@ def same_job(job_id: str) -> str:
 
 # Submission failures. The old name stays for callers that catch it.
 QsubError = SubmitError
-
-
-def qsub(cmd, quiet=False):
-    """
-    Submits a job via qsub based on the given command (cmd)
-
-    Args:
-        cmd (chr): qsub command, including all of the options generated by qt
-        quiet (bool): whether to suppress spinner output
-
-    Returns:
-        The job id for the submitted job
-
-    Raises:
-        QsubError: If the qsub command fails or the command is not a qsub command.
-    """
-    # Make sure that this is a qsub cmd -- don't pass on random commands!
-    if not cmd[:4] == "qsub":
-        raise QsubError("Expected qsub command, got something else", exit_code=1)
-
-    # Submit job directly without spinner (spinner is handled in monitor)
-    # pylint: disable=W1510
-    result = subprocess.run(
-        shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    )
-    if result.returncode != 0:
-        logger.debug("Job submission failed")
-        # Map PBS validation errors to exit code 2 for consistency
-        exit_code = 2 if result.returncode == 166 else result.returncode
-        raise QsubError(
-            f"qsub failed (exit {exit_code}): {result.stderr.strip()}",
-            exit_code=exit_code,
-            stderr=result.stderr,
-        )
-    else:
-        logger.debug("Job submitted successfully")
-        return result.stdout.rstrip("\n")
 
 
 def qdel(job_id, quiet=False):
@@ -559,77 +386,6 @@ def _format_completion_message(job_id, exit_status, status_dir):
         message += f" ({', '.join(hook_info)})"
 
     return message
-
-
-def collect_job_resources_after_completion(job_id, out_file):
-    """
-    Collect detailed resource usage after job completion by parsing the joblog.
-    Waits for PBS to finalize the joblog with resource information.
-    """
-
-    try:
-        # Derive joblog path from out_file path
-        joblog_path = str(out_file).replace(".out", ".log")
-
-        logger.debug("Waiting for PBS to finalize joblog for job %s", job_id)
-
-        # Wait 60 seconds for PBS to write final resource information to joblog
-        time.sleep(60)
-
-        # Try to parse the joblog with retry logic
-        max_retries = 3
-        retry_delay = 60  # Wait 60 seconds between retries
-
-        for attempt in range(max_retries):
-            logger.debug(
-                "Attempting to collect resource usage from joblog for job %s "
-                "(attempt %d/%d)",
-                job_id,
-                attempt + 1,
-                max_retries,
-            )
-
-            try:
-                from ..resources import parse_joblog_resources, resource_tracker
-
-                # Parse resource data from joblog
-                resource_data = parse_joblog_resources(joblog_path)
-
-                if resource_data:
-                    # Update the existing job record with resource data
-                    success = resource_tracker.update_job_resources(
-                        job_id, resource_data
-                    )
-                    if success:
-                        logger.debug(
-                            f"Successfully updated resource data for job {job_id}"
-                        )
-                        return
-
-                    logger.debug(f"Failed to update resource data for job {job_id}")
-                else:
-                    logger.debug(
-                        f"Could not parse resource data from joblog: {joblog_path}"
-                    )
-
-            except Exception as e:
-                logger.debug(
-                    f"Error collecting resources for job {job_id} (attempt {attempt + 1}): {e}"
-                )
-
-            # If not the last attempt, wait before retrying
-            if attempt < max_retries - 1:
-                logger.debug(
-                    f"Retrying resource collection in {retry_delay} seconds..."
-                )
-                time.sleep(retry_delay)
-
-        logger.debug(
-            f"Failed to collect resource data for job {job_id} after {max_retries} attempts"
-        )
-
-    except Exception as e:
-        logger.debug("Resource collection failed for job %s: %s", job_id, e)
 
 
 def start_background_resource_collection(

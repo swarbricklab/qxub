@@ -6,7 +6,6 @@ PBS sessions with environment activation, resource allocation, and optional
 tmux integration for session persistence.
 """
 
-import base64
 import os
 import shlex
 import subprocess
@@ -234,11 +233,6 @@ def _get_container_prompt(container_name: str) -> str:
         return default_prompt.replace("{container}", container_name)
 
 
-def _encode_command(cmd: str) -> str:
-    """Base64 encode a command for safe shell passing."""
-    return base64.b64encode(cmd.encode("utf-8")).decode("ascii")
-
-
 def _process_session_completion(session_id: str, ctx=None) -> dict | None:
     """
     Process the completion of an interactive session.
@@ -301,7 +295,7 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
     qstat_file = status_dir / "qstat_output"
     if qstat_file.exists():
         try:
-            from .core.scheduler import parse_qstat_fx_output
+            from .backends.pbs import parse_qstat_fx_output
 
             qstat_content = qstat_file.read_text()
             if qstat_content.strip():

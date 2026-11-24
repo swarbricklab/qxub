@@ -231,10 +231,6 @@ class Platform:
         """Get queue by name."""
         return self.queues.get(name)
 
-    def list_queues(self) -> List[str]:
-        """List all available queue names."""
-        return list(self.queues.keys())
-
     def allows_walltime(self, queue_name: str, resources: Dict[str, Any]) -> bool:
         """Whether ``queue_name`` accepts the requested walltime.
 
@@ -316,15 +312,6 @@ class Platform:
         wants_gpus = (resources.get("gpus") or resources.get("gpu_requested") or 0) > 0
         has_gpus = bool(queue.gpu_type or queue.limits.max_gpus)
         return wants_gpus == has_gpus
-
-    def validate_queue_resources(
-        self, queue_name: str, resources: Dict[str, Any]
-    ) -> List[str]:
-        """Validate resources against specific queue."""
-        queue = self.get_queue(queue_name)
-        if not queue:
-            return [f"Queue '{queue_name}' not found"]
-        return queue.validate_resources(resources)
 
 
 class PlatformLoader:
@@ -499,11 +486,6 @@ class PlatformLoader:
         return list(self.platforms.keys())
 
     def reload(self):
-        """Reload all platform definitions."""
-        self.platforms.clear()
-        self._load_platforms()
-
-    def reload_platforms(self):
         """Reload all platform definitions."""
         self.platforms.clear()
         self._load_platforms()

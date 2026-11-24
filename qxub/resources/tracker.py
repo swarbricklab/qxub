@@ -9,7 +9,6 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
-import os
 import re
 import sqlite3
 import time
@@ -18,7 +17,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from ..queue.connection import BUSY_TIMEOUT_SECONDS, connect
-from .parser import size_to_bytes, time_to_seconds
 
 
 def parse_date_filter(value: str) -> str:
@@ -241,81 +239,6 @@ class ResourceTracker:
         """Make sure the schema exists (a single version read once it does)."""
         self._connect().close()
 
-    def log_job_resources(
-        self, job_id: str, resource_data: Dict[str, Any], command: Optional[str] = None
-    ) -> bool:
-        """
-        Log resource usage for a completed job.
-
-        Args:
-            job_id: PBS job ID
-            resource_data: Resource data from get_job_resource_data()
-            command: Command that was executed (optional)
-
-        Returns:
-            bool: True if logged successfully
-        """
-        try:
-            # Extract key metrics only
-            requested = resource_data.get("resources_requested", {})
-            used = resource_data.get("resources_used", {})
-            efficiency = resource_data.get("efficiency", {})
-            execution = resource_data.get("execution", {})
-            timing = resource_data.get("timing", {})
-
-            # Clean up command for better display
-            clean_command = self._clean_command(command)
-
-            # Convert to standardized units
-            record = {
-                "job_id": job_id,
-                "timestamp": datetime.now().isoformat(),
-                "command": clean_command,
-                "exit_code": resource_data.get("exit_status"),
-                # Requested resources (convert to MB/seconds)
-                "mem_requested_mb": self._parse_size_to_mb(requested.get("mem")),
-                "time_requested_sec": self._parse_time_to_sec(
-                    requested.get("walltime")
-                ),
-                "cpus_requested": self._parse_int(requested.get("ncpus")),
-                "jobfs_requested_mb": self._parse_size_to_mb(requested.get("jobfs")),
-                # Used resources
-                "mem_used_mb": self._parse_size_to_mb(used.get("mem")),
-                "time_used_sec": self._parse_time_to_sec(used.get("walltime")),
-                "cpus_used": self._parse_int(used.get("ncpus")),
-                "jobfs_used_mb": self._parse_size_to_mb(used.get("jobfs")),
-                "cpu_percent": self._parse_float(used.get("cpupercent")),
-                # Efficiency metrics
-                "mem_efficiency": efficiency.get("memory_efficiency"),
-                "time_efficiency": efficiency.get("time_efficiency"),
-                "cpu_efficiency": efficiency.get("cpu_efficiency"),
-                "jobfs_efficiency": efficiency.get("jobfs_efficiency"),
-                # Execution details
-                "queue": execution.get("queue"),
-                "hostname": execution.get("exec_host_parsed", {}).get("hostname"),
-                # Timing
-                "queue_wait_sec": timing.get("queue_wait_seconds"),
-                "execution_sec": timing.get("execution_seconds"),
-            }
-
-            # Insert into database
-            with self._connect() as conn:
-                placeholders = ", ".join(["?" for _ in record])
-                columns = ", ".join(record.keys())
-
-                conn.execute(
-                    f"INSERT OR REPLACE INTO job_resources ({columns}) VALUES ({placeholders})",
-                    list(record.values()),
-                )
-                conn.commit()
-
-            logger.debug("Logged resource data for job %s", job_id)
-            return True
-
-        except Exception as e:
-            logger.debug("Failed to log resource data for job %s: %s", job_id, e)
-            return False
-
     def update_job_resources(self, job_id: str, resource_data: Dict[str, Any]) -> bool:
         """
         Update resource usage for a job using parsed joblog data.
@@ -463,43 +386,6 @@ class ResourceTracker:
         cleaned = re.sub(pattern, "qxub", command)
 
         return cleaned
-
-    def _parse_size_to_mb(self, size_str: Optional[str]) -> Optional[int]:
-        """Parse size string to MB."""
-        if not size_str:
-            return None
-        try:
-            bytes_val = size_to_bytes(size_str)
-            return int(bytes_val / (1024 * 1024))  # Convert to MB
-        except Exception:
-            return None
-
-    def _parse_time_to_sec(self, time_str: Optional[str]) -> Optional[int]:
-        """Parse time string to seconds."""
-        if not time_str:
-            return None
-        try:
-            return time_to_seconds(time_str)
-        except Exception:
-            return None
-
-    def _parse_int(self, value) -> Optional[int]:
-        """Parse integer value."""
-        if value is None:
-            return None
-        try:
-            return int(value)
-        except Exception:
-            return None
-
-    def _parse_float(self, value) -> Optional[float]:
-        """Parse float value."""
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except Exception:
-            return None
 
     def get_recent_jobs(
         self,
@@ -819,199 +705,9 @@ class ResourceTracker:
             logger.debug("Failed to update exit code for %s: %s", job_id, e)
             return False
 
-    def finalize_job(self, job_id: str, exit_code: int, joblog_path: str) -> bool:
-        """Record job completion: update status and exit code.
-
-        Job scripts no longer call this (see ``qxub.queue.runs``).
-        Resource data (mem, walltime, cpu) is NOT collected here because PBS
-        only appends the resource section to the joblog AFTER the script exits.
-        The joblog_path is stored so that ``backfill_resources()`` can pick it
-        up the next time ``qxub resources list`` is run.
-
-        Writes to both ``job_resources`` (legacy) and unified ``queue`` table.
-        """
-        now = datetime.now().isoformat()
-        status = "completed" if exit_code == 0 else "failed"
-        try:
-            with self._connect() as conn:
-                # Legacy table
-                conn.execute(
-                    """UPDATE job_resources
-                       SET status=?, exit_code=?, completed_at=?, last_status_update=?,
-                           joblog_path=COALESCE(joblog_path, ?)
-                       WHERE job_id=?""",
-                    (status, exit_code, now, now, joblog_path, job_id),
-                )
-
-                # Unified queue table
-                conn.execute(
-                    """UPDATE queue
-                       SET status=?, exit_code=?, completed_at=?, last_status_update=?,
-                           joblog_path=COALESCE(joblog_path, ?)
-                       WHERE pbs_job_id=?""",
-                    (status, exit_code, now, now, joblog_path, job_id),
-                )
-
-                conn.commit()
-            logger.debug(
-                "Finalized job %s (exit=%s, status=%s)", job_id, exit_code, status
-            )
-            return True
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("Failed to finalize job %s: %s", job_id, exc)
-            return False
-
     # ------------------------------------------------------------------
-    # Joblog discovery helpers
+    # Run files
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_job_id_from_log(path: str) -> Optional[str]:
-        """Quickly extract the PBS Job Id from the tail of a .log file.
-
-        PBS appends the resource section at the very end of the file, so
-        reading the last 2 KB is enough to find "Job Id: <id>".
-        """
-        import re  # pylint: disable=import-outside-toplevel
-
-        try:
-            with open(path, "rb") as fh:
-                fh.seek(0, 2)
-                size = fh.tell()
-                fh.seek(max(0, size - 2048))
-                tail = fh.read().decode("utf-8", errors="replace")
-            m = re.search(r"Job Id:\s*(\S+)", tail)
-            return m.group(1) if m else None
-        except Exception:  # pylint: disable=broad-except
-            return None
-
-    def _discover_joblog_paths(self, log_dirs: List[str]) -> Dict[str, str]:
-        """Scan *log_dirs* for ``*.log`` files and return ``{job_id: path}``."""
-        import glob  # pylint: disable=import-outside-toplevel
-
-        index: Dict[str, str] = {}
-        for d in log_dirs:
-            for path in glob.glob(os.path.join(d, "*.log")):
-                job_id = self._extract_job_id_from_log(path)
-                if job_id:
-                    index[job_id] = path
-        return index
-
-    def _resolve_log_dirs(self) -> List[str]:
-        """Return candidate log directories derived from already-stored paths."""
-        try:
-            with self._connect() as conn:
-                rows = conn.execute(
-                    "SELECT DISTINCT joblog_path FROM job_resources"
-                    " WHERE joblog_path IS NOT NULL LIMIT 20"
-                ).fetchall()
-            dirs: List[str] = []
-            seen: set = set()
-            for (p,) in rows:
-                d = os.path.dirname(p)
-                if d and d not in seen and os.path.isdir(d):
-                    dirs.append(d)
-                    seen.add(d)
-            return dirs
-        except Exception:  # pylint: disable=broad-except
-            return []
-
-    # ------------------------------------------------------------------
-    # Public backfill entry point
-    # ------------------------------------------------------------------
-
-    def backfill_resources(self, limit: int = 200) -> int:
-        """Parse joblogs for recently completed jobs that have no resource data.
-
-        Two-phase approach:
-        1. Discovery — for completed jobs whose ``joblog_path`` is still NULL,
-           scan known log directories to find the matching file.
-        2. Parsing  — for all backfillable rows (now including newly discovered
-           ones), parse the joblog and populate the resource columns.
-
-        Designed to be called automatically on ``qxub resources list`` so data
-        appears without any manual intervention.
-
-        Returns the number of jobs successfully backfilled.
-        """
-        from .parser import (  # pylint: disable=import-outside-toplevel
-            parse_joblog_resources,
-        )
-
-        # ---- Phase 1: discover joblog paths for jobs that lack them ----------
-        try:
-            with self._connect() as conn:
-                missing = conn.execute(
-                    """
-                    SELECT job_id FROM job_resources
-                    WHERE status IN ('completed', 'failed')
-                      AND mem_used_mb IS NULL
-                      AND joblog_path IS NULL
-                      AND submitted_at > datetime('now', '-180 days')
-                    ORDER BY completed_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-            missing_ids = {row[0] for row in missing}
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("backfill phase-1 query failed: %s", exc)
-            missing_ids = set()
-
-        if missing_ids:
-            log_dirs = self._resolve_log_dirs()
-            if log_dirs:
-                index = self._discover_joblog_paths(log_dirs)
-                matched = {
-                    jid: path for jid, path in index.items() if jid in missing_ids
-                }
-                if matched:
-                    try:
-                        with self._connect() as conn:
-                            conn.executemany(
-                                "UPDATE job_resources SET joblog_path=?"
-                                " WHERE job_id=? AND joblog_path IS NULL",
-                                [(path, jid) for jid, path in matched.items()],
-                            )
-                            conn.commit()
-                        logger.debug(
-                            "Discovered joblog paths for %d historical jobs",
-                            len(matched),
-                        )
-                    except Exception as exc:  # pylint: disable=broad-except
-                        logger.debug("backfill path-update failed: %s", exc)
-
-        # ---- Phase 2: parse joblogs and fill resource columns ---------------
-        try:
-            with self._connect() as conn:
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    """
-                    SELECT job_id, joblog_path FROM job_resources
-                    WHERE status IN ('completed', 'failed')
-                      AND mem_used_mb IS NULL
-                      AND joblog_path IS NOT NULL
-                    ORDER BY completed_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.debug("backfill phase-2 query failed: %s", exc)
-            return 0
-
-        filled = 0
-        for row in rows:
-            try:
-                data = parse_joblog_resources(row["joblog_path"])
-                if data:
-                    ok = self.update_job_resources(row["job_id"], data)
-                    if ok:
-                        filled += 1
-                        logger.debug("Backfilled resources for %s", row["job_id"])
-            except Exception as exc:  # pylint: disable=broad-except
-                logger.debug("Backfill failed for %s: %s", row["job_id"], exc)
-        return filled
 
     def sync_from_run_files(
         self, pbs_job_ids: Optional[Sequence[str]] = None, limit: int = 500

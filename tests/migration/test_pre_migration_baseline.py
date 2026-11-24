@@ -40,7 +40,7 @@ class TestPreMigrationBaseline:
         import_tests = [
             "from qxub.config import config_manager",
             "from qxub.platforms import get_platform",
-            "from qxub.core.scheduler import qsub, qdel",
+            "from qxub.core.scheduler import qdel",
             "from qxub.resources import parse_memory_size",
             "from qxub.execution.context import execute_unified",
         ]

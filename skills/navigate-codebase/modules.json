@@ -211,46 +211,48 @@
 
     {
       "path": "qxub/execution/__init__.py",
-      "description": "Execution package public API – re-exports from core, executors, context, mode, submit",
+      "description": "Execution package public API – re-exports from context, mode, submit",
       "exports": [
-        "submit_and_monitor_job", "validate_execution_context",
-        "build_submission_variables", "expand_submission_variables",
-        "execute_conda", "execute_module", "execute_singularity", "execute_default",
         "ExecutionContext", "execute_unified",
         "ExecutionMode", "get_execution_mode",
-        "submit_job", "SubmitResult", "QsubError"
+        "submit_job", "dispatch", "SubmitResult", "QsubError"
       ]
     },
     {
-      "path": "qxub/execution/core.py",
-      "description": "Core submission – variable expansion, smart-quote processing, submit_and_monitor_job",
-      "exports": ["submit_and_monitor_job", "expand_submission_variables", "build_submission_variables", "validate_execution_context"]
-    },
-    {
       "path": "qxub/execution/context.py",
-      "description": "Unified ExecutionContext dataclass – validate, get template, build submission vars",
-      "exports": ["ExecutionContext", "execute_unified", "create_conda_context", "create_module_context", "create_singularity_context", "create_default_context"]
-    },
-    {
-      "path": "qxub/execution/executors.py",
-      "description": "Context-specific executors – build job scripts and submit for conda/module/singularity/default",
-      "exports": ["execute_conda", "execute_module", "execute_singularity", "execute_default"]
+      "description": "ExecutionContext (validate, template, job_env) and execute_unified, the qxub exec path",
+      "exports": ["ExecutionContext", "execute_unified"]
     },
     {
       "path": "qxub/execution/mode.py",
       "description": "Detect LOCAL vs REMOTE vs REMOTE_DELEGATED execution mode from platform config",
-      "exports": ["ExecutionMode", "get_execution_mode", "get_remote_config", "validate_remote_config"]
+      "exports": ["ExecutionMode", "get_execution_mode"]
     },
     {
       "path": "qxub/execution/submit.py",
-      "description": "Programmatic job submission API (no CLI dependency)",
-      "exports": ["submit_job", "SubmitResult"]
+      "description": "dispatch (the one submission pipeline) and submit_job, the programmatic API",
+      "exports": ["submit_job", "dispatch", "SubmitResult"]
     },
 
     {
+      "path": "qxub/backends/base.py",
+      "description": "SchedulerBackend interface, JobSpec, LiveJob, SubmitError, SchedulerQueryError",
+      "exports": ["SchedulerBackend", "JobSpec", "LiveJob", "SubmitError", "SchedulerQueryError"]
+    },
+    {
+      "path": "qxub/backends/pbs.py",
+      "description": "PbsBackend – every qsub/qstat/qdel call, plus the qstat output parsers",
+      "exports": ["PbsBackend", "qsub_argv", "parse_qstat_fx_output", "parse_qstat_user_listing", "parse_qstat_full_listing"]
+    },
+    {
+      "path": "qxub/backends/__init__.py",
+      "description": "get_backend(): the platform definition's type picks the scheduler backend",
+      "exports": ["get_backend", "backend_for_type", "BACKENDS"]
+    },
+    {
       "path": "qxub/core/scheduler.py",
-      "description": "PBS interaction – qsub, qdel, monitor_job_single_thread, job_status_from_files, resource extraction",
-      "exports": ["qsub", "qdel", "monitor_job_single_thread", "job_status_from_files", "get_job_resource_data", "QsubError", "SimpleSpinner"]
+      "description": "Monitoring and status files – qdel, monitor_job_single_thread, job_status_from_files, get_job_resource_data (scheduler calls go through qxub/backends)",
+      "exports": ["qdel", "monitor_job_single_thread", "job_status_from_files", "get_job_resource_data", "QsubError", "SimpleSpinner"]
     },
     {
       "path": "qxub/core/templates.py",
@@ -262,11 +264,6 @@
       "path": "qxub/platforms/core.py",
       "description": "Platform abstraction – Platform, Queue, QueueLimits, QueueSelector, detect_platform",
       "exports": ["Platform", "Queue", "QueueLimits", "QueueSelector", "detect_platform", "get_platform", "list_platforms", "select_best_queue"]
-    },
-    {
-      "path": "qxub/platforms/loader.py",
-      "description": "Load platform definitions from URL/file/search paths with caching",
-      "exports": ["PlatformLoader", "PlatformLoadError"]
     },
     {
       "path": "qxub/platforms/cli.py",
@@ -301,11 +298,6 @@
       "exports": ["get_db_path", "init_db", "new_virtual_id", "create_queue_entry", "update_queue_entry", "resolve_virtual_id", "mark_running", "mark_complete"]
     },
 
-    {
-      "path": "qxub/history/base.py",
-      "description": "History data structures and constants",
-      "exports": ["CommandHistoryLogger"]
-    },
     {
       "path": "qxub/history/manager.py",
       "description": "Dual-log history system – one JSON file per recipe/execution under ~/.config/qxub/history",

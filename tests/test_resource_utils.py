@@ -13,8 +13,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from qxub.resources.utils import (
-    compare_memory,
-    compare_walltime,
     evaluate_condition,
     format_memory_size,
     format_walltime,
@@ -126,45 +124,6 @@ def test_walltime_formatting():
     assert passed == len(test_cases), f"{passed}/{len(test_cases)} cases passed"
 
 
-def test_comparisons():
-    """Test memory and walltime comparisons."""
-    print("🧪 Testing comparisons...")
-
-    memory_tests = [
-        ("4GB", "2GB", 1),
-        ("512MB", "1GB", -1),
-        ("1GB", "1024MB", 0),
-    ]
-
-    walltime_tests = [
-        ("48:00:00", "24:00:00", 1),
-        ("1:30:00", "2:00:00", -1),
-        ("1h", "1:00:00", 0),
-    ]
-
-    passed = 0
-    total = len(memory_tests) + len(walltime_tests)
-
-    for mem1, mem2, expected in memory_tests:
-        result = compare_memory(mem1, mem2)
-        if result == expected:
-            print(f"  ✅ {mem1} vs {mem2} -> {result}")
-            passed += 1
-        else:
-            print(f"  ❌ {mem1} vs {mem2} -> {result}, expected {expected}")
-
-    for time1, time2, expected in walltime_tests:
-        result = compare_walltime(time1, time2)
-        if result == expected:
-            print(f"  ✅ {time1} vs {time2} -> {result}")
-            passed += 1
-        else:
-            print(f"  ❌ {time1} vs {time2} -> {result}, expected {expected}")
-
-    print(f"Comparisons: {passed}/{total} tests passed\n")
-    assert passed == total, f"{passed}/{total} cases passed"
-
-
 def test_condition_evaluation():
     """Test resource condition evaluation."""
     print("🧪 Testing condition evaluation...")
@@ -228,7 +187,6 @@ def main():
         test_memory_formatting,
         test_walltime_parsing,
         test_walltime_formatting,
-        test_comparisons,
         test_condition_evaluation,
         test_resource_adjustment,
     ]

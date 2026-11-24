@@ -703,25 +703,3 @@ def resolve_virtual_id(
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("resolve_virtual_id failed for %s: %s", virtual_id, exc)
         return None
-
-
-def get_project_job_status(
-    pbs_job_id: str,
-    db_path: Optional[Path] = None,
-) -> Optional[Dict[str, Any]]:
-    """Return the ``project_jobs`` row for a given PBS job ID, or ``None``."""
-    try:
-        with get_connection(db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT pbs_job_id, entry_id, status, exit_code,
-                       submitted_at, started_at, completed_at, tags
-                FROM project_jobs
-                WHERE pbs_job_id = ?
-                """,
-                (pbs_job_id,),
-            ).fetchone()
-            return dict(row) if row else None
-    except Exception as exc:  # pylint: disable=broad-except
-        logger.debug("get_project_job_status failed for %s: %s", pbs_job_id, exc)
-        return None
