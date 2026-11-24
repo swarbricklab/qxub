@@ -29,3 +29,4 @@ export qxub_submit_host=<HOST>
 export QXUB_RUN_ID=<RUN_ID>
 export QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
 export QXUB_STATUS_DIR=<HOME>/.local/state/qxub/status
+export QXUB_JOB_ID_VAR=PBS_JOBID

@@ -1,0 +1,22 @@
+# Local platform: run qxub jobs as background processes on this machine,
+# with no scheduler (qxub.backends.local.LocalBackend).
+#
+# Select it with QXUB_PLATFORM_FILE=/path/to/local.yaml, or by copying it
+# into a platform search path and setting `defaults.platform: local`. It is
+# kept out of docs/platforms itself, so pointing QXUB_PLATFORM_PATHS there
+# loads only real clusters.
+# Resource requests (--mem, --cpus, --runtime) are recorded but not
+# enforced, and every job starts at once.
+
+platform:
+  name: local
+  type: local
+  host: localhost
+  description: "This machine, without a scheduler"
+
+  queues:
+    - name: normal
+      type: standard
+      priority: normal
+      su_billing_rate: 0
+      limits: {}

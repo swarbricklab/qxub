@@ -14,6 +14,7 @@ from typing import Dict, Optional, Type
 
 from ..resources.spec import ResourceSpec
 from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
+from .local import LocalBackend
 from .pbs import PbsBackend
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ BACKENDS: Dict[str, Type[SchedulerBackend]] = {
     "pbs_pro": PbsBackend,
     "pbspro": PbsBackend,
     "torque": PbsBackend,
+    # Jobs as background processes on this machine
+    "local": LocalBackend,
 }
 DEFAULT_TYPE = "pbs"
 
@@ -65,6 +68,7 @@ __all__ = [
     "BACKENDS",
     "JobSpec",
     "LiveJob",
+    "LocalBackend",
     "PbsBackend",
     "ResourceSpec",
     "SchedulerBackend",

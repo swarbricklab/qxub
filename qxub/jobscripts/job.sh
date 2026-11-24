@@ -26,6 +26,11 @@ fi
 # Older names for the image settings, still honoured if set.
 sif_file="${sif_file:-${sif:-}}"
 
+# The scheduler's ID for this job: qxub names the variable that holds it
+# (QXUB_JOB_ID_VAR, e.g. PBS_JOBID); jobs from older qxub ran under PBS.
+QXUB_JOB_ID="${QXUB_JOB_ID_VAR:+${!QXUB_JOB_ID_VAR}}"
+QXUB_JOB_ID="${QXUB_JOB_ID:-${PBS_JOBID:-}}"
+
 # Logging
 echo "📁 Execution directory: $cwd"
 [ -n "${mods:-}" ] && echo "📦 Modules to load: $mods"
@@ -84,14 +89,14 @@ if ! mkdir -p "$STATUS_DIR" 2>/dev/null; then
 fi
 # Status files are named after the qxub run ID, not the scheduler's job ID.
 # native_<job ID> lets readers that only know the job ID find the run ID.
-STATUS_KEY="${QXUB_RUN_ID:-${PBS_JOBID:-unknown}}"
-if [ -n "${QXUB_RUN_ID:-}" ] && [ -n "${PBS_JOBID:-}" ]; then
-    echo "$QXUB_RUN_ID" > "$STATUS_DIR/native_${PBS_JOBID}" 2>/dev/null || true
+STATUS_KEY="${QXUB_RUN_ID:-${QXUB_JOB_ID:-unknown}}"
+if [ -n "${QXUB_RUN_ID:-}" ] && [ -n "$QXUB_JOB_ID" ]; then
+    echo "$QXUB_RUN_ID" > "$STATUS_DIR/native_${QXUB_JOB_ID}" 2>/dev/null || true
 fi
 
 # Signal job started with timestamp and job ID
 echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${STATUS_KEY}"
-echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${STATUS_KEY}"
+echo "${QXUB_JOB_ID:-unknown}" >> "$STATUS_DIR/job_started_${STATUS_KEY}"
 echo "🚀 Job started at $(date -Iseconds)"
 
 # Run record: one file per run ($QXUB_RUN_FILE), replaced by rename on each
@@ -114,7 +119,7 @@ qxub_status() {
 }
 
 # Record that the job is running
-qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=${PBS_JOBID:-}"
+qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=$QXUB_JOB_ID"
 # Every exit path (success, the ERR trap's exit, an explicit exit) records
 # the final state. PBS stops a job (walltime, qdel, memory) with SIGTERM;
 # without a TERM trap bash would run the EXIT trap with the last completed
@@ -164,7 +169,7 @@ qxub_notify() {
     if [ "$qxub_notify" = "true" ]; then
         echo "📬 Queueing notification job..."
         qxub exec --internet --terse --default -- qxub notify send \
-            --job-id "${PBS_JOBID:-unknown}" \
+            --job-id "${QXUB_JOB_ID:-unknown}" \
             --exit-code "$1" \
             --job-name "${PBS_JOBNAME:-unknown}" \
             --output-dir "${qxub_notify_outdir:-$PWD}" \
