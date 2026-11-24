@@ -88,12 +88,21 @@ def test_submission_records_the_backend_everywhere(sandbox):
     ).fetchone() == ("local",)
 
 
-def test_a_local_job_is_cancelled_locally_under_another_platform(sandbox):
-    """Submitted with the local platform, cancelled with none (PBS)."""
+@pytest.mark.parametrize("other", ["none", "gadi"])
+def test_a_local_job_is_cancelled_locally_under_another_platform(sandbox, other):
+    """Submitted with the local platform, cancelled under a PBS one.
+
+    #167 review: the Gadi platform has a scratch path, so its status
+    directory differs from the local platform's; the local backend must
+    still find its jobs.
+    """
     sandbox.env["QXUB_PLATFORM_FILE"] = str(LOCAL_PLATFORM)
     job_id = sandbox.run("exec", "--terse", "--", "sleep 30").stdout.strip()
 
     del sandbox.env["QXUB_PLATFORM_FILE"]  # the current backend is now PBS
+    if other == "gadi":
+        sandbox.use_gadi_platform()
+        sandbox.env["PROJECT"] = "a56"
     result = sandbox.run("cancel", "id", "-f", job_id)
 
     assert result.returncode == 0, result.stdout + result.stderr
