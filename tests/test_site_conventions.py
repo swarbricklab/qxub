@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, job_variables
 
 from qxub.config import site
 from qxub.platforms import core as platform_core
@@ -128,6 +128,13 @@ def dry_run_argv(sandbox, *args, env=None):
     return shlex.split(line.split(": ", 1)[1])
 
 
+def dry_run_variables(sandbox, *args, env=None):
+    result = sandbox.run("exec", "--dry-run", *args, "--", "true", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    (line,) = [l for l in result.stdout.splitlines() if l.startswith("Dry run")]
+    return job_variables(shlex.split(line.split(": ", 1)[1]), result.stdout)
+
+
 def test_exec_uses_the_platform_project_and_directives(sandbox_platform):
     sandbox, _ = sandbox_platform
 
@@ -154,19 +161,15 @@ def test_default_output_goes_to_platform_scratch_when_it_exists(sandbox_platform
     user_scratch = scratch / "ef56" / sandbox.env.get("USER", "")
     user_scratch.mkdir(parents=True)
 
-    argv = dry_run_argv(sandbox, env={"TEST_ACCOUNT": "ef56"})
-
-    variables = argv[argv.index("-v") + 1]
-    assert f"out={user_scratch}/qt/" in variables
+    variables = dry_run_variables(sandbox, env={"TEST_ACCOUNT": "ef56"})
+    assert variables["out"].startswith(f"{user_scratch}/qt/")
 
 
 def test_default_output_falls_back_to_cwd(sandbox_platform):
     sandbox, _ = sandbox_platform
 
-    argv = dry_run_argv(sandbox, env={"TEST_ACCOUNT": "ef56"})
-
-    variables = argv[argv.index("-v") + 1]
-    assert f"out={sandbox.cwd}/qt/" in variables
+    variables = dry_run_variables(sandbox, env={"TEST_ACCOUNT": "ef56"})
+    assert variables["out"].startswith(f"{sandbox.cwd}/qt/")
 
 
 # -- job scripts ---------------------------------------------------------------
@@ -221,5 +224,4 @@ def test_submit_job_api_passes_qxub_python(sandbox):
     assert result.returncode == 0, result.stdout + result.stderr
 
     (call,) = sandbox.pbs_calls("qsub")
-    variables = call["argv"][call["argv"].index("-v") + 1]
-    assert f"qxub_python={sys.executable}" in variables.split(",")
+    assert job_variables(call["argv"])["qxub_python"] == sys.executable

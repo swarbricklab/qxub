@@ -272,7 +272,9 @@ def execute_unified(
     job_vars.update(runs.job_env(run_id, run_path))
 
     backend = backends.get_backend()
-    spec = job_spec(ctx_obj, template, job_vars)
+    spec = runs.attach_settings(
+        job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]
+    )
     submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Submission command: %s", submission_command)
 
@@ -284,6 +286,9 @@ def execute_unified(
 
     if ctx_obj["dry"]:
         print(f"Dry run - would execute: {submission_command}")
+        if spec.env_file:
+            print(f"Job settings ({spec.env_file}):")
+            print(runs.format_settings(spec.env), end="")
         # Log history even for dry runs
         try:
             # Prepare file paths for history (even for dry runs)

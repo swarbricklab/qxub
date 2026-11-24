@@ -373,6 +373,7 @@ def test_refused_submit_job_raises_and_removes_the_run_file(submit_env):
     from pathlib import Path
 
     assert not Path(spec.env["QXUB_RUN_FILE"]).exists()
+    assert spec.env_file and not Path(spec.env_file).exists()
 
 
 def test_exec_submits_through_the_backend(submit_env):

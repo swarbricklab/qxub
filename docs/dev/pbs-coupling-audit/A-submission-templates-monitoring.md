@@ -52,7 +52,7 @@ Efficiency maths reads PBS resource names: `mem`, `walltime`, `cpupercent` (`:65
 The live CLI path builds the full command with an f-string: `f'qsub -v {submission_vars} {ctx_obj["options"]} {template}'`. The same pattern appears at `execution/core.py:287`, `execution/executors.py:52-54` and `execution/submit.py:275`.
 *Suggest:* replace all four with `scheduler.submit(JobSpec, rendered_script)`. The execution layer should never see argv.
 
-**B2. `qsub -v` as the transport for job parameters. High.**
+**B2. `qsub -v` as the transport for job parameters. High.** *(Done: a sidecar settings file, `<runs dir>/<run ID>.env`, sourced by the job script; `qsub -v` carries only `QXUB_JOB_FILE`.)*
 Sites: `execution/context.py:116, 136-165`, `execution/core.py:204-231`, `execution/submit.py:233-270`.
 All job inputs (`cmd_b64`, `cwd`, `out`, `err`, `env`, `mods`, `sif`, `bind`, `pre/post`, `user_vars_b64`, `QXUB_SHARED_DB`, `qxub_notify*`) travel as one comma-separated `-v` list. That format belongs to PBS: Slurm uses `--export=` with different quoting, LSF has no `-v`, and Kubernetes uses pod env. Several values are also unquoted (`cwd=`, `out=`, `err=`, `QXUB_SHARED_DB=`), so paths that contain commas or spaces break. Singularity bind lists also use commas (`a:/a,b:/b`).
 *Suggest:* render the parameters into the job script itself (a heredoc or `export` lines inside the script), or write a sidecar `job.env` / `job.json` next to the script. Either removes the dependence on scheduler env-passing and on quoting rules.

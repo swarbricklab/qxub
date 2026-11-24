@@ -2,6 +2,7 @@
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -202,3 +203,73 @@ def golden(request):
         assert actual == path.read_text(), f"Output differs from golden file {path}"
 
     return check
+
+
+# -- the variables a job is given ----------------------------------------------
+
+SETTINGS_HEADER = "Job settings ("
+
+
+def split_qsub_vars(value: str) -> list:
+    """Split a ``qsub -v`` list on the commas PBS treats as separators.
+
+    Commas inside single or double quotes belong to the value, as in
+    ``bind='/a,/b'``.
+    """
+    items, current, quote = [], "", None
+    for char in value:
+        if quote:
+            quote = None if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        elif char == ",":
+            items.append(current)
+            current = ""
+            continue
+        current += char
+    items.append(current)
+    return items
+
+
+def parse_settings(text: str) -> dict:
+    """The variables in a job settings file (``export NAME=value`` lines)."""
+    found = {}
+    tokens = iter(shlex.split(text, comments=True))  # values may span lines
+    for token in tokens:
+        if token == "export":
+            name, _, value = next(tokens).partition("=")
+            found[name] = value
+    return found
+
+
+def dry_run_settings(stdout: str) -> str:
+    """The job settings a dry run prints after its command line."""
+    lines = stdout.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith(SETTINGS_HEADER):
+            return "\n".join(lines[i + 1 :]) + "\n"
+    return ""
+
+
+def job_variables(argv, dry_run_stdout=None) -> dict:
+    """The variables a ``qsub`` argv gives the job.
+
+    Either the ``-v`` list itself or, when it names a settings file
+    (``QXUB_JOB_FILE``), that file's variables. A dry run doesn't write the
+    file, so pass its stdout instead.
+    """
+    if "-v" not in argv:
+        return {}
+    found = {}
+    for item in split_qsub_vars(argv[argv.index("-v") + 1]):
+        name, _, value = item.partition("=")
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        found[name] = value
+    if "QXUB_JOB_FILE" in found:
+        if dry_run_stdout is not None:
+            text = dry_run_settings(dry_run_stdout)
+        else:
+            text = Path(found["QXUB_JOB_FILE"]).read_text()
+        found.update(parse_settings(text))
+    return found
