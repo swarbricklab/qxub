@@ -13,6 +13,62 @@ import pytest
 IMPORT_TIME_LIMIT = 1.0
 
 
+# ---------------------------------------------------------------------------
+# The whole session runs away from the machine's own qxub setup
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure(config):
+    """Give the test session its own home, config and ``qxub`` command.
+
+    Runs before any test module imports qxub, so qxub's global config sees
+    only this. Without it, a run on a cluster login node (Gadi) picked up
+    the user's config, ``$PROJECT``, the site's platform files and
+    ``QXUB_SHARED_DB``, wrote history and job-database rows into the user's
+    real ``~/.config/qxub``, and tests that run ``qxub`` by name failed when
+    the CLI wasn't installed on ``PATH``. :class:`QxubSandbox` isolates
+    each subprocess run the same way.
+    """
+    import atexit
+    import shutil
+    import site
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="qxub-tests-"))
+    atexit.register(shutil.rmtree, root, ignore_errors=True)
+    home = root / "home"
+    bin_dir = root / "bin"
+    for path in (home / ".config", root / "xdg", bin_dir):
+        path.mkdir(parents=True)
+
+    # Subprocess Pythons still find packages installed with --user.
+    os.environ.setdefault("PYTHONUSERBASE", site.getuserbase())
+    # The site's settings go; test switches (QXUB_TEST_REMOTE=1) stay.
+    for name in list(os.environ):
+        if name.startswith("QXUB_TEST_"):
+            continue
+        if name.startswith(("QXUB_", "PBS_")) or name == "PROJECT":
+            del os.environ[name]
+    os.environ.update(
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / ".config"),
+        XDG_CONFIG_DIRS=str(root / "xdg"),
+        XDG_STATE_HOME=str(home / ".local" / "state"),
+        XDG_DATA_HOME=str(home / ".local" / "share"),
+        # Never match a platform's host pattern by accident (e.g. on Gadi)
+        HOSTNAME="qxub-test-host",
+        # No background consolidation rounds (qxub.queue.consolidate)
+        QXUB_AUTO_CONSOLIDATE="0",
+    )
+
+    # `qxub` on PATH is this checkout's CLI, run by the interpreter under
+    # test, whether or not (and whichever) qxub is installed.
+    shim = bin_dir / "qxub"
+    shim.write_text(f"#!{sys.executable}\n{_CLI_SHIM.replace('; ', chr(10))}\n")
+    shim.chmod(0o755)
+    os.environ["PATH"] = os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
+
+
 def measure_cold_import_time(module: str = "qxub") -> float:
     """Time importing ``module`` in a fresh interpreter.
 
