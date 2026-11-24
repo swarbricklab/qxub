@@ -118,3 +118,49 @@ def test_status_check_reads_a_finished_run_file(tmp_path):
 
     run.write_text(run.read_text() + "state=finished\nexit_code=143\nsignal=TERM\n")
     assert job_status_from_files("77.gadi-pbs", status) == ("F", 143)
+
+
+def test_a_job_on_another_host_is_not_judged_by_its_pid(tmp_path, monkeypatch):
+    """#166 review: with a shared home, another machine checked the PID
+    locally and reported a running job as killed."""
+    import json
+
+    import qxub.backends.local as local_mod
+
+    monkeypatch.setattr(local_mod, "jobs_dir", lambda: tmp_path)
+    job = tmp_path / "local-elsewhere"
+    job.mkdir()
+    (job / "meta.json").write_text(
+        json.dumps(
+            {
+                "name": "j",
+                "queue": "local",
+                "job_log": "/x.log",
+                "submitted": "2026-11-24T00:00:00",
+                "host": "some-other-host",
+            }
+        )
+    )
+    (job / "pid").write_text("999999\n")  # not running here
+    backend = LocalBackend()
+
+    details = backend.job_details(["local-elsewhere"])["local-elsewhere"]
+    assert details["exit_status"] is None and not backend.is_finished(details)
+    assert details["metadata"]["host"] == "some-other-host"
+    assert [j.job_id for j in backend.list_jobs()] == ["local-elsewhere"]
+    ok, reason = backend.cancel("local-elsewhere")
+    assert not ok and "some-other-host" in reason
+
+    (job / "exit_status").write_text("0\n")  # it finished over there
+    assert backend.is_finished(
+        backend.job_details(["local-elsewhere"])["local-elsewhere"]
+    )
+
+    # On its own host, a missing process still means it was killed
+    meta = json.loads((job / "meta.json").read_text())
+    meta["host"] = local_mod.socket.gethostname()
+    (job / "meta.json").write_text(json.dumps(meta))
+    (job / "exit_status").unlink()
+    assert (
+        backend.job_details(["local-elsewhere"])["local-elsewhere"]["exit_status"] == -1
+    )
