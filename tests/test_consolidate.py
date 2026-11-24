@@ -300,13 +300,16 @@ def test_new_runs_are_added_to_what_is_already_published(area):
 def test_run_files_are_removed_only_after_the_grace_period(area):
     runs_dir, snapshot = area
     path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    settings = path.with_suffix(".env")  # the job's settings file
+    settings.write_text("export cmd_b64=x\n")
     run(area, qstat=lambda ids: {})
 
     run(area, now=NOW + timedelta(days=cons.GRACE_DAYS - 1))
-    assert path.exists()
+    assert path.exists() and settings.exists()
 
     result = run(area, now=NOW + timedelta(days=cons.GRACE_DAYS + 1))
     assert result.removed == 1 and not path.exists()
+    assert not settings.exists()
     assert len(rows(snapshot)) == 1, "the snapshot keeps the job"
 
 

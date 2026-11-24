@@ -3,6 +3,15 @@
 #PBS -S /bin/bash
 #PBS -j oe
 
+# qxub passes the job's settings in a file (QXUB_JOB_FILE) instead of as
+# qsub -v variables; jobs from older qxub got them with -v and no file.
+if [ -n "${QXUB_JOB_FILE:-}" ]; then
+    if ! . "$QXUB_JOB_FILE"; then
+        echo "❌ Cannot read the job settings file $QXUB_JOB_FILE" >&2
+        exit 1
+    fi
+fi
+
 # qxub passes the image as `sif` and bind mounts as `bind` (see
 # qxub/execution/context.py); map them onto the names used below.
 sif_file="${sif_file:-$sif}"

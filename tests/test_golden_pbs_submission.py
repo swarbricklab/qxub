@@ -18,7 +18,7 @@ import re
 import shlex
 
 import pytest
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, dry_run_settings, split_qsub_vars
 
 DRY_RUN_PREFIX = "Dry run - would execute: "
 JOBSCRIPTS_DIR = REPO_ROOT / "qxub" / "jobscripts"
@@ -128,27 +128,6 @@ def normalise(text: str, sandbox) -> str:
     return text
 
 
-def split_qsub_vars(value: str) -> list:
-    """Split a ``qsub -v`` list on the commas PBS treats as separators.
-
-    Commas inside single or double quotes belong to the value, as in
-    ``bind='/a,/b'``.
-    """
-    items, current, quote = [], "", None
-    for char in value:
-        if quote:
-            quote = None if char == quote else quote
-        elif char in "'\"":
-            quote = char
-        elif char == ",":
-            items.append(current)
-            current = ""
-            continue
-        current += char
-    items.append(current)
-    return items
-
-
 def render_qsub_argv(argv: list) -> str:
     """One argument per line, with the ``-v`` list split onto its own lines.
 
@@ -187,7 +166,11 @@ def test_exec_dry_run_matches_golden(sandbox, golden, name, setup, args):
 
     argv = dry_run_qsub_argv(result)
     assert argv[0] == "qsub"
-    golden(f"exec/{name}.txt", normalise(render_qsub_argv(argv), sandbox))
+    rendered = render_qsub_argv(argv)
+    settings = dry_run_settings(result.stdout)
+    if settings:
+        rendered += "--- job settings (QXUB_JOB_FILE) ---\n" + settings
+    golden(f"exec/{name}.txt", normalise(rendered, sandbox))
     assert sandbox.pbs_calls() == [], "a dry run must not call PBS"
 
 

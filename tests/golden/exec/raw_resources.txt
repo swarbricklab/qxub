@@ -1,18 +1,6 @@
 qsub
 -v
-    cmd_b64=bHM=
-    cwd=<CWD>
-    out=<CWD>/qt/<TIMESTAMP>/out
-    err=<CWD>/qt/<TIMESTAMP>/err
-    quiet=false
-    create_execdir=false
-    qxub_version=<VERSION>
-    qxub_path=<QXUB_PATH>
-    qxub_python=<PYTHON>
-    qxub_submit_host=<HOST>
-    QXUB_RUN_ID=<RUN_ID>
-    QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
-    QXUB_STATUS_DIR=<HOME>/.local/state/qxub/status
+    QXUB_JOB_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.env
 -N
 ls-<TIMESTAMP>
 -q
@@ -30,3 +18,18 @@ storage=gdata/ab12+scratch/ab12
 -o
 <CWD>/ls-<TIMESTAMP>.log
 <JOBSCRIPTS>/qdefault.pbs
+--- job settings (QXUB_JOB_FILE) ---
+# qxub job settings, read by the job script (QXUB_JOB_FILE)
+export cmd_b64=bHM=
+export cwd=<CWD>
+export out=<CWD>/qt/<TIMESTAMP>/out
+export err=<CWD>/qt/<TIMESTAMP>/err
+export quiet=false
+export create_execdir=false
+export qxub_version=<VERSION>
+export qxub_path=<QXUB_PATH>
+export qxub_python=<PYTHON>
+export qxub_submit_host=<HOST>
+export QXUB_RUN_ID=<RUN_ID>
+export QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
+export QXUB_STATUS_DIR=<HOME>/.local/state/qxub/status

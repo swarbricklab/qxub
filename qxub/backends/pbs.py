@@ -130,7 +130,9 @@ def pbs_resource_list(resources: ResourceSpec) -> List[str]:
 def qsub_argv(spec: JobSpec) -> List[str]:
     """The ``qsub`` command line for ``spec``."""
     argv = ["qsub"]
-    if spec.env:
+    if spec.env_file:
+        argv += ["-v", f"QXUB_JOB_FILE={qsub_var(spec.env_file)}"]
+    elif spec.env:
         argv += ["-v", ",".join(f"{k}={qsub_var(v)}" for k, v in spec.env.items())]
     argv += ["-N", spec.name]
     if spec.queue:

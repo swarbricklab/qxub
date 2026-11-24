@@ -118,6 +118,7 @@ def dispatch(
         job_id = backend.submit(spec)
     except BaseException:
         runs.discard(run_path)
+        runs.discard(spec.env_file)
         if virtual_id:
             try:
                 update_queue_entry(virtual_id, status="failed")
@@ -361,7 +362,7 @@ def submit_job(
     job_vars.update(runs.job_env(run_id, run_path))
 
     backend = backends.get_backend()
-    spec = job_spec(processed_params, template, job_vars)
+    spec = runs.attach_settings(job_spec(processed_params, template, job_vars), run_id)
     submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Programmatic submission command: %s", submission_command)
 

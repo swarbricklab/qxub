@@ -755,6 +755,7 @@ def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -
             pass
         except OSError as exc:
             logger.debug("Could not remove run file %s: %s", path, exc)
+        runs.discard(path.with_suffix(runs.SETTINGS_SUFFIX))
     return removed
 
 

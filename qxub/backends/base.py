@@ -67,6 +67,9 @@ class JobSpec:
     #: When to send mail, in the scheduler's own letters (PBS ``-m ae``).
     mail_events: Optional[str] = None
     env: Dict[str, str] = field(default_factory=dict)
+    #: A file holding ``env`` (``qxub.queue.runs.attach_settings``). When
+    #: set, the backend passes the job only its path, as ``QXUB_JOB_FILE``.
+    env_file: Optional[str] = None
     #: Extra scheduler arguments the platform adds to every job.
     native_args: List[str] = field(default_factory=list)
 

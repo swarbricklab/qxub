@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import FAKE_PBS_BIN
+from conftest import FAKE_PBS_BIN, job_variables
 
 from qxub.core import scheduler
 
@@ -148,25 +148,15 @@ def test_array_from_a_shortcut_is_rejected(sandbox):
     assert sandbox.pbs_calls() == []
 
 
-def test_multi_path_bind_reaches_qsub_as_one_variable(sandbox):
+def test_multi_path_bind_reaches_the_job_as_one_variable(sandbox):
     sandbox.run(
         "exec", "--terse", "-P", "ab12", "--sif", "/c/t.sif",
         "--bind", "/a,/b", "--", "true",
     )  # fmt: skip
 
     (call,) = sandbox.pbs_calls("qsub")
-    variables = call["argv"][call["argv"].index("-v") + 1]
-    # PBS only keeps commas inside a -v value when the value is quoted.
-    assert variables.startswith("sif=/c/t.sif,bind='/a,/b',")
-
-
-def qsub_variables(call) -> dict:
-    """The ``-v`` list as PBS splits it: on commas outside quotes."""
-    import csv
-
-    text = call["argv"][call["argv"].index("-v") + 1]
-    (fields,) = csv.reader([text], quotechar="'")
-    return dict(f.split("=", 1) for f in fields)
+    variables = job_variables(call["argv"])
+    assert (variables["sif"], variables["bind"]) == ("/c/t.sif", "/a,/b")
 
 
 @pytest.mark.parametrize(
@@ -189,7 +179,7 @@ def test_paths_with_spaces_reach_qsub_whole(sandbox, context):
     # The default joblog is inside the execdir and goes to -o (#140 retest).
     joblog = call["argv"][call["argv"].index("-o") + 1]
     assert joblog.startswith(str(execdir) + "/"), call["argv"]
-    variables = qsub_variables(call)
+    variables = job_variables(call["argv"])
     assert variables["cwd"] == str(execdir)
     assert variables["out"] == str(out)
     if "--sif" in context:

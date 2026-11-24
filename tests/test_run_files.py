@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, job_variables
 
 from qxub.config import site
 from qxub.queue import connection, db, runs
@@ -182,12 +182,7 @@ def test_job_without_run_file_variable_still_runs(tmp_path):
 
 
 def qsub_var(call, name):
-    variables = call["argv"][call["argv"].index("-v") + 1]
-    for item in variables.split(","):
-        key, _, value = item.partition("=")
-        if key == name:
-            return value
-    return None
+    return job_variables(call["argv"]).get(name)
 
 
 def test_exec_writes_run_file_and_passes_its_path(sandbox):
