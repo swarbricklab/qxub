@@ -51,9 +51,12 @@ def test_unwritable_runs_dir_falls_back_to_qsub_v(monkeypatch, tmp_path):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("")
     monkeypatch.setattr(runs, "runs_dir", lambda: blocker / "runs")
-    spec = JobSpec(script="s", name="n", env={"a": "1"})
+    script = JOBSCRIPTS / "qdefault.pbs"  # reads QXUB_JOB_FILE
+    spec = JobSpec(script=str(script), name="n", env={"a": "1"})
 
     assert runs.attach_settings(spec, "qx-1") is spec
+    monkeypatch.setattr(runs, "runs_dir", lambda: tmp_path / "runs")
+    assert runs.attach_settings(spec, "qx-1").env_file  # writable: used
 
 
 def test_exec_writes_the_settings_file(sandbox):
@@ -120,3 +123,31 @@ def test_missing_settings_file_fails_the_job_clearly(tmp_path):
 
     assert result.returncode == 1
     assert "Cannot read the job settings file" in result.stderr
+
+
+def test_custom_template_without_the_file_still_gets_qsub_v(sandbox):
+    """A --template written for older qxub never loads QXUB_JOB_FILE."""
+    template = sandbox.cwd / "old.pbs"
+    template.write_text('#!/bin/bash\necho "$cmd_b64" | base64 -d | bash\n')
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--template", str(template),
+        "--", "echo", "a,b",
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    (call,) = sandbox.pbs_calls("qsub")
+    variables = job_variables(call["argv"])
+    assert "QXUB_JOB_FILE" not in variables
+    assert variables["cmd_b64"] and variables["QXUB_RUN_ID"]
+
+
+def test_custom_template_that_reads_the_file_gets_it(sandbox):
+    template = sandbox.cwd / "new.pbs"
+    template.write_text('#!/bin/bash\n. "$QXUB_JOB_FILE"\neval "$cmd"\n')
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--template", str(template), "--", "true"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    (call,) = sandbox.pbs_calls("qsub")
+    assert "QXUB_JOB_FILE" in job_variables(call["argv"])
