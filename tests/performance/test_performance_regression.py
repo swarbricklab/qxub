@@ -1,11 +1,12 @@
 """
 Performance regression tests for migration.
+
+Each limit is checked against the fastest of a few runs (``timed_run``), so
+a busy shared login node doesn't fail them; a real slowdown still does.
 """
 
-import subprocess
-import time
-
 import pytest
+from conftest import timed_run
 
 
 class TestPerformanceRegression:
@@ -18,11 +19,7 @@ class TestPerformanceRegression:
 
     def test_cli_startup_time(self):
         """Test CLI startup time hasn't degraded."""
-        start_time = time.time()
-        result = subprocess.run(
-            ["qxub", "--help"], capture_output=True, text=True, timeout=10
-        )
-        startup_time = time.time() - start_time
+        result, startup_time = timed_run(["qxub", "--help"], limit=3.0, timeout=10)
 
         print(f"📊 CLI startup time: {startup_time:.3f}s")
 
@@ -31,14 +28,11 @@ class TestPerformanceRegression:
 
     def test_dry_run_performance(self):
         """Test dry run performance."""
-        start_time = time.time()
-        result = subprocess.run(
+        result, dry_run_time = timed_run(
             ["qxub", "exec", "--dry", "--env", "base", "--", "echo", "test"],
-            capture_output=True,
-            text=True,
+            limit=15.0,
             timeout=15,
         )
-        dry_run_time = time.time() - start_time
 
         print(f"📊 Dry run time: {dry_run_time:.3f}s")
 
@@ -47,14 +41,9 @@ class TestPerformanceRegression:
 
     def test_config_access_performance(self):
         """Test configuration access performance."""
-        start_time = time.time()
-        result = subprocess.run(
-            ["qxub", "config", "get", "defaults.project"],
-            capture_output=True,
-            text=True,
-            timeout=10,
+        result, config_time = timed_run(
+            ["qxub", "config", "get", "defaults.project"], limit=3.0, timeout=10
         )
-        config_time = time.time() - start_time
 
         print(f"📊 Config access time: {config_time:.3f}s")
 
@@ -64,11 +53,9 @@ class TestPerformanceRegression:
 
     def test_platform_list_performance(self):
         """Test platform listing performance."""
-        start_time = time.time()
-        result = subprocess.run(
-            ["qxub", "platform", "list"], capture_output=True, text=True, timeout=10
+        result, platform_time = timed_run(
+            ["qxub", "platform", "list"], limit=3.0, timeout=10
         )
-        platform_time = time.time() - start_time
 
         print(f"📊 Platform list time: {platform_time:.3f}s")
 
