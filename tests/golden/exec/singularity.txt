@@ -14,6 +14,7 @@ qsub
     qxub_submit_host=<HOST>
     QXUB_RUN_ID=<RUN_ID>
     QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
+    QXUB_STATUS_DIR=<HOME>/.local/state/qxub/status
 -N
 tool-<TIMESTAMP>
 -q

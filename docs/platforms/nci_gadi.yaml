@@ -16,6 +16,11 @@ platform:
     # puts default job output under {scratch}/qt and status files under
     # {scratch}/qxub/status.
     scratch: "/scratch/{project}/{user}"
+    # The storage request that mounts {scratch} on compute nodes. Jobs only
+    # see their own project's scratch, so a job charged to another project
+    # (-P) gets this added for the default project, to reach qxub's status
+    # directory and run files.
+    scratch_storage: "scratch/{project}"
   # Added to every qsub. PBS applies it to the job log it copies back
   # (group read, no world access). It does not change the umask of the job
   # itself, so files the job writes, including qxub's .out/.err, keep the

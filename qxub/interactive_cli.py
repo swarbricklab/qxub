@@ -1363,6 +1363,14 @@ def interactive_cli(
     # Resolve storage volumes - use default if not specified
     storage = volumes or _get_default_volumes()
 
+    # The session writes to qxub's status directory, under the default
+    # project's scratch: a session charged to another project needs it too.
+    from .config.site import status_dir_storage
+
+    needed = status_dir_storage(project)
+    if needed and needed not in (storage or "").split("+"):
+        storage = f"{storage}+{needed}" if storage else needed
+
     # Build qsub command
     qsub_cmd = _build_qsub_command(
         resources=all_resources,

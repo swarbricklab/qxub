@@ -95,7 +95,7 @@ Every template starts with:
 Project `a56` and `storage=gdata/a56` are specific to NCI Gadi and to one project, so they are wrong even on other PBS sites. `-l storage` and `-W umask` are Gadi/PBS-only, and `-j oe` changes where stdout/stderr go (see C6).
 *Suggest:* drop all scheduler directives from the templates and keep a scheduler-agnostic body. The backend's `JobScriptRenderer` prepends a directive header (`#SBATCH`, `#BSUB`, `#$`, `#PBS`, or none for local/k8s), built from `JobSpec`.
 
-**C2. `PBS_JOBID` as the key for status files. High.**
+**C2. `PBS_JOBID` as the key for status files. High.** *(Done: status files are named after `QXUB_RUN_ID` and written to `QXUB_STATUS_DIR`; a `native_<job ID>` file maps the scheduler ID to the run ID. Notifications still show the PBS ID.)*
 Sites, using `qdefault.pbs` as the example:
 - `:56-57` (`job_started_${PBS_JOBID:-unknown}`)
 - `:71, 74, 86, 88` (DB updates)

@@ -20,8 +20,21 @@ echo "🖥️  Submitted from: ${qxub_submit_host:-unknown}"
 echo "🏠 Hostname: $(hostname)"
 
 # Create status directory for monitoring
-STATUS_DIR="${out%/*}/status"
-mkdir -p "$STATUS_DIR"
+# qxub passes the status directory; jobs from older qxub derive it from $out.
+STATUS_DIR="${QXUB_STATUS_DIR:-${out%/*}/status}"
+if ! mkdir -p "$STATUS_DIR" 2>/dev/null; then
+    # e.g. another project's scratch, not mounted for this job: carry on
+    # next to $out rather than failing the job.
+    echo "⚠️  Cannot create the status directory $STATUS_DIR; using ${out%/*}/status instead" >&2
+    STATUS_DIR="${out%/*}/status"
+    mkdir -p "$STATUS_DIR"
+fi
+# Status files are named after the qxub run ID, not the scheduler's job ID.
+# native_<job ID> lets readers that only know the job ID find the run ID.
+STATUS_KEY="${QXUB_RUN_ID:-${PBS_JOBID:-unknown}}"
+if [ -n "${QXUB_RUN_ID:-}" ] && [ -n "${PBS_JOBID:-}" ]; then
+    echo "$QXUB_RUN_ID" > "$STATUS_DIR/native_${PBS_JOBID}" 2>/dev/null || true
+fi
 
 # Run record: one file per run ($QXUB_RUN_FILE), replaced by rename on each
 # update. Jobs never open the job database: on Lustre with localflock,
@@ -29,18 +42,18 @@ mkdir -p "$STATUS_DIR"
 qxub_run_update() {
     [ -n "${QXUB_RUN_FILE:-}" ] || return 0
     local tmp="${QXUB_RUN_FILE%/*}/.${QXUB_RUN_FILE##*/}.$$.tmp"
-    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null
+    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null || true
     {
         if [ -f "$QXUB_RUN_FILE" ]; then cat "$QXUB_RUN_FILE"; fi
         printf '%s
 ' "$@"
-    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     return 0
 }
 
 # Mark job as started
-echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
-echo "$PBS_JOBID" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${STATUS_KEY}"
+echo "$PBS_JOBID" >> "$STATUS_DIR/job_started_${STATUS_KEY}"
 qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=${PBS_JOBID:-}"
 # Every exit path (success, the ERR trap's exit, an explicit exit) records
 # the final state. PBS stops a job (walltime, qdel, memory) with SIGTERM;
@@ -62,8 +75,8 @@ qxub_setup_fail() {
     if [ "$quiet" != "true" ] && [ -n "${err:-}" ]; then
         { mkdir -p "${err%/*}" && printf '%s\n' "$@" >> "$err"; } 2>/dev/null || true
     fi
-    { echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-      date -Iseconds >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"; } 2>/dev/null || true
+    { echo "1" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+      date -Iseconds >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"; } 2>/dev/null || true
     exit 1
 }
 
@@ -104,8 +117,8 @@ error_handler() {
     local exit_code=$?
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
-    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 
     # Queue Slack/Discord notification if enabled
     if [ "$qxub_notify" = "true" ]; then
@@ -181,18 +194,18 @@ fi
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Running pre-command: $pre_cmd"
-    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started_${STATUS_KEY}"
 
     bash -c "$pre_cmd"
     PRE_EXIT_CODE=$?
 
-    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code_${STATUS_KEY}"
 
     if [ $PRE_EXIT_CODE -ne 0 ]; then
         echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
-        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
         exit $PRE_EXIT_CODE
     fi
     echo "✅ Pre-command completed"
@@ -202,7 +215,7 @@ fi
 # $sing_options and $cmd are meant to be split there.
 printf -v sif_q '%q' "$sif_file"
 echo "🚀 Running Singularity container: $sif_file"
-echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${STATUS_KEY}"
 
 if [ "$quiet" = "true" ]; then
     # In quiet mode, let output go to default joblog (no redirection)
@@ -228,13 +241,13 @@ else
     fi
 fi
 
-echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
-echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code_${STATUS_KEY}"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code_${STATUS_KEY}"
 
 if [ $MAIN_EXIT_CODE -ne 0 ]; then
     echo "❌ Singularity command failed with exit code $MAIN_EXIT_CODE"
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
     exit $MAIN_EXIT_CODE
 fi
 echo "✅ Singularity command completed"
@@ -242,27 +255,27 @@ echo "✅ Singularity command completed"
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
     echo "🏁 Running post-command: $post_cmd"
-    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started_${STATUS_KEY}"
 
     bash -c "$post_cmd"
     POST_EXIT_CODE=$?
 
-    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code_${STATUS_KEY}"
 
     if [ $POST_EXIT_CODE -ne 0 ]; then
         echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
-        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
         exit $POST_EXIT_CODE
     fi
     echo "✅ Post-command completed"
-    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 else
     # No post-command, main command exit code is final
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 fi
 
 

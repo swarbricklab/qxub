@@ -654,29 +654,32 @@ QXUB_USE_QSTAT_MONITORING=true qxub exec --env myenv -- python job.py
 - **2-second response time** for job completion detection (vs 30-second qstat polling)
 - **Reduced PBS scheduler load** by eliminating frequent qstat calls
 - **Background resource collection** with 60-second delay for detailed statistics
-- **Real-time status files** in `<output_dir>/status/` for external monitoring
+- **Real-time status files** in qxub's status directory for external monitoring
 
 **Status file monitoring:**
 ```bash
-# Status files created automatically in job output directory
-ls /scratch/$USER/qt/*/status/
-# job_started       - Job began execution
-# main_started      - Main command started
-# pre_exit_code     - Pre-command result
-# main_exit_code    - Main command result
-# post_exit_code    - Post-command result
-# final_exit_code   - Final job result
+# Status files live in {scratch}/qxub/status (or ~/.local/state/qxub/status
+# when the platform has no scratch area). Each is named after the job's qxub
+# run ID (qx-...); native_<PBS job ID> holds the run ID for a PBS job.
+ls /scratch/$PROJECT/$USER/qxub/status/
+# job_started_<run ID>      - Job began execution
+# main_started_<run ID>     - Main command started
+# pre_exit_code_<run ID>    - Pre-command result
+# main_exit_code_<run ID>   - Main command result
+# post_exit_code_<run ID>   - Post-command result
+# final_exit_code_<run ID>  - Final job result
 ```
 
 **External monitoring example:**
 ```bash
-# Monitor job progress externally
-JOB_DIR="/scratch/a56/user/qt/20251020_194025"
-while [ ! -f "$JOB_DIR/status/final_exit_code" ]; do
-    if [ -f "$JOB_DIR/status/main_started" ]; then
+# Monitor job progress externally, given the PBS job ID from qxub exec --terse
+STATUS_DIR="/scratch/$PROJECT/$USER/qxub/status"
+RUN_ID=$(cat "$STATUS_DIR/native_$JOB_ID")   # written when the job starts
+while [ ! -f "$STATUS_DIR/final_exit_code_$RUN_ID" ]; do
+    if [ -f "$STATUS_DIR/main_started_$RUN_ID" ]; then
         echo "Job is running main command..."
     fi
     sleep 5
 done
-echo "Job completed with exit code: $(head -n1 $JOB_DIR/status/final_exit_code)"
+echo "Job completed with exit code: $(head -n1 "$STATUS_DIR/final_exit_code_$RUN_ID")"
 ```
