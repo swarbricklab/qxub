@@ -6,6 +6,7 @@ extra scheduler directives (``default_directives``) and matching the
 current host against each platform's ``host``.
 """
 
+import re
 import shlex
 import subprocess
 import sys
@@ -185,7 +186,10 @@ def test_job_scripts_never_open_the_job_database(script):
     for value in ("python", "qxub.queue", "qxub.resources", "QXUB_SHARED_DB"):
         assert value not in text, f"{script.name} contains {value!r}"
     assert "qxub_run_update state=running" in text
-    assert "trap 'qxub_run_update state=finished" in text
+    # The finished state is recorded from the EXIT trap (directly, or from
+    # the function it calls).
+    assert "qxub_run_update state=finished" in text
+    assert re.search(r"^trap .+ EXIT$", text, re.MULTILINE)
 
 
 # -- every submission path passes the submitting Python ------------------------

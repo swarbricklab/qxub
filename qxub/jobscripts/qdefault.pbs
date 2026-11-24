@@ -89,9 +89,22 @@ qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" 
 # without a TERM trap bash would run the EXIT trap with the last completed
 # command's status, often 0, so a killed job looked successful. The signal
 # traps exit with 128+signal instead. A job that gets SIGKILL records
-# nothing and stays "running"; the joblog settles it. A user command that
-# sets its own EXIT trap replaces this one, because it is eval'ed here.
-trap 'qxub_run_update state=finished "exit_code=$?" "signal=${QXUB_SIGNAL:-}" "finished_at=$(date -Iseconds)"' EXIT
+# nothing and stays "running"; the joblog settles it. A --pre or --post
+# that sets its own EXIT trap replaces this one, because it is eval'ed here.
+#
+# --pre and --post run in this shell, so an `exit` in one ends the job
+# before any status file says so. Record the exit code then, so `qxub exec`
+# doesn't wait for the joblog. Signal exits are left to the joblog, whose
+# exit status says why PBS stopped the job.
+qxub_on_exit() {
+    local code=$?
+    if [ -z "${QXUB_SIGNAL:-}" ] && [ -n "${STATUS_DIR:-}" ] && [ -n "${STATUS_KEY:-}" ] \
+        && [ ! -f "$STATUS_DIR/final_exit_code_${STATUS_KEY}" ]; then
+        { echo "$code"; date -Iseconds; } > "$STATUS_DIR/final_exit_code_${STATUS_KEY}" 2>/dev/null || true
+    fi
+    qxub_run_update state=finished "exit_code=$code" "signal=${QXUB_SIGNAL:-}" "finished_at=$(date -Iseconds)"
+}
+trap qxub_on_exit EXIT
 trap 'QXUB_SIGNAL=TERM; exit 143' TERM
 trap 'QXUB_SIGNAL=INT; exit 130' INT
 trap 'QXUB_SIGNAL=HUP; exit 129' HUP
@@ -207,13 +220,16 @@ fi
 echo "💻 Executing main command..."
 echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${STATUS_KEY}"
 
+# The command runs in a subshell, so `exit N` or `exec` in it ends the
+# command, not this script: its status is recorded and --post still runs,
+# as with `bash -c` in the other templates. It still sees what --pre set up.
 if [ "$quiet" = "true" ]; then
-    eval "$cmd"
+    ( eval "$cmd" )
     MAIN_EXIT_CODE=$?
 else
     # Redirect only this command: an `exec` redirection would send the rest
     # of the script to $out and truncate it again at the next step.
-    eval "$cmd" > "$out" 2> "$err"
+    ( eval "$cmd" ) > "$out" 2> "$err"
     MAIN_EXIT_CODE=$?
 fi
 
