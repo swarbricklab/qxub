@@ -64,6 +64,9 @@ class FakeBackend(SchedulerBackend):
     def submit_command(self, spec):
         return ["fake-submit", spec.name, spec.script]
 
+    def interactive_command(self, spec):
+        return ["fake-interactive", spec.name, spec.script]
+
     def submit(self, spec):
         self.calls.append(("submit", spec))
         if self.fail:
@@ -399,3 +402,30 @@ def test_exec_shows_why_the_scheduler_refused(submit_env):
 
     assert result.exit_code == 3
     assert "queue is closed" in result.output
+
+
+# -- interactive sessions ----------------------------------------------------
+
+
+def test_qsub_interactive_argv():
+    from qxub.backends.pbs import qsub_interactive_argv
+
+    spec = JobSpec(
+        script="/t/session.sh",
+        name="qxub-interactive",
+        queue="normal",
+        account="ab12",
+        resources=ResourceSpec(cpus=2, native={"storage": "gdata/ab12"}),
+        # Batch-only settings a session doesn't get:
+        job_log="/l/x.log",
+        mail_to="me@example.org",
+        env={"cmd_b64": "x"},
+        env_file="/r/x.env",
+        native_args=["-W umask=0027"],
+    )
+    assert qsub_interactive_argv(spec) == [
+        "qsub", "-I", "-N", "qxub-interactive", "-q", "normal", "-P", "ab12",
+        "-l", "ncpus=2", "-l", "storage=gdata/ab12", "--", "/t/session.sh",
+    ]  # fmt: skip
+    assert PbsBackend().interactive_command(spec) == qsub_interactive_argv(spec)
+    assert PbsBackend.job_id_variable == "PBS_JOBID"

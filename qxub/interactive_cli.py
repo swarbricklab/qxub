@@ -107,7 +107,7 @@ def _get_default_queue() -> str:
         return "normal"
 
 
-def _resolve_auto_queue(resources: list[str], internet: bool) -> str:
+def _resolve_auto_queue(resources, internet: bool) -> str:
     """Pick a real queue for ``auto`` the same way ``qxub exec`` does.
 
     Uses the platform auto-selection rules with the session's resources
@@ -118,7 +118,7 @@ def _resolve_auto_queue(resources: list[str], internet: bool) -> str:
     from .config.handler import select_auto_queue
 
     params = select_auto_queue(
-        {"queue": "auto", "resources": list(resources), "internet": internet}
+        {"queue": "auto", "resources": resources, "internet": internet}
     )
     return params["queue"]
 
@@ -291,20 +291,6 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
         except Exception:
             pass
 
-    # Parse qstat output for resource usage
-    qstat_file = status_dir / "qstat_output"
-    if qstat_file.exists():
-        try:
-            from .backends.pbs import parse_qstat_fx_output
-
-            qstat_content = qstat_file.read_text()
-            if qstat_content.strip():
-                resource_data = parse_qstat_fx_output(qstat_content)
-                if resource_data:
-                    session_info["resources"] = resource_data
-        except Exception:
-            pass
-
     # The status files come from inside the job. They miss the final exit
     # status and resource usage, and are not written at all if the session
     # was killed (e.g. at walltime). Ask the scheduler once the job is over.
@@ -365,9 +351,13 @@ def _build_interactive_script(
     record: bool = False,
     record_dir: str | None = None,
     session_id: str | None = None,
+    job_id_variable: str = "PBS_JOBID",
 ) -> str:
     """
     Build the shell script that runs inside the interactive PBS job.
+
+    ``job_id_variable`` is the scheduler's variable holding the job's ID
+    (the backend's ``job_id_variable``).
 
     This script:
     1. Loads modules (if any) - with environment diff tracking
@@ -411,7 +401,7 @@ def _build_interactive_script(
                 'mkdir -p "$QXUB_SESSION_DIR"',
                 "",
                 "# Write job ID and start time",
-                'echo "$PBS_JOBID" > "$QXUB_SESSION_DIR/job_id"',
+                f'echo "${{{job_id_variable}}}" > "$QXUB_SESSION_DIR/job_id"',
                 'date +%s > "$QXUB_SESSION_DIR/start_time"',
                 'hostname > "$QXUB_SESSION_DIR/hostname"',
                 "",
@@ -420,8 +410,6 @@ def _build_interactive_script(
                 "    local exit_code=$1",
                 '    date +%s > "$QXUB_SESSION_DIR/end_time"',
                 '    echo "$exit_code" > "$QXUB_SESSION_DIR/exit_code"',
-                "    # Capture resource usage from qstat before job ends",
-                '    qstat -f "$PBS_JOBID" 2>/dev/null > "$QXUB_SESSION_DIR/qstat_output" || true',
                 "}",
                 "",
             ]
@@ -800,43 +788,6 @@ def _build_interactive_script(
     return "\n".join(lines)
 
 
-def _build_qsub_command(
-    resources: list[str],
-    queue: str,
-    project: str | None,
-    name: str,
-    working_dir: str,
-    storage: str | None,
-) -> list[str]:
-    """Build the qsub -I command with all options."""
-    cmd = ["qsub", "-I"]
-
-    # Job name
-    cmd.extend(["-N", name])
-
-    # Queue
-    cmd.extend(["-q", queue])
-
-    # Project
-    if project:
-        cmd.extend(["-P", project])
-    else:
-        # Fall back to the platform's default project (e.g. $PROJECT on Gadi)
-        env_project = default_project()
-        if env_project:
-            cmd.extend(["-P", env_project])
-
-    # Resources
-    for res in resources:
-        cmd.extend(["-l", res])
-
-    # Storage
-    if storage:
-        cmd.extend(["-l", f"storage={storage}"])
-
-    return cmd
-
-
 @click.command(name="interactive")
 @click.option(
     "--env",
@@ -1108,7 +1059,10 @@ def interactive_cli(
         - With --tmux: session persists on login node after PBS job ends
         - Reconnect to tmux with: tmux attach -t <session>
     """
-    from .backends.pbs import parse_pbs_resources, pbs_resource_list
+    from dataclasses import replace
+
+    from .backends import JobSpec, get_backend
+    from .backends.pbs import parse_pbs_resources
     from .resources import ResourceSpec
 
     # Check for conflicting shortcut/alias usage
@@ -1329,12 +1283,12 @@ def interactive_cli(
         )
     except ValueError as exc:
         raise click.UsageError(f"Invalid resource request: {exc}")
-    all_resources = pbs_resource_list(session_resources)
+    backend = get_backend()
 
     # "auto" (from --queue or config) is not a real queue; resolve it here
     # rather than letting qsub reject it.
     if queue == "auto":
-        queue = _resolve_auto_queue(all_resources, internet)
+        queue = _resolve_auto_queue(session_resources, internet)
 
     # Build the interactive script
     # Resolve record_dir from config if not specified
@@ -1358,6 +1312,7 @@ def interactive_cli(
         record=record,
         record_dir=resolved_record_dir,
         session_id=session_id,
+        job_id_variable=backend.job_id_variable,
     )
 
     # Resolve storage volumes - use default if not specified
@@ -1371,14 +1326,16 @@ def interactive_cli(
     if needed and needed not in (storage or "").split("+"):
         storage = f"{storage}+{needed}" if storage else needed
 
-    # Build qsub command
-    qsub_cmd = _build_qsub_command(
-        resources=all_resources,
-        queue=queue,
-        project=project,
+    # The session, for the scheduler's backend to start (PBS: qsub -I)
+    if storage:
+        session_resources.native["storage"] = storage
+    session_spec = JobSpec(
+        script="",  # the session script, written below
         name=name,
-        working_dir=working_dir,
-        storage=storage,
+        queue=queue,
+        # Fall back to the platform's default project (e.g. $PROJECT on Gadi)
+        account=project or default_project() or None,
+        resources=session_resources,
     )
 
     # Determine context description for output
@@ -1425,7 +1382,10 @@ def interactive_cli(
             click.echo("Config defaults: SKIPPED (--no-defaults)")
         click.echo("")
         click.echo("qsub command:")
-        click.echo(f"  {' '.join(qsub_cmd)}")
+        shown = backend.interactive_command(
+            replace(session_spec, script="<session script>")
+        )
+        click.echo(f"  {shlex.join(shown)}")
         click.echo("")
 
     if dry:
@@ -1507,21 +1467,20 @@ def interactive_cli(
         f.write(script)
     script_file.chmod(0o755)
 
-    # Build the final qsub command that runs our script
-    # qsub -I executes interactively, and we pass our script as the command
-    qsub_cmd.extend(["--", str(script_file)])
+    # The command that starts the session running our script (qsub -I)
+    qsub_cmd = backend.interactive_command(
+        replace(session_spec, script=str(script_file))
+    )
 
     if verbose:
         click.echo(f"Script file: {script_file}")
-        click.echo(f"Full command: {' '.join(qsub_cmd)}")
+        click.echo(f"Full command: {shlex.join(qsub_cmd)}")
         click.echo("")
 
     # Handle tmux: start tmux on LOGIN node, run qsub INSIDE tmux
     # This ensures the tmux session persists when the PBS job ends
     if tmux_session:
-        import shlex
-
-        qsub_cmd_str = " ".join(shlex.quote(arg) for arg in qsub_cmd)
+        qsub_cmd_str = shlex.join(qsub_cmd)
 
         # Check if tmux session already exists
         result = subprocess.run(
