@@ -19,9 +19,9 @@ express
 -P
 cd34
 -l
-mem=8GB
--l
 ncpus=1
+-l
+mem=8GB
 -l
 walltime=00:30:00
 -o

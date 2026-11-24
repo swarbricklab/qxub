@@ -241,8 +241,8 @@
     },
     {
       "path": "qxub/backends/pbs.py",
-      "description": "PbsBackend – every qsub/qstat/qdel call, plus the qstat output parsers",
-      "exports": ["PbsBackend", "qsub_argv", "parse_qstat_fx_output", "parse_qstat_user_listing", "parse_qstat_full_listing"]
+      "description": "PbsBackend – every qsub/qstat/qdel call, the qstat output parsers, and -l parsing/rendering of ResourceSpec",
+      "exports": ["PbsBackend", "qsub_argv", "parse_pbs_resources", "pbs_resource_list", "parse_qstat_fx_output", "parse_qstat_user_listing", "parse_qstat_full_listing"]
     },
     {
       "path": "qxub/backends/__init__.py",
@@ -282,9 +282,9 @@
       "exports": ["parse_memory_size", "format_memory_size", "parse_walltime", "format_walltime"]
     },
     {
-      "path": "qxub/resources/mappers.py",
-      "description": "ResourceMapper – convert workflow formats to PBS (add_memory, add_runtime, add_cpus, add_jobfs, add_storage)",
-      "exports": ["ResourceMapper"]
+      "path": "qxub/resources/spec.py",
+      "description": "ResourceSpec – scheduler-neutral resource request (cpus, memory, walltime, gpus, disk, native); the one size and duration parser",
+      "exports": ["ResourceSpec", "parse_size", "parse_duration", "format_size", "format_duration"]
     },
     {
       "path": "qxub/resources/tracker.py",

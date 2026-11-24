@@ -17,6 +17,7 @@ from qxub import backends, cancel_cli
 from qxub.backends import (
     JobSpec,
     LiveJob,
+    ResourceSpec,
     SchedulerBackend,
     SchedulerQueryError,
     SubmitError,
@@ -295,7 +296,7 @@ def test_qsub_argv_renders_a_job_spec():
         name="j",
         queue="normal",
         account="ab12",
-        resources=["ncpus=2", "mem=4GB"],
+        resources=ResourceSpec(cpus=2, memory=4 * 1024**3),
         job_log="/logs/my job.log",
         mail_to="me@example.org",
         env={"cmd_b64": "ZWNobw==", "bind": "/a,/b", "odd": "it's,here", "p": "/x y"},
@@ -354,7 +355,7 @@ def test_submit_job_goes_through_the_backend(submit_env):
     (spec,) = [c[1] for c in submit_env.calls if c[0] == "submit"]
     assert result.job_id == "fake-1"
     assert (spec.name, spec.queue, spec.account) == ("greet", "normal", "ab12")
-    assert spec.resources == ["ncpus=2", "mem=4GB"]
+    assert spec.resources == ResourceSpec(cpus=2, memory=4 * 1024**3)
     assert spec.env["env"] == "myenv"
     assert spec.env["QXUB_RUN_ID"] == result.virtual_id
     assert result.submission_command == "fake-submit greet " + spec.script

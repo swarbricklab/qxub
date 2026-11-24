@@ -11,6 +11,8 @@ import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from .spec import parse_duration, parse_size
+
 
 def size_to_bytes(size_str: str) -> int:
     """
@@ -32,34 +34,9 @@ def size_to_bytes(size_str: str) -> int:
         >>> size_to_bytes('4gb')
         4294967296
     """
-    if not size_str or size_str == "0b":
+    if not size_str:
         return 0
-
-    # Extract number and unit
-    match = re.match(r"^(\d+(?:\.\d+)?)([a-zA-Z]+)$", size_str.strip())
-    if not match:
-        raise ValueError(f"Invalid size format: {size_str}")
-
-    value, unit = match.groups()
-    value = float(value)
-    unit = unit.lower()
-
-    # Convert to bytes
-    multipliers = {
-        "b": 1,
-        "kb": 1024,
-        "mb": 1024**2,
-        "gb": 1024**3,
-        "tb": 1024**4,
-        "k": 1024,  # Sometimes PBS uses 'k' instead of 'kb'
-        "m": 1024**2,  # Sometimes PBS uses 'm' instead of 'mb'
-        "g": 1024**3,  # Sometimes PBS uses 'g' instead of 'gb'
-    }
-
-    if unit not in multipliers:
-        raise ValueError(f"Unknown size unit: {unit}")
-
-    return int(value * multipliers[unit])
+    return parse_size(size_str, bare_unit="B")
 
 
 def bytes_to_human(bytes_value: int) -> str:
@@ -115,14 +92,7 @@ def time_to_seconds(time_str: str) -> int:
     """
     if not time_str:
         return 0
-
-    # Handle format HH:MM:SS
-    match = re.match(r"^(\d+):(\d+):(\d+)$", time_str.strip())
-    if not match:
-        raise ValueError(f"Invalid time format: {time_str}")
-
-    hours, minutes, seconds = map(int, match.groups())
-    return hours * 3600 + minutes * 60 + seconds
+    return parse_duration(time_str, bare_unit="seconds")
 
 
 def parse_exec_host(exec_host: str) -> Dict[str, Any]:

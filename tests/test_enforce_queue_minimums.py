@@ -11,6 +11,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from qxub.backends.pbs import parse_pbs_resources, pbs_resource_list
 from qxub.config.handler import enforce_queue_minimums, select_auto_queue
 
 
@@ -69,9 +70,14 @@ def _params(queue, resources, cpus_explicit=False, queue_was_auto=False):
     return {
         "queue": queue,
         "queue_was_auto": queue_was_auto,
-        "resources": list(resources),
+        "resources": parse_pbs_resources(resources),
         "cpus_explicit": cpus_explicit,
     }
+
+
+def _l(result):
+    """The result's resources as PBS -l strings."""
+    return pbs_resource_list(result["resources"])
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +94,7 @@ def test_cpu_below_minimum_is_raised(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    ncpus = next(r for r in result["resources"] if r.startswith("ncpus="))
+    ncpus = next(r for r in _l(result) if r.startswith("ncpus="))
     assert ncpus == "ncpus=12", f"Expected ncpus=12, got {ncpus}"
     mock_echo.assert_called_once()
     warning_text = mock_echo.call_args[0][0]
@@ -105,7 +111,7 @@ def test_cpu_non_multiple_rounded_up(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    ncpus = next(r for r in result["resources"] if r.startswith("ncpus="))
+    ncpus = next(r for r in _l(result) if r.startswith("ncpus="))
     assert ncpus == "ncpus=24", f"Expected ncpus=24, got {ncpus}"
     mock_echo.assert_called_once()
     print("  PASS: ncpus=13 rounded up to ncpus=24 for gpuvolta")
@@ -120,7 +126,7 @@ def test_cpu_exact_multiple_unchanged(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    ncpus = next(r for r in result["resources"] if r.startswith("ncpus="))
+    ncpus = next(r for r in _l(result) if r.startswith("ncpus="))
     assert ncpus == "ncpus=24"
     mock_echo.assert_not_called()
     print("  PASS: ncpus=24 unchanged for gpuvolta")
@@ -135,7 +141,7 @@ def test_cpu_larger_compliant_multiple_unchanged(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    ncpus = next(r for r in result["resources"] if r.startswith("ncpus="))
+    ncpus = next(r for r in _l(result) if r.startswith("ncpus="))
     assert ncpus == "ncpus=36"
     mock_echo.assert_not_called()
     print("  PASS: ncpus=36 unchanged for gpuvolta")
@@ -150,7 +156,7 @@ def test_no_cpus_in_resources_not_touched(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    assert not any(r.startswith("ncpus=") for r in result["resources"])
+    assert not any(r.startswith("ncpus=") for r in _l(result))
     mock_echo.assert_not_called()
     print(
         "  PASS: no ncpus injected when not in resources (adjust_cpus_for_gpus handles that)"
@@ -166,7 +172,7 @@ def test_queue_without_cpu_constraint_not_touched(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    ncpus = next(r for r in result["resources"] if r.startswith("ncpus="))
+    ncpus = next(r for r in _l(result) if r.startswith("ncpus="))
     assert ncpus == "ncpus=3"
     mock_echo.assert_not_called()
     print("  PASS: ncpus=3 unchanged on normal queue")
@@ -224,7 +230,7 @@ def test_disk_below_minimum_is_raised(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    jobfs = next(r for r in result["resources"] if r.startswith("jobfs="))
+    jobfs = next(r for r in _l(result) if r.startswith("jobfs="))
     assert jobfs == "jobfs=100GB", f"Expected jobfs=100GB, got {jobfs}"
     mock_echo.assert_called_once()
     print("  PASS: jobfs=50GB raised to jobfs=100GB for diskqueue")
@@ -239,7 +245,7 @@ def test_disk_above_minimum_unchanged(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    jobfs = next(r for r in result["resources"] if r.startswith("jobfs="))
+    jobfs = next(r for r in _l(result) if r.startswith("jobfs="))
     assert jobfs == "jobfs=200GB"
     mock_echo.assert_not_called()
     print("  PASS: jobfs=200GB unchanged for diskqueue")
@@ -254,7 +260,7 @@ def test_disk_not_specified_gets_minimum_injected_silently(tmp_path):
         with patch("click.echo") as mock_echo:
             result = enforce_queue_minimums(params)
 
-    jobfs = next((r for r in result["resources"] if r.startswith("jobfs=")), None)
+    jobfs = next((r for r in _l(result) if r.startswith("jobfs=")), None)
     assert jobfs == "jobfs=100GB", f"Expected jobfs=100GB injected, got {jobfs}"
     mock_echo.assert_not_called()
     print("  PASS: jobfs=100GB injected silently when not specified")
@@ -268,7 +274,7 @@ def test_disk_not_specified_no_minimum_not_injected(tmp_path):
     with patch.dict(os.environ, {"QXUB_PLATFORM_PATHS": str(tmp_path)}):
         result = enforce_queue_minimums(params)
 
-    assert not any(r.startswith("jobfs=") for r in result["resources"])
+    assert not any(r.startswith("jobfs=") for r in _l(result))
     print("  PASS: no jobfs injected when queue has no min_local_storage")
 
 
@@ -285,7 +291,7 @@ def test_unknown_queue_returns_params_unchanged(tmp_path):
     with patch.dict(os.environ, {"QXUB_PLATFORM_PATHS": str(tmp_path)}):
         result = enforce_queue_minimums(params)
 
-    assert result["resources"] == ["ncpus=4"]
+    assert _l(result) == ["ncpus=4"]
     print("  PASS: unknown queue leaves params unchanged")
 
 
@@ -293,7 +299,7 @@ def test_auto_queue_sentinel_skipped():
     """queue='auto' should be skipped (not yet resolved)."""
     params = _params("auto", ["ncpus=1"])
     result = enforce_queue_minimums(params)
-    assert result["resources"] == ["ncpus=1"]
+    assert _l(result) == ["ncpus=1"]
     print("  PASS: queue='auto' sentinel skipped")
 
 
@@ -310,9 +316,9 @@ def test_other_resources_preserved(tmp_path):
         with patch("click.echo"):
             result = enforce_queue_minimums(params)
 
-    assert "mem=32GB" in result["resources"]
-    assert "walltime=2:00:00" in result["resources"]
-    assert "ngpus=1" in result["resources"]
+    assert "mem=32GB" in _l(result)
+    assert "walltime=02:00:00" in _l(result)
+    assert "ngpus=1" in _l(result)
     print("  PASS: other resources preserved through CPU enforcement")
 
 

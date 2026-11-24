@@ -12,6 +12,7 @@ definition decides which scheduler qxub talks to::
 import logging
 from typing import Dict, Optional, Type
 
+from ..resources.spec import ResourceSpec
 from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
 from .pbs import PbsBackend
 
@@ -65,6 +66,7 @@ __all__ = [
     "JobSpec",
     "LiveJob",
     "PbsBackend",
+    "ResourceSpec",
     "SchedulerBackend",
     "SchedulerQueryError",
     "SubmitError",

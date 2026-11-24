@@ -23,6 +23,13 @@ from ..resources import (
     size_to_bytes,
     time_to_seconds,
 )
+from ..resources.spec import (
+    ResourceSpec,
+    format_duration,
+    format_size,
+    parse_duration,
+    parse_size,
+)
 from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
 
 logger = logging.getLogger(__name__)
@@ -57,6 +64,69 @@ def qsub_var(value: Any) -> str:
     return f"{quote}{value}{quote}"
 
 
+# PBS ``-l`` names for the neutral ResourceSpec fields, in the order qxub
+# writes them. Anything else (storage=, place=, select=) is kept as native.
+PBS_RESOURCE_NAMES = {
+    "ncpus": "cpus",
+    "ngpus": "gpus",
+    "mem": "memory",
+    "walltime": "walltime",
+    "jobfs": "disk",
+}
+
+
+def parse_pbs_resources(items: Iterable[str]) -> ResourceSpec:
+    """A :class:`ResourceSpec` from PBS ``-l`` requests.
+
+    Each item is ``name=value`` or a comma-separated list of them
+    (``ncpus=48,mem=128GB``). Values follow PBS: a plain ``mem=4096`` is
+    bytes, a plain ``walltime=3600`` is seconds and ``walltime=30:00`` is
+    30 minutes. Later items win. Raises ``ValueError`` for a malformed one.
+    """
+    spec = ResourceSpec()
+    for item in items or []:
+        for part in str(item).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            name, sep, value = part.partition("=")
+            name, value = name.strip(), value.strip()
+            if not sep or not name or not value:
+                raise ValueError(f"expected NAME=VALUE, got {part!r}")
+            field_name = PBS_RESOURCE_NAMES.get(name)
+            if field_name is None:
+                spec.native[name] = value
+            elif field_name in ("cpus", "gpus"):
+                if not value.isdigit():
+                    raise ValueError(f"invalid {name}: {value!r}")
+                setattr(spec, field_name, int(value))
+            elif field_name == "walltime":
+                # PBS reads [[hours:]minutes:]seconds; parse_duration reads
+                # two fields as hours:minutes.
+                if value.count(":") == 1:
+                    value = "0:" + value
+                spec.walltime = parse_duration(value, bare_unit="seconds")
+            else:
+                setattr(spec, field_name, parse_size(value, bare_unit="B"))
+    return spec
+
+
+def pbs_resource_list(resources: ResourceSpec) -> List[str]:
+    """``resources`` as PBS ``-l`` values: ``["ncpus=2", "mem=4GB", …]``."""
+    out = []
+    for pbs_name, field_name in PBS_RESOURCE_NAMES.items():
+        value = getattr(resources, field_name)
+        if value is None:
+            continue
+        if field_name == "walltime":
+            value = format_duration(value)
+        elif field_name in ("memory", "disk"):
+            value = format_size(value)
+        out.append(f"{pbs_name}={value}")
+    out += [f"{name}={value}" for name, value in resources.native.items()]
+    return out
+
+
 def qsub_argv(spec: JobSpec) -> List[str]:
     """The ``qsub`` command line for ``spec``."""
     argv = ["qsub"]
@@ -67,7 +137,7 @@ def qsub_argv(spec: JobSpec) -> List[str]:
         argv += ["-q", spec.queue]
     if spec.account:
         argv += ["-P", spec.account]
-    for resource in spec.resources:
+    for resource in pbs_resource_list(spec.resources):
         argv += ["-l", resource]
     if spec.job_log:
         argv += ["-o", str(spec.job_log)]

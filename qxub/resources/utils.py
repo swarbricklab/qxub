@@ -9,50 +9,23 @@ import logging
 import re
 from typing import Optional
 
+from .spec import parse_duration, parse_size
+
 logger = logging.getLogger(__name__)
 
 
 def parse_memory_size(memory_str: str) -> Optional[int]:
-    """
-    Parse memory size string to bytes.
+    """Memory size in bytes, or None if it can't be parsed.
 
-    Supports formats like: "4GB", "512MB", "2TB", "1024" (assumed MB)
-    Returns memory size in bytes, or None if parsing fails.
+    A plain number is MB. See :func:`qxub.resources.spec.parse_size`.
     """
     if not memory_str:
         return None
-
-    memory_str = memory_str.strip().upper()
-
-    # Extract number and unit
-    match = re.match(r"^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$", memory_str)
-    if not match:
-        # Try just number (assume MB)
-        try:
-            return int(float(memory_str)) * 1024 * 1024
-        except ValueError:
-            logger.warning(f"Could not parse memory size: {memory_str}")
-            return None
-
-    value, unit = match.groups()
-    value = float(value)
-
-    # Convert to bytes
-    multipliers = {
-        "": 1024 * 1024,  # Default to MB
-        "B": 1,
-        "KB": 1024,
-        "MB": 1024 * 1024,
-        "GB": 1024 * 1024 * 1024,
-        "TB": 1024 * 1024 * 1024 * 1024,
-        "K": 1024,
-        "M": 1024 * 1024,
-        "G": 1024 * 1024 * 1024,
-        "T": 1024 * 1024 * 1024 * 1024,
-    }
-
-    multiplier = multipliers.get(unit, 1024 * 1024)  # Default to MB
-    return int(value * multiplier)
+    try:
+        return parse_size(memory_str, bare_unit="MB")
+    except ValueError:
+        logger.warning(f"Could not parse memory size: {memory_str}")
+        return None
 
 
 def format_memory_size(bytes_size: int) -> str:
@@ -70,52 +43,17 @@ def format_memory_size(bytes_size: int) -> str:
 
 
 def parse_walltime(walltime_str: str) -> Optional[float]:
-    """
-    Parse walltime string to hours.
+    """Walltime in hours, or None if it can't be parsed.
 
-    Supports formats like: "48:00:00", "2:30:00", "1h", "30m", "45s"
-    Returns walltime in hours, or None if parsing fails.
+    A plain number is hours. See :func:`qxub.resources.spec.parse_duration`.
     """
     if not walltime_str:
         return None
-
-    walltime_str = walltime_str.strip()
-
-    # Try HH:MM:SS or HH:MM format
-    if ":" in walltime_str:
-        return _parse_colon_format(walltime_str)
-
-    # Try human-readable format (1h, 30m, 45s)
-    return _parse_unit_format(walltime_str)
-
-
-def _parse_colon_format(walltime_str: str) -> Optional[float]:
-    """Parse HH:MM:SS or HH:MM format."""
-    parts = walltime_str.split(":")
     try:
-        if len(parts) == 3:
-            hours, minutes, seconds = map(int, parts)
-            return hours + minutes / 60 + seconds / 3600
-        elif len(parts) == 2:
-            hours, minutes = map(int, parts)
-            return hours + minutes / 60
+        return parse_duration(walltime_str, bare_unit="hours") / 3600
     except ValueError:
-        pass
-    return None
-
-
-def _parse_unit_format(walltime_str: str) -> Optional[float]:
-    """Parse unit format like 1h, 30m, 45s."""
-    match = re.match(r"^(\d+(?:\.\d+)?)\s*([hms]?)$", walltime_str.lower())
-    if not match:
         logger.warning(f"Could not parse walltime: {walltime_str}")
         return None
-
-    value, unit = match.groups()
-    value = float(value)
-
-    unit_multipliers = {"h": 1, "": 1, "m": 1 / 60, "s": 1 / 3600}
-    return value * unit_multipliers.get(unit, 1)
 
 
 def format_walltime(hours: float) -> str:

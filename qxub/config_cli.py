@@ -862,41 +862,23 @@ def set_shortcut(command_prefix: str, user_config: bool, system: bool, **options
     # PBS options
     resources_list = []
 
-    # Handle workflow-friendly resource options - convert to PBS format
-    if options.get("mem") or options.get("memory"):
-        from qxub.resources import ResourceMapper
+    # Workflow-friendly resource options, stored in PBS form
+    from qxub.backends.pbs import pbs_resource_list
+    from qxub.resources import ResourceSpec
 
-        mapper = ResourceMapper()
-        mapper.add_memory(options.get("mem") or options.get("memory"))
-        resources_list.extend(mapper.get_pbs_resources())
-
-    if options.get("runtime") or options.get("time"):
-        from qxub.resources import ResourceMapper
-
-        mapper = ResourceMapper()
-        mapper.add_runtime(options.get("runtime") or options.get("time"))
-        resources_list.extend(mapper.get_pbs_resources())
-
-    if options.get("cpus") or options.get("threads"):
-        from qxub.resources import ResourceMapper
-
-        mapper = ResourceMapper()
-        mapper.add_cpus(options.get("cpus") or options.get("threads"))
-        resources_list.extend(mapper.get_pbs_resources())
-
-    if options.get("disk") or options.get("jobfs"):
-        from qxub.resources import ResourceMapper
-
-        mapper = ResourceMapper()
-        mapper.add_disk(options.get("disk") or options.get("jobfs"))
-        resources_list.extend(mapper.get_pbs_resources())
-
-    if options.get("volumes") or options.get("storage"):
-        from qxub.resources import ResourceMapper
-
-        mapper = ResourceMapper()
-        mapper.add_storage(options.get("volumes") or options.get("storage"))
-        resources_list.extend(mapper.get_pbs_resources())
+    try:
+        option_resources = ResourceSpec.from_options(
+            memory=options.get("mem") or options.get("memory"),
+            walltime=options.get("runtime") or options.get("time"),
+            cpus=options.get("cpus") or options.get("threads"),
+            disk=options.get("disk") or options.get("jobfs"),
+        )
+    except ValueError as exc:
+        raise click.UsageError(f"Invalid resource request: {exc}")
+    volumes = options.get("volumes") or options.get("storage")
+    if volumes:
+        option_resources.native["storage"] = str(volumes)
+    resources_list.extend(pbs_resource_list(option_resources))
 
     # Handle traditional PBS resources format
     if options["resources"]:
