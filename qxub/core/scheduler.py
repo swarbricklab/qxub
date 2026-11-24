@@ -101,7 +101,7 @@ class SimpleSpinner:
 
 def same_job(job_id: str) -> str:
     """A key that matches ``12345`` with ``12345.gadi-pbs``."""
-    return backends.get_backend().same_job(job_id)
+    return backends.backend_for_job(job_id).same_job(job_id)
 
 
 # Submission failures. The old name stays for callers that catch it.
@@ -119,7 +119,7 @@ def qdel(job_id, quiet=False):
         bool: True if the scheduler accepted the cancellation
     """
     logger.debug("Deleting job %s", job_id)
-    ok, reason = backends.get_backend().cancel(job_id)
+    ok, reason = backends.backend_for_job(job_id).cancel(job_id)
     if ok:
         if not quiet:
             click.echo(f"🗑️  Job {job_id} deleted successfully")
@@ -345,7 +345,7 @@ def get_job_resource_data(job_id):
         - efficiency: Dict of calculated efficiencies
     """
     logger.debug("Getting resource data for job %s", job_id)
-    backend = backends.get_backend()
+    backend = backends.backend_for_job(job_id)
     return backend.find_details(backend.job_details([job_id]), job_id)
 
 

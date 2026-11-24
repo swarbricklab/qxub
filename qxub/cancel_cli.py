@@ -175,12 +175,13 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
     success_count = 0
     failed_jobs = []
     tracker = ResourceTracker()
-    backend = backends.get_backend()
 
     for job_id in all_job_ids:
         if not quiet:
             click.echo(f"🗑️  Cancelling job {job_id}...")
 
+        # The job's own backend: the one recorded at submission if known
+        backend = backends.backend_for_job(job_id, tracker.recorded_backend(job_id))
         ok, reason = backend.cancel(job_id)
         if ok:
             success_count += 1
@@ -189,7 +190,7 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
 
             if wait:
                 # Wait for deletion confirmation
-                if _wait_for_deletion(job_id, timeout, quiet):
+                if _wait_for_deletion(job_id, timeout, quiet, backend):
                     if not quiet:
                         click.echo(f"✅ Job {job_id} successfully cancelled")
                 else:
@@ -730,14 +731,16 @@ def _find_jobs_by_name(
     ]
 
 
-def _wait_for_deletion(job_id: str, timeout: int, quiet: bool = False) -> bool:
+def _wait_for_deletion(
+    job_id: str, timeout: int, quiet: bool = False, backend=None
+) -> bool:
     """
     Wait until the scheduler no longer lists the job.
 
     Returns:
         True if job is confirmed deleted, False if timeout
     """
-    backend = backends.get_backend()
+    backend = backend or backends.backend_for_job(job_id)
     key = backend.same_job(job_id)
     start_time = time.time()
 

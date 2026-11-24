@@ -263,13 +263,16 @@ def execute_unified(
     # The run ID names this run's record file, which the job updates instead
     # of writing the job database (docs/dev/sqlite-robustness.md, Phase 2).
     run_id = new_virtual_id()
+    backend = backends.get_backend()
     run_path = None
     if not ctx_obj["dry"]:
         run_path = runs.write_submitted(
             run_id,
-            _run_record_fields(ctx_obj, command, execution_context),
+            {
+                **_run_record_fields(ctx_obj, command, execution_context),
+                "backend": backend.name,
+            },
         )
-    backend = backends.get_backend()
     job_vars.update(runs.job_env(run_id, run_path, backend.job_id_variable))
     spec = runs.attach_settings(
         job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]

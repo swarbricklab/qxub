@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Bump when a table or column is added; ensure_schema() then runs the
 # (idempotent) DDL and migrations once on each existing database.
 # 2: job_resources.job_name (#143)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3  # 3: queue.backend, job_resources.backend
 
 BUSY_TIMEOUT_SECONDS = 15.0
 RETRY_ATTEMPTS = 5
