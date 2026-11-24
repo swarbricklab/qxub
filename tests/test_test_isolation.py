@@ -56,3 +56,23 @@ def test_sandbox_runs_import_the_checkout(sandbox):
     sandbox.env = _env_with_a_decoy_qxub(sandbox.root, sandbox.env)
     result = sandbox.run("--version")
     assert result.stdout.split() == ["qxub", qxub.__version__], result.stdout
+
+
+# -- timing limits on busy machines ------------------------------------------
+
+
+def test_fastest_of_retries_only_until_under_the_limit():
+    from conftest import fastest_of
+
+    timings = iter([3.02, 2.1, 9.9])  # a load spike, then a normal run
+    calls = []
+
+    def measure():
+        calls.append(1)
+        return next(timings)
+
+    assert fastest_of(measure, limit=3.0) == 2.1
+    assert len(calls) == 2  # stopped at the first run under the limit
+
+    always_slow = iter([4.0, 3.5, 3.9])
+    assert fastest_of(lambda: next(always_slow), limit=3.0) == 3.5  # still fails

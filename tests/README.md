@@ -39,6 +39,13 @@ machine's own qxub setup, so a run on a Gadi login node behaves as in CI:
   start (the shim, sandbox runs) imports this checkout's qxub, not an
   installed one the interpreter can also see.
 
+### Timing limits
+
+Tests that check a wall-clock limit (`tests/performance`, the cold-import
+fixture) use the fastest of up to three runs, stopping at the first under
+the limit (`fastest_of`, `timed_run` in `conftest.py`). A busy login node
+doesn't fail them; a real slowdown is slow every time and still does.
+
 ## Test Scripts
 
 ### Integration Tests

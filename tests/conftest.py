@@ -5,6 +5,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -100,10 +101,41 @@ def measure_cold_import_time(module: str = "qxub") -> float:
     return float(result.stdout.strip().splitlines()[-1])
 
 
+def fastest_of(measure, limit: float, attempts: int = 3) -> float:
+    """The fastest of up to ``attempts`` timings from ``measure()``.
+
+    Stops at the first one under ``limit``. A single wall-clock timing on a
+    shared login node fails whenever the node is busy (#163 review: 3.02 s
+    against a 3.0 s limit at load 11); a real slowdown is slow every time.
+    """
+    best = float("inf")
+    for _ in range(attempts):
+        best = min(best, measure())
+        if best < limit:
+            break
+    return best
+
+
+def timed_run(argv, limit: float, timeout: float, attempts: int = 3):
+    """Run ``argv``; return its last result and its fastest time (see
+    :func:`fastest_of`)."""
+    results = []
+
+    def measure():
+        start = time.perf_counter()
+        results.append(
+            subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        )
+        return time.perf_counter() - start
+
+    elapsed = fastest_of(measure, limit, attempts)
+    return results[-1], elapsed
+
+
 @pytest.fixture
 def cold_import_time():
-    """Seconds taken by a cold ``import qxub``."""
-    return measure_cold_import_time()
+    """Seconds taken by a cold ``import qxub`` (the fastest of a few tries)."""
+    return fastest_of(measure_cold_import_time, IMPORT_TIME_LIMIT)
 
 
 # ---------------------------------------------------------------------------
