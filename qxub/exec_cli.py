@@ -6,7 +6,6 @@ options and contexts (conda, modules, singularity, default) into a single
 comprehensive interface.
 """
 
-
 import click
 
 from .config.handler import process_job_options
