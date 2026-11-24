@@ -61,9 +61,11 @@ def _still_queued_or_running(
 
     Returns ``None`` (after saying why) if the scheduler can't be asked.
     """
-    backend = backends.get_backend()
     try:
-        live = {backend.same_job(j.job_id): j for j in backend.list_jobs()}
+        live = {
+            (owner.name, owner.same_job(j.job_id)): j
+            for owner, j in backends.live_jobs()
+        }
     except SchedulerQueryError as exc:
         click.echo(
             f"❌ Can't tell which jobs are still queued or running: {exc}", err=True
@@ -72,8 +74,10 @@ def _still_queued_or_running(
 
     cutoff = (datetime.now() - STALE_AFTER).isoformat()
     candidates, gone = [], []
+    current = backends.get_backend()
     for job in jobs:
-        key = backend.same_job(job["job_id"])
+        backend = backends.backend_for_job(job["job_id"], job.get("backend"))
+        key = (backend.name, backend.same_job(job["job_id"]))
         if key in live:
             if not job.get("job_name"):
                 job = {**job, "job_name": live[key].name}
@@ -81,6 +85,8 @@ def _still_queued_or_running(
         elif (
             job.get("status") in UNFINISHED
             and backend.looks_like_job_id(job["job_id"])
+            # Another backend's jobs count as gone only if it can be asked
+            and (backend.name == current.name or backend.available())
             and (job.get("submitted_at") or "") < cutoff
         ):
             gone.append(job["job_id"])
@@ -650,7 +656,7 @@ def cancel_all(user, queue, status, force, quiet):
     try:
         matching_jobs = [
             job.job_id
-            for job in backends.get_backend().list_jobs(user)
+            for _backend, job in backends.live_jobs(user)
             if (accepted_queues is None or job.queue in accepted_queues)
             and (status is None or job.state == status)
         ]
@@ -718,7 +724,7 @@ def _find_jobs_by_name(
             return []
 
     try:
-        live = backends.get_backend().list_jobs(full_names=True)
+        live = [job for _backend, job in backends.live_jobs(full_names=True)]
     except SchedulerQueryError as e:
         if not quiet:
             click.echo(f"❌ Failed to query jobs: {e}", err=True)

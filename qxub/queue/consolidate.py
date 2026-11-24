@@ -350,17 +350,19 @@ def usage_from_qstat(data: Dict[str, Any]) -> Dict[str, Any]:
 def query_qstat(job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     """What the scheduler remembers about many jobs. Never raises.
 
-    Asks the platform's scheduler backend in batches (PBS: ``qstat -fx``,
-    100 jobs per call). Returns parsed data by job ID, for the jobs the
-    scheduler still remembers.
+    Asks each job's backend in batches (PBS: ``qstat -fx``, 100 jobs per
+    call). ``job_ids`` may be a dict of job ID to the backend its run file
+    recorded; otherwise the backend is inferred from the ID. Returns parsed
+    data by job ID, for the jobs the scheduler still remembers.
     """
     from .. import backends  # pylint: disable=import-outside-toplevel
 
     # Each job asks its own backend (PBS: qstat -fx; local: its records)
     by_backend: Dict[Any, List[str]] = {}
     owners: Dict[str, Any] = {}
+    recorded = job_ids if isinstance(job_ids, dict) else {}
     for job_id in job_ids:
-        backend = backends.backend_for_job(job_id)
+        backend = backends.backend_for_job(job_id, recorded.get(job_id))
         key = type(backend)
         owners.setdefault(key, backend)
         by_backend.setdefault(key, []).append(job_id)
@@ -615,12 +617,12 @@ def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> 
 
     # Usage from joblogs first; one batched qstat for the rest.
     joblogs = {}
-    need_qstat = []
+    need_qstat: Dict[str, Optional[str]] = {}  # job ID -> recorded backend
     for run_id, _path, record in pending:
         job_id = record.get("native_job_id") or None
         joblogs[run_id] = _joblog_data(record, job_id)
         if job_id and not joblogs[run_id]:
-            need_qstat.append(job_id)
+            need_qstat[job_id] = record.get("backend") or None
     pbs = qstat(need_qstat) if need_qstat else {}
 
     changed = False

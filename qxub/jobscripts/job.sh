@@ -171,7 +171,7 @@ qxub_notify() {
         qxub exec --internet --terse --default -- qxub notify send \
             --job-id "${QXUB_JOB_ID:-unknown}" \
             --exit-code "$1" \
-            --job-name "${PBS_JOBNAME:-unknown}" \
+            --job-name "${QXUB_JOB_NAME:-${PBS_JOBNAME:-unknown}}" \
             --output-dir "${qxub_notify_outdir:-$PWD}" \
             2>/dev/null || echo "⚠️  Failed to queue notification (non-fatal)"
     fi
