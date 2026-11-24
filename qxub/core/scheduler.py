@@ -143,6 +143,26 @@ def get_default_status_dir():
     return default_status_dir()
 
 
+def status_file_key(job_id, status_dir):
+    """The name a job's status files use.
+
+    Jobs name them after the qxub run ID (``QXUB_RUN_ID``) and leave a
+    ``native_<job ID>`` file holding it, so a scheduler job ID can be looked
+    up without the database. Jobs from older qxub used the job ID itself.
+    """
+    from pathlib import Path
+
+    from ..queue.db import is_virtual_id
+
+    if is_virtual_id(job_id):
+        return job_id
+    try:
+        run_id = (Path(status_dir) / f"native_{job_id}").read_text().strip()
+    except OSError:
+        return job_id
+    return run_id or job_id
+
+
 def job_status_from_files(job_id, status_dir=None, log_dir=None):
     """
     Check the current status of a job using status files instead of qstat.
@@ -151,13 +171,15 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     PBS scheduler is under heavy load.
 
     Status detection priority:
-    1. final_exit_code_{job_id} file - definitive completion status
+    1. final_exit_code_{key} file - definitive completion status
     2. PBS job log file with Exit Status - job was killed by PBS
-    3. job_started_{job_id} file - job is running
+    3. job_started_{key} file - job is running
     4. No files - job is queued or unknown
 
+    ``key`` is the run ID (see :func:`status_file_key`).
+
     Args:
-        job_id: PBS job ID (e.g., "12345.gadi-pbs")
+        job_id: PBS job ID (e.g., "12345.gadi-pbs") or qxub run ID
         status_dir: Path to status directory. If None, uses default.
         log_dir: Path to log directory (for PBS job logs). If None, uses parent of status_dir.
 
@@ -181,8 +203,9 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
         log_dir = Path(log_dir)
 
     # Check for status files
-    job_started_file = status_dir / f"job_started_{job_id}"
-    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+    key = status_file_key(job_id, status_dir)
+    job_started_file = status_dir / f"job_started_{key}"
+    final_exit_code_file = status_dir / f"final_exit_code_{key}"
 
     # Check if job has completed via our exit code file
     if final_exit_code_file.exists():
@@ -314,7 +337,7 @@ def get_job_resource_data(job_id):
     return backend.find_details(backend.job_details([job_id]), job_id)
 
 
-def _format_completion_message(job_id, exit_status, status_dir):
+def _format_completion_message(job_id, exit_status, status_dir, key=None):
     """
     Format a completion message with appropriate emoji and hook status information.
 
@@ -322,6 +345,8 @@ def _format_completion_message(job_id, exit_status, status_dir):
         job_id: The PBS job ID
         exit_status: The final exit status of the job
         status_dir: Path to the status directory containing hook exit codes
+        key: The name the job's status files use (its run ID); defaults
+            to :func:`status_file_key`
 
     Returns:
         str: Formatted completion message
@@ -339,47 +364,23 @@ def _format_completion_message(job_id, exit_status, status_dir):
     # Base message
     message = f"{emoji} {status_text}"
 
-    # Check for hook status information
+    # Exit codes of --pre, the main command and --post, if they ran
+    key = key or status_file_key(job_id, status_dir)
     hook_info = []
-
-    # Check pre-command status
-    pre_exit_file = pathlib.Path(status_dir) / "pre_exit_code"
-    if pre_exit_file.exists():
+    for step in ("pre", "main", "post"):
+        exit_file = pathlib.Path(status_dir) / f"{step}_exit_code_{key}"
+        if not exit_file.exists():
+            continue
         try:
-            with open(pre_exit_file, "r", encoding="utf-8") as f:
-                pre_exit_code = int(f.readline().strip())
-                if pre_exit_code == 0:
-                    hook_info.append("pre ✅")
-                else:
-                    hook_info.append(f"pre ❌({pre_exit_code})")
+            with open(exit_file, "r", encoding="utf-8") as f:
+                step_exit_code = int(f.readline().strip())
         except (OSError, ValueError):
-            hook_info.append("pre ❓")
-
-    # Check main command status (always present)
-    main_exit_file = pathlib.Path(status_dir) / "main_exit_code"
-    if main_exit_file.exists():
-        try:
-            with open(main_exit_file, "r", encoding="utf-8") as f:
-                main_exit_code = int(f.readline().strip())
-                if main_exit_code == 0:
-                    hook_info.append("main ✅")
-                else:
-                    hook_info.append(f"main ❌({main_exit_code})")
-        except (OSError, ValueError):
-            hook_info.append("main ❓")
-
-    # Check post-command status
-    post_exit_file = pathlib.Path(status_dir) / "post_exit_code"
-    if post_exit_file.exists():
-        try:
-            with open(post_exit_file, "r", encoding="utf-8") as f:
-                post_exit_code = int(f.readline().strip())
-                if post_exit_code == 0:
-                    hook_info.append("post ✅")
-                else:
-                    hook_info.append(f"post ❌({post_exit_code})")
-        except (OSError, ValueError):
-            hook_info.append("post ❓")
+            hook_info.append(f"{step} ❓")
+            continue
+        if step_exit_code == 0:
+            hook_info.append(f"{step} ✅")
+        else:
+            hook_info.append(f"{step} ❌({step_exit_code})")
 
     # Add hook information if any hooks were specified
     if hook_info:
@@ -539,9 +540,15 @@ def monitor_job_single_thread(
     walltime_str=None,
     joblog_check_interval=60,
     walltime_offset_sec=0,
+    run_id=None,
+    status_dir=None,
 ):
     """
     Single-thread job monitoring with proper spinner integration using status files.
+
+    The job writes its status files to ``status_dir`` (default: the
+    platform's status directory, passed to it as ``QXUB_STATUS_DIR``),
+    named after ``run_id`` (``QXUB_RUN_ID``).
 
     Flow:
     1. "Job constructed" progress message (handled by caller)
@@ -557,12 +564,12 @@ def monitor_job_single_thread(
     """
     from pathlib import Path
 
-    # Determine status directory based on output file location
-    status_dir = Path(out_file).parent / "status"
+    status_dir = Path(status_dir) if status_dir else get_default_status_dir()
+    key = run_id or job_id
 
-    # Status files to monitor (using job ID directly for uniqueness)
-    job_started_file = status_dir / f"job_started_{job_id}"
-    final_exit_code_file = status_dir / f"final_exit_code_{job_id}"
+    # Status files to monitor
+    job_started_file = status_dir / f"job_started_{key}"
+    final_exit_code_file = status_dir / f"final_exit_code_{key}"
 
     # Track job state
     job_started_notified = False
@@ -591,7 +598,7 @@ def monitor_job_single_thread(
                 # Completion message
                 if not quiet:
                     completion_msg = _format_completion_message(
-                        job_id, exit_status, status_dir
+                        job_id, exit_status, status_dir, key
                     )
                     print_status(completion_msg, final=True)
 
@@ -642,7 +649,9 @@ def monitor_job_single_thread(
 
     # 8. Completion message
     if not quiet:
-        completion_msg = _format_completion_message(job_id, exit_status, status_dir)
+        completion_msg = _format_completion_message(
+            job_id, exit_status, status_dir, key
+        )
         print_status(completion_msg, final=True)
 
     # 9. Start background resource collection and return control immediately

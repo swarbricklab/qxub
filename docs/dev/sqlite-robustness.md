@@ -90,7 +90,7 @@ Under `localflock` this only helps between processes on the same node, such as t
 - **Writing from the job:**
   - The job script merges its fields into the existing record with plain shell.
   - The submission side writes the record in a form the shell can extend without a JSON parser, e.g. one `key=value` per line. Alternatively, the job could write a small sibling file that is folded into the record later.
-  - The spool directory is passed to the job explicitly (step 3b), rather than derived from `${out%/*}/status`.
+  - The spool directory is passed to the job explicitly (step 3b), rather than derived from `${out%/*}/status`. *(Done: `QXUB_STATUS_DIR`.)*
 - **No more DB writes from jobs:** the job scripts stop calling `update_job_status`/`mark_running`/`mark_complete`, so there is no `qxub_python` and no SQLite on the compute node.
 - **Readers:**
   - `qxtat check` reads the run's file. It falls back to the existing status files and the DB, so in-flight jobs from before the upgrade still work.

@@ -124,5 +124,16 @@ def exit_code(record: Dict[str, str]) -> Optional[int]:
 
 
 def job_env(run_id: str, path: Optional[Path]) -> Dict[str, str]:
-    """Job variables that tell the job where its run file is."""
-    return {"QXUB_RUN_ID": run_id, "QXUB_RUN_FILE": str(path or run_file(run_id))}
+    """Job variables that tell the job its run ID and where to record status.
+
+    The job writes its status files to ``QXUB_STATUS_DIR``, the same
+    directory ``qxub monitor`` and ``qxub status`` read, named after
+    ``QXUB_RUN_ID``.
+    """
+    from ..config.site import default_status_dir
+
+    return {
+        "QXUB_RUN_ID": run_id,
+        "QXUB_RUN_FILE": str(path or run_file(run_id)),
+        "QXUB_STATUS_DIR": str(default_status_dir()),
+    }

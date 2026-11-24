@@ -15,6 +15,7 @@ qsub
     user_vars_b64=Rk9PPWJhcjtBPTE7Qj0y
     QXUB_RUN_ID=<RUN_ID>
     QXUB_RUN_FILE=<HOME>/.local/state/qxub/status/runs/<RUN_ID>.run
+    QXUB_STATUS_DIR=<HOME>/.local/state/qxub/status
 -N
 env-<TIMESTAMP>
 -q

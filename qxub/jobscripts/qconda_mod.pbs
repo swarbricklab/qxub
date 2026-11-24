@@ -67,8 +67,8 @@ error_handler() {
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
     # Write error exit code to status
-    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$exit_code" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 
 
     # Queue Slack/Discord notification if enabled
@@ -89,12 +89,19 @@ error_handler() {
 trap 'error_handler' ERR
 
 # Create status directory for file-based monitoring
-STATUS_DIR="${out%/*}/status"
+# qxub passes the status directory; jobs from older qxub derive it from $out.
+STATUS_DIR="${QXUB_STATUS_DIR:-${out%/*}/status}"
 mkdir -p "$STATUS_DIR"
+# Status files are named after the qxub run ID, not the scheduler's job ID.
+# native_<job ID> lets readers that only know the job ID find the run ID.
+STATUS_KEY="${QXUB_RUN_ID:-${PBS_JOBID:-unknown}}"
+if [ -n "${QXUB_RUN_ID:-}" ] && [ -n "${PBS_JOBID:-}" ]; then
+    echo "$QXUB_RUN_ID" > "$STATUS_DIR/native_${PBS_JOBID}" 2>/dev/null || true
+fi
 
 # Signal job started with timestamp and job ID
-echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
-echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${PBS_JOBID:-unknown}"
+echo "$(date -Iseconds)" > "$STATUS_DIR/job_started_${STATUS_KEY}"
+echo "${PBS_JOBID:-unknown}" >> "$STATUS_DIR/job_started_${STATUS_KEY}"
 echo "🚀 Job started at $(date -Iseconds)"
 
 # Record that the job is running
@@ -119,8 +126,8 @@ qxub_setup_fail() {
     if [ "$quiet" != "true" ] && [ -n "${err:-}" ]; then
         { mkdir -p "${err%/*}" && printf '%s\n' "$@" >> "$err"; } 2>/dev/null || true
     fi
-    { echo "1" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-      date -Iseconds >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"; } 2>/dev/null || true
+    { echo "1" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+      date -Iseconds >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"; } 2>/dev/null || true
     exit 1
 }
 
@@ -222,18 +229,18 @@ fi
 # Run pre-command if specified
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Running pre-command: $pre_cmd"
-    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started_${STATUS_KEY}"
 
     bash -c "$pre_cmd"
     PRE_EXIT_CODE=$?
 
-    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
+    echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code_${STATUS_KEY}"
 
     if [ $PRE_EXIT_CODE -ne 0 ]; then
         echo "❌ Pre-command failed with exit code $PRE_EXIT_CODE"
-        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$PRE_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
         exit $PRE_EXIT_CODE
     fi
     echo "✅ Pre-command completed"
@@ -241,7 +248,7 @@ fi
 
 # Run main command
 echo "🚀 Running main command: $cmd"
-echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${PBS_JOBID:-unknown}"
+echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${STATUS_KEY}"
 
 if [ "$quiet" = "true" ]; then
     # In quiet mode, let output go to default joblog (no redirection)
@@ -255,13 +262,13 @@ else
     MAIN_EXIT_CODE=$?
 fi
 
-echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code"
-echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code"
+echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/main_exit_code_${STATUS_KEY}"
+echo "$(date -Iseconds)" >> "$STATUS_DIR/main_exit_code_${STATUS_KEY}"
 
 if [ $MAIN_EXIT_CODE -ne 0 ]; then
     echo "❌ Main command failed with exit code $MAIN_EXIT_CODE"
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
     exit $MAIN_EXIT_CODE
 fi
 echo "✅ Main command completed"
@@ -269,27 +276,27 @@ echo "✅ Main command completed"
 # Run post-command if specified and main command succeeded
 if [ -n "$post_cmd" ]; then
     echo "🏁 Running post-command: $post_cmd"
-    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
+    echo "$(date -Iseconds)" > "$STATUS_DIR/post_started_${STATUS_KEY}"
 
     bash -c "$post_cmd"
     POST_EXIT_CODE=$?
 
-    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code_${STATUS_KEY}"
 
     if [ $POST_EXIT_CODE -ne 0 ]; then
         echo "❌ Post-command failed with exit code $POST_EXIT_CODE"
-        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+        echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+        echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
         exit $POST_EXIT_CODE
     fi
     echo "✅ Post-command completed"
-    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$POST_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 else
     # No post-command, main command exit code is final
-    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
-    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${PBS_JOBID:-unknown}"
+    echo "$MAIN_EXIT_CODE" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
+    echo "$(date -Iseconds)" >> "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
 fi
 
 
