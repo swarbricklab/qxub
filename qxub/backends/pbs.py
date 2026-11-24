@@ -1,7 +1,7 @@
 """PBS Pro (and Torque) backend: ``qsub``, ``qstat`` and ``qdel``.
 
-All of qxub's ``qsub``/``qstat``/``qdel`` calls live here, apart from
-interactive sessions. The parsers are plain functions so they can be tested
+All of qxub's ``qsub``/``qstat``/``qdel`` calls live here, including
+interactive sessions (``qsub -I``). The parsers are plain functions so they can be tested
 on captured output.
 """
 
@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import subprocess
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
@@ -127,6 +128,19 @@ def pbs_resource_list(resources: ResourceSpec) -> List[str]:
     return out
 
 
+def qsub_interactive_argv(spec: JobSpec) -> List[str]:
+    """The ``qsub -I`` command that runs ``spec.script`` interactively.
+
+    Sessions get no job variables, job log, mail or site directives: the
+    session script carries what it needs.
+    """
+    argv = qsub_argv(
+        replace(spec, env={}, env_file=None, job_log=None, mail_to=None, native_args=[])
+    )
+    script = argv.pop()
+    return [argv[0], "-I", *argv[1:], "--", script]
+
+
 def qsub_argv(spec: JobSpec) -> List[str]:
     """The ``qsub`` command line for ``spec``."""
     argv = ["qsub"]
@@ -155,6 +169,7 @@ class PbsBackend(SchedulerBackend):
     """PBS Pro. Torque's ``qstat``/``qdel`` output has the same shape."""
 
     name = "pbs"
+    job_id_variable = "PBS_JOBID"
 
     def list_jobs(
         self, user: Optional[str] = None, full_names: bool = False
@@ -216,6 +231,9 @@ class PbsBackend(SchedulerBackend):
 
     def submit_command(self, spec: JobSpec) -> List[str]:
         return qsub_argv(spec)
+
+    def interactive_command(self, spec: JobSpec) -> List[str]:
+        return qsub_interactive_argv(spec)
 
     def submit(self, spec: JobSpec) -> str:
         argv = qsub_argv(spec)

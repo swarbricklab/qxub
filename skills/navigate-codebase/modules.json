@@ -242,7 +242,7 @@
     {
       "path": "qxub/backends/pbs.py",
       "description": "PbsBackend – every qsub/qstat/qdel call, the qstat output parsers, and -l parsing/rendering of ResourceSpec",
-      "exports": ["PbsBackend", "qsub_argv", "parse_pbs_resources", "pbs_resource_list", "parse_qstat_fx_output", "parse_qstat_user_listing", "parse_qstat_full_listing"]
+      "exports": ["PbsBackend", "qsub_argv", "qsub_interactive_argv", "parse_pbs_resources", "pbs_resource_list", "parse_qstat_fx_output", "parse_qstat_user_listing", "parse_qstat_full_listing"]
     },
     {
       "path": "qxub/backends/__init__.py",

@@ -4,8 +4,8 @@ Each scheduler (PBS Pro, and later Slurm, a local runner and others) gets
 one :class:`SchedulerBackend`. The platform definition's ``type`` picks
 which one (see :func:`qxub.backends.get_backend`).
 
-A job to submit is described by a :class:`JobSpec`; the backend turns it
-into its own command line, including the :class:`ResourceSpec` (PBS writes
+A job to submit, or an interactive session to start, is described by a
+:class:`JobSpec`; the backend turns it into its own command line, including the :class:`ResourceSpec` (PBS writes
 ``-l ncpus=…``).
 """
 
@@ -79,6 +79,8 @@ class SchedulerBackend(ABC):
 
     #: Short name, e.g. ``"pbs"``.
     name: str = ""
+    #: The environment variable that holds a running job's own ID.
+    job_id_variable: str = ""
 
     @abstractmethod
     def list_jobs(
@@ -133,6 +135,14 @@ class SchedulerBackend(ABC):
         """Submit ``spec`` and return the scheduler's job ID.
 
         Raises :class:`SubmitError` if the job isn't accepted.
+        """
+
+    @abstractmethod
+    def interactive_command(self, spec: JobSpec) -> List[str]:
+        """The command that runs ``spec.script`` as an interactive session
+        on this terminal (PBS: ``qsub -I … -- script``).
+
+        The caller runs it in the foreground, or inside tmux.
         """
 
     def same_job(self, job_id: str) -> str:
