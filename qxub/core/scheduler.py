@@ -173,8 +173,9 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     Status detection priority:
     1. final_exit_code_{key} file - definitive completion status
     2. PBS job log file with Exit Status - job was killed by PBS
-    3. job_started_{key} file - job is running
-    4. No files - job is queued or unknown
+    3. the run file (runs/{key}.run) saying state=finished - e.g. a signal
+    4. job_started_{key} file - job is running
+    5. No files - job is queued or unknown
 
     ``key`` is the run ID (see :func:`status_file_key`).
 
@@ -230,6 +231,17 @@ def job_status_from_files(job_id, status_dir=None, log_dir=None):
     if exit_code is not None:
         logger.debug(f"Found PBS exit status {exit_code} for job {job_id} in log file")
         return ("C" if exit_code == 0 else "F"), exit_code
+
+    # The run file records every exit, a signal included (state=finished,
+    # exit_code), so a job stopped by the scheduler or `qxub cancel` isn't
+    # reported running when its job log is elsewhere.
+    from ..queue import runs as run_files
+
+    record = run_files.read_run(status_dir / "runs" / f"{key}{run_files.SUFFIX}")
+    if record and record.get("state") == "finished":
+        code = run_files.exit_code(record)
+        if code is not None:
+            return ("C" if code == 0 else "F"), code
 
     # Check if job has started (and PBS log not yet written — still running)
     if job_started_file.exists():

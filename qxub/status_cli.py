@@ -173,8 +173,9 @@ def summary():
 def show(job_id):
     """Show detailed status for a specific job."""
 
-    # Add .gadi-pbs suffix if not present
-    if not job_id.endswith(".gadi-pbs"):
+    # A bare PBS number gets Gadi's server suffix (12345 -> 12345.gadi-pbs);
+    # other IDs (local-..., another server's) are used as given.
+    if job_id.isdigit():
         job_id = f"{job_id}.gadi-pbs"
 
     resource_tracker.sync_from_run_files([job_id])
@@ -329,8 +330,9 @@ def check(job_id, output_format, snakemake, log_dir, audit):
     # -----------------------------------------------------------------------
     # Standard PBS job ID lookup — files-first to minimise DB pressure
     # -----------------------------------------------------------------------
-    # Add .gadi-pbs suffix if not present
-    if not job_id.endswith(".gadi-pbs"):
+    # A bare PBS number gets Gadi's server suffix (12345 -> 12345.gadi-pbs);
+    # other IDs (local-..., another server's) are used as given.
+    if job_id.isdigit():
         job_id = f"{job_id}.gadi-pbs"
 
     # -------------------------------------------------------------------

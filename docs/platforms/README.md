@@ -15,6 +15,19 @@ Complete queue definitions for the National Computational Infrastructure Gadi su
 
 Based on official NCI documentation: https://opus.nci.org.au/spaces/Help/pages/90308823/Queue+Limits
 
+### This machine, no scheduler (`local/local.yaml`)
+`type: local` runs each job as a background process on the current machine
+(`qxub.backends.local.LocalBackend`): `qx` streams and reports it as usual,
+and `qxub status`, `monitor`, `cancel` and `interactive` work too. Resource
+requests are not enforced and every job starts at once. Select it with:
+
+```bash
+export QXUB_PLATFORM_FILE=/path/to/qxub/docs/platforms/local/local.yaml
+```
+
+It lives in its own directory so that a search path pointing at
+`docs/platforms` loads only real clusters.
+
 ## Installation
 
 ### System-Level (Recommended)

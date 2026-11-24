@@ -202,7 +202,9 @@ def attach_settings(spec, run_id: str, write: bool = True):
     return replace(spec, env_file=str(path))
 
 
-def job_env(run_id: str, path: Optional[Path]) -> Dict[str, str]:
+def job_env(
+    run_id: str, path: Optional[Path], job_id_variable: str = ""
+) -> Dict[str, str]:
     """Job variables that tell the job its run ID and where to record status.
 
     The job writes its status files to ``QXUB_STATUS_DIR``, the same
@@ -211,8 +213,12 @@ def job_env(run_id: str, path: Optional[Path]) -> Dict[str, str]:
     """
     from ..config.site import default_status_dir
 
-    return {
+    env = {
         "QXUB_RUN_ID": run_id,
         "QXUB_RUN_FILE": str(path or run_file(run_id)),
         "QXUB_STATUS_DIR": str(default_status_dir()),
     }
+    if job_id_variable:
+        # Which variable holds the scheduler's ID for the job (PBS_JOBID)
+        env["QXUB_JOB_ID_VAR"] = job_id_variable
+    return env

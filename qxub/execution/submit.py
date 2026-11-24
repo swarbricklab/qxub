@@ -364,9 +364,8 @@ def submit_job(
             "err": processed_params.get("err"),
         },
     )
-    job_vars.update(runs.job_env(run_id, run_path))
-
     backend = backends.get_backend()
+    job_vars.update(runs.job_env(run_id, run_path, backend.job_id_variable))
     spec = runs.attach_settings(job_spec(processed_params, template, job_vars), run_id)
     submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Programmatic submission command: %s", submission_command)

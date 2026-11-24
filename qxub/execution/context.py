@@ -269,9 +269,8 @@ def execute_unified(
             run_id,
             _run_record_fields(ctx_obj, command, execution_context),
         )
-    job_vars.update(runs.job_env(run_id, run_path))
-
     backend = backends.get_backend()
+    job_vars.update(runs.job_env(run_id, run_path, backend.job_id_variable))
     spec = runs.attach_settings(
         job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]
     )

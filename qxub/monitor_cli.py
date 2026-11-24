@@ -486,9 +486,14 @@ def monitor_cli(ctx, job_ids, quiet, interval, suffix, name_only, job_id_only, s
             seen.add(job_id)
 
     # Basic validation of job ID format
+    from .backends import get_backend
+
+    backend = get_backend()
     valid_job_ids = []
     for job_id in unique_job_ids:
-        if job_id and ("." in job_id or job_id.isdigit()):
+        if job_id and (
+            "." in job_id or job_id.isdigit() or backend.looks_like_job_id(job_id)
+        ):
             valid_job_ids.append(job_id)
         else:
             click.echo(f"Warning: Skipping invalid job ID format: {job_id}", err=True)
