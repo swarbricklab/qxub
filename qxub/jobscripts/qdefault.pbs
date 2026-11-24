@@ -101,6 +101,7 @@ qxub_on_exit() {
     if [ -z "${QXUB_SIGNAL:-}" ] && [ -n "${STATUS_DIR:-}" ] && [ -n "${STATUS_KEY:-}" ] \
         && [ ! -f "$STATUS_DIR/final_exit_code_${STATUS_KEY}" ]; then
         { echo "$code"; date -Iseconds; } > "$STATUS_DIR/final_exit_code_${STATUS_KEY}" 2>/dev/null || true
+        qxub_record_step "$code"
     fi
     qxub_run_update state=finished "exit_code=$code" "signal=${QXUB_SIGNAL:-}" "finished_at=$(date -Iseconds)"
 }
@@ -123,8 +124,17 @@ qxub_setup_fail() {
 }
 
 # Error handler function
+# Record the running step's exit code if the step didn't (it failed under
+# set -e, or called exit), so the summary can say which step failed.
+qxub_record_step() {
+    [ -n "${QXUB_STEP:-}" ] && [ -n "${STATUS_DIR:-}" ] || return 0
+    local f="$STATUS_DIR/${QXUB_STEP}_exit_code_${STATUS_KEY}"
+    [ -f "$f" ] || { echo "$1"; date -Iseconds; } > "$f" 2>/dev/null || true
+}
+
 error_handler() {
     local exit_code=$?
+    qxub_record_step "$exit_code"
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
     # Write error exit code to status
@@ -200,6 +210,7 @@ fi
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Executing pre-command..."
     echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started_${STATUS_KEY}"
+    QXUB_STEP=pre
 
     eval "$pre_cmd"
     PRE_EXIT_CODE=$?
@@ -219,6 +230,7 @@ fi
 # Execute main command
 echo "💻 Executing main command..."
 echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${STATUS_KEY}"
+QXUB_STEP=main
 
 # The command runs in a subshell, so `exit N` or `exec` in it ends the
 # command, not this script: its status is recorded and --post still runs,
@@ -248,6 +260,7 @@ echo "✅ Command completed successfully"
 if [ -n "$post_cmd" ]; then
     echo "🏁 Executing post-command..."
     echo "$(date -Iseconds)" > "$STATUS_DIR/post_started_${STATUS_KEY}"
+    QXUB_STEP=post
 
     eval "$post_cmd"
     POST_EXIT_CODE=$?

@@ -218,3 +218,43 @@ def test_exit_in_pre_or_post_is_recorded(job, tmp_path, step):
 
     assert result.returncode == 4
     assert _first_line(status / "final_exit_code_qx-1") == "4"
+
+
+# -- the summary names the failed step (review of #155) -----------------------
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+@pytest.mark.parametrize(
+    "command, post, code, summary",
+    [
+        ("sh -c 'exit 3'", None, 3, "(main ❌(3))"),
+        ("exit 3", None, 3, "(main ❌(3))"),
+        ("true", "sh -c 'exit 4'", 4, "(main ✅, post ❌(4))"),
+    ],
+)
+def test_summary_names_the_failed_step(
+    job, tmp_path, template, command, post, code, summary
+):
+    status = tmp_path / "status"
+    extra = {"post_cmd_b64": _b64(post)} if post else {}
+    result = job(
+        template, command, QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status), **extra
+    )
+
+    assert result.returncode == code
+    message = _format_completion_message(PBS_ID, code, status)
+    assert message.endswith(summary), message
+
+
+def test_exit_in_qdefault_post_is_named(job, tmp_path):
+    status = tmp_path / "status"
+    job(
+        "qdefault",
+        "true",
+        QXUB_RUN_ID="qx-1",
+        QXUB_STATUS_DIR=str(status),
+        post_cmd_b64=_b64("exit 4"),
+    )
+    assert _format_completion_message(PBS_ID, 4, status).endswith(
+        "(main ✅, post ❌(4))"
+    )

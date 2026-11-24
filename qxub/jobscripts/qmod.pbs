@@ -105,8 +105,17 @@ fi
 set -e
 
 # Error handler function
+# Record the running step's exit code if the step didn't (it failed under
+# set -e, or called exit), so the summary can say which step failed.
+qxub_record_step() {
+    [ -n "${QXUB_STEP:-}" ] && [ -n "${STATUS_DIR:-}" ] || return 0
+    local f="$STATUS_DIR/${QXUB_STEP}_exit_code_${STATUS_KEY}"
+    [ -f "$f" ] || { echo "$1"; date -Iseconds; } > "$f" 2>/dev/null || true
+}
+
 error_handler() {
     local exit_code=$?
+    qxub_record_step "$exit_code"
     echo "❌ ERROR: Command failed with exit code $exit_code"
     echo "❌ Failed command: $BASH_COMMAND"
     echo "$exit_code" > "$STATUS_DIR/final_exit_code_${STATUS_KEY}"
@@ -184,6 +193,7 @@ fi
 if [ -n "$pre_cmd" ]; then
     echo "⚡ Running pre-command: $pre_cmd"
     echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started_${STATUS_KEY}"
+    QXUB_STEP=pre
 
     bash -c "$pre_cmd"
     PRE_EXIT_CODE=$?
@@ -203,6 +213,7 @@ fi
 # Run main command
 echo "🚀 Running main command: $cmd"
 echo "$(date -Iseconds)" > "$STATUS_DIR/main_started_${STATUS_KEY}"
+QXUB_STEP=main
 
 if [ "$quiet" = "true" ]; then
     # In quiet mode, let output go to default joblog (no redirection)
@@ -231,6 +242,7 @@ echo "✅ Main command completed"
 if [ -n "$post_cmd" ]; then
     echo "🏁 Running post-command: $post_cmd"
     echo "$(date -Iseconds)" > "$STATUS_DIR/post_started_${STATUS_KEY}"
+    QXUB_STEP=post
 
     bash -c "$post_cmd"
     POST_EXIT_CODE=$?
