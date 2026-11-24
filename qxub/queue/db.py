@@ -167,6 +167,7 @@ def create_queue_schema(conn) -> None:
             resources        TEXT,
             status           TEXT DEFAULT 'initiated',
             pbs_job_id       TEXT,
+            backend          TEXT,  -- the scheduler backend: pbs, local, ...
             initiated_at     TEXT,
             dispatched_at    TEXT,
             started_at       TEXT,
@@ -255,6 +256,7 @@ def create_queue_schema(conn) -> None:
 
     # Schema migration for existing queue tables
     _migrate_queue_schema(conn)
+    backfill_backend(conn, "queue", "pbs_job_id")
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +288,23 @@ _QUEUE_NEW_COLUMNS = [
     ("jobfs_efficiency", "REAL"),
     ("queue_wait_sec", "INTEGER"),
     ("execution_sec", "INTEGER"),
+    ("backend", "TEXT"),
 ]
+
+
+def backfill_backend(conn, table: str, id_column: str) -> None:
+    """Name the backend of rows written before the ``backend`` column.
+
+    Until then every job was a PBS job, apart from the local backend's
+    ``local-`` IDs. Idempotent: only rows without a backend change.
+    """
+    conn.execute(
+        f"""
+        UPDATE {table}
+        SET backend = CASE WHEN {id_column} LIKE 'local-%' THEN 'local' ELSE 'pbs' END
+        WHERE backend IS NULL AND {id_column} IS NOT NULL
+        """
+    )
 
 
 def _rebuild_legacy_queue_schema(conn) -> None:
@@ -391,6 +409,7 @@ def create_queue_entry(
     cpus_requested: Optional[int] = None,
     db_path: Optional[Path] = None,
     entry_id: Optional[str] = None,
+    backend: Optional[str] = None,
 ) -> str:
     """Register a job in the unified queue table.
 
@@ -411,6 +430,7 @@ def create_queue_entry(
         db_path:          Override DB path (defaults to ``get_db_path()``).
         entry_id:         Use this ID (the run ID, ``QXUB_RUN_ID``) instead of
                           generating one.
+        backend:          The scheduler backend's name (``pbs``, ``local``).
 
     Returns:
         The virtual job ID string (``qx-{uuid4}``).
@@ -435,8 +455,8 @@ def create_queue_entry(
                     working_dir, exec_context, resources,
                     status, pbs_job_id, initiated_at, dispatched_at,
                     last_status_update, username, joblog_path,
-                    queue_name, cpus_requested
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    queue_name, cpus_requested, backend
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     entry_id,
@@ -457,6 +477,7 @@ def create_queue_entry(
                     joblog_path,
                     queue_name,
                     cpus_requested,
+                    backend,
                 ),
             )
 

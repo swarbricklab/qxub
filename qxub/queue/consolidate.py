@@ -356,7 +356,18 @@ def query_qstat(job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     """
     from .. import backends  # pylint: disable=import-outside-toplevel
 
-    return backends.get_backend().job_details(job_ids)
+    # Each job asks its own backend (PBS: qstat -fx; local: its records)
+    by_backend: Dict[Any, List[str]] = {}
+    owners: Dict[str, Any] = {}
+    for job_id in job_ids:
+        backend = backends.backend_for_job(job_id)
+        key = type(backend)
+        owners.setdefault(key, backend)
+        by_backend.setdefault(key, []).append(job_id)
+    found: Dict[str, Dict[str, Any]] = {}
+    for key, ids in by_backend.items():
+        found.update(owners[key].job_details(ids))
+    return found
 
 
 def _qstat_finished(data: Optional[Dict[str, Any]]) -> bool:
@@ -364,6 +375,7 @@ def _qstat_finished(data: Optional[Dict[str, Any]]) -> bool:
         return False
     from .. import backends  # pylint: disable=import-outside-toplevel
 
+    # PBS and local details both mark a finished job metadata.job_state "F"
     return backends.get_backend().is_finished(data)
 
 

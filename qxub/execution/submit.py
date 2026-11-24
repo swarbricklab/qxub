@@ -110,6 +110,7 @@ def dispatch(
             queue_name=spec.queue,
             cpus_requested=cpus,
             entry_id=run_id,
+            backend=backend.name,
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Failed to create queue entry: %s", exc)
@@ -146,6 +147,7 @@ def dispatch(
             queue=spec.queue,
             cpus_requested=cpus,
             job_name=spec.name,
+            backend=backend.name,
         )
     except Exception as exc:  # pylint: disable=broad-except
         logger.debug("Failed to log job submission: %s", exc)
@@ -344,9 +346,11 @@ def submit_job(
     # Run file: the job updates it instead of writing the job database
     # (docs/dev/sqlite-robustness.md, Phase 2).
     run_id = new_virtual_id()
+    backend = backends.get_backend()
     run_path = runs.write_submitted(
         run_id,
         {
+            "backend": backend.name,
             "state": "submitted",
             "submitted_at": datetime.now().isoformat(timespec="seconds"),
             "user": os.environ.get("USER", ""),
@@ -364,7 +368,6 @@ def submit_job(
             "err": processed_params.get("err"),
         },
     )
-    backend = backends.get_backend()
     job_vars.update(runs.job_env(run_id, run_path, backend.job_id_variable))
     spec = runs.attach_settings(job_spec(processed_params, template, job_vars), run_id)
     submission_command = shlex.join(backend.submit_command(spec))

@@ -64,6 +64,31 @@ def get_backend(platform=None) -> SchedulerBackend:
     return backend_for_type(getattr(platform, "type", None))
 
 
+def backend_for_job(
+    job_id: str, backend_name: Optional[str] = None
+) -> SchedulerBackend:
+    """The backend that owns ``job_id``.
+
+    ``backend_name`` is the backend recorded when the job was submitted (the
+    job database's and run file's ``backend``); use it when known. Otherwise
+    the current platform's backend if it recognises the ID, else the first
+    backend that does (``local-...`` is the local backend's), else the
+    current one. IDs that look alike across schedulers (PBS and Slurm are
+    both numbers) need the recorded name.
+    """
+    if backend_name:
+        return backend_for_type(backend_name)
+    current = get_backend()
+    if current.looks_like_job_id(job_id):
+        return current
+    for cls in dict.fromkeys(BACKENDS.values()):
+        if not isinstance(current, cls):
+            candidate = cls()
+            if candidate.looks_like_job_id(job_id):
+                return candidate
+    return current
+
+
 __all__ = [
     "BACKENDS",
     "JobSpec",
@@ -74,6 +99,7 @@ __all__ = [
     "SchedulerBackend",
     "SchedulerQueryError",
     "SubmitError",
+    "backend_for_job",
     "backend_for_type",
     "get_backend",
 ]

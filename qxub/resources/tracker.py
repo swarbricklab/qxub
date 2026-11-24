@@ -136,7 +136,10 @@ def create_job_resources_schema(conn) -> None:
             joblog_path TEXT,
 
             -- Scheduler job name (-N), so cancel can match it without PBS
-            job_name TEXT
+            job_name TEXT,
+
+            -- The scheduler backend: pbs, local, ...
+            backend TEXT
         )
         """
     )
@@ -167,9 +170,13 @@ def create_job_resources_schema(conn) -> None:
         ("username", "TEXT"),
         ("joblog_path", "TEXT"),
         ("job_name", "TEXT"),
+        ("backend", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE job_resources ADD COLUMN {column} {column_type}")
+    from ..queue.db import backfill_backend
+
+    backfill_backend(conn, "job_resources", "job_id")
     # An old writer stored one status JSON-quoted ('"running"').
     conn.execute(
         "UPDATE job_resources SET status=TRIM(status, '\"') WHERE status LIKE '\"%'"
@@ -545,6 +552,7 @@ class ResourceTracker:
         queue: Optional[str] = None,
         cpus_requested: Optional[int] = None,
         job_name: Optional[str] = None,
+        backend: Optional[str] = None,
     ) -> bool:
         """Log initial job submission.
 
@@ -570,8 +578,9 @@ class ResourceTracker:
                     """
                     INSERT OR REPLACE INTO job_resources
                     (job_id, timestamp, command, status, submitted_at, last_status_update,
-                     tags, username, joblog_path, queue, cpus_requested, job_name)
-                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?)
+                     tags, username, joblog_path, queue, cpus_requested, job_name,
+                     backend)
+                    VALUES (?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -585,6 +594,7 @@ class ResourceTracker:
                         queue,
                         cpus_requested,
                         job_name,
+                        backend,
                     ),
                 )
 
@@ -810,6 +820,26 @@ class ResourceTracker:
             logger.debug("sync_from_run_files: update failed: %s", exc)
             return 0
         return len(updates)
+
+    def recorded_backend(self, job_id: str) -> Optional[str]:
+        """The scheduler backend recorded for ``job_id`` (``pbs``,
+        ``local``), or None if unknown or the database can't be read."""
+        try:
+            with self._connect(timeout=_STATUS_READ_TIMEOUT) as conn:
+                row = conn.execute(
+                    """
+                    SELECT backend FROM queue
+                    WHERE pbs_job_id=? AND backend IS NOT NULL
+                    UNION ALL
+                    SELECT backend FROM job_resources
+                    WHERE job_id=? AND backend IS NOT NULL
+                    LIMIT 1
+                    """,
+                    (job_id, job_id),
+                ).fetchone()
+        except Exception:  # pylint: disable=broad-except
+            return None
+        return row[0] if row else None
 
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get current status of a specific job.
