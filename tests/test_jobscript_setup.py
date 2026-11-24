@@ -185,3 +185,53 @@ def test_quiet_mode_reports_on_stderr_only(job, tmp_path):
     assert result.returncode == 1
     assert "execution directory does not exist" in result.stderr
     assert result.err_file == ""
+
+
+# -- where each step's output goes (#150) --------------------------------------
+
+
+def _b64(text):
+    return base64.b64encode(text.encode()).decode()
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_pre_and_post_keep_the_main_commands_output(job, tmp_path, template):
+    """``$out``/``$err`` hold the main command's output; the rest goes to the joblog."""
+    result = job(
+        template,
+        command="echo MAIN-OUT; echo MAIN-ERR >&2",
+        pre_cmd_b64=_b64("echo PRE-OUT; echo PRE-ERR >&2"),
+        post_cmd_b64=_b64("echo POST-OUT; echo POST-ERR >&2"),
+    )
+
+    out = (tmp_path / "logs" / "job.out").read_text()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert out == "MAIN-OUT\n"
+    assert result.err_file == "MAIN-ERR\n"
+    joblog = result.stdout + result.stderr
+    for text in ("PRE-OUT", "PRE-ERR", "POST-OUT", "POST-ERR"):
+        assert text in joblog
+
+
+def test_user_vars_reach_the_main_command_with_post(job, tmp_path):
+    job(
+        "qdefault",
+        command='echo "FOO=$FOO"',
+        user_vars_b64=_b64("FOO=1"),
+        post_cmd_b64=_b64("echo POST"),
+    )
+
+    assert (tmp_path / "logs" / "job.out").read_text() == "FOO=1\n"
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_out_and_err_start_empty_on_a_rerun(job, tmp_path, template):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "job.out").write_text("old output\n")
+    (logs / "job.err").write_text("old error\n")
+
+    result = job(template, command="echo new")
+
+    assert (logs / "job.out").read_text() == "new\n"
+    assert result.err_file == ""

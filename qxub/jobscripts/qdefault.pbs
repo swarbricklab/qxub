@@ -155,11 +155,10 @@ if [ -n "$user_vars" ]; then
     done
 fi
 
-# Set output redirection for quiet mode
-if [ "$quiet" = "true" ]; then
-    # In quiet mode, don't redirect stdout/stderr to files
-    exec_prefix=""
-else
+# Outside quiet mode the main command writes $out and $err. Pre- and
+# post-commands, and this script's own messages, go to the joblog, as in the
+# other templates (#150).
+if [ "$quiet" != "true" ]; then
     # Create output directories
     out_dir=$(dirname "$out")
     err_dir=$(dirname "$err")
@@ -169,8 +168,6 @@ else
     # Test write permissions
     touch "$out" "$err" || qxub_setup_fail \
         "❌ ERROR: cannot write the output files: $out and $err"
-
-    exec_prefix="exec 1>\"$out\" 2>\"$err\""
 fi
 
 # Execute pre-command if provided
@@ -178,13 +175,8 @@ if [ -n "$pre_cmd" ]; then
     echo "⚡ Executing pre-command..."
     echo "$(date -Iseconds)" > "$STATUS_DIR/pre_started"
 
-    if [ "$quiet" = "true" ]; then
-        eval "$pre_cmd"
-        PRE_EXIT_CODE=$?
-    else
-        eval "$exec_prefix; $pre_cmd"
-        PRE_EXIT_CODE=$?
-    fi
+    eval "$pre_cmd"
+    PRE_EXIT_CODE=$?
 
     echo "$PRE_EXIT_CODE" > "$STATUS_DIR/pre_exit_code"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/pre_exit_code"
@@ -206,7 +198,9 @@ if [ "$quiet" = "true" ]; then
     eval "$cmd"
     MAIN_EXIT_CODE=$?
 else
-    eval "$exec_prefix; $cmd"
+    # Redirect only this command: an `exec` redirection would send the rest
+    # of the script to $out and truncate it again at the next step.
+    eval "$cmd" > "$out" 2> "$err"
     MAIN_EXIT_CODE=$?
 fi
 
@@ -226,13 +220,8 @@ if [ -n "$post_cmd" ]; then
     echo "🏁 Executing post-command..."
     echo "$(date -Iseconds)" > "$STATUS_DIR/post_started"
 
-    if [ "$quiet" = "true" ]; then
-        eval "$post_cmd"
-        POST_EXIT_CODE=$?
-    else
-        eval "$exec_prefix; $post_cmd"
-        POST_EXIT_CODE=$?
-    fi
+    eval "$post_cmd"
+    POST_EXIT_CODE=$?
 
     echo "$POST_EXIT_CODE" > "$STATUS_DIR/post_exit_code"
     echo "$(date -Iseconds)" >> "$STATUS_DIR/post_exit_code"
