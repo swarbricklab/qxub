@@ -142,6 +142,18 @@ def format_settings(env: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def reads_settings_file(script) -> bool:
+    """Whether the job script loads ``$QXUB_JOB_FILE``.
+
+    qxub's own job scripts do. A custom ``--template`` written for older
+    qxub expects its variables from the scheduler (``qsub -v``) instead.
+    """
+    try:
+        return "QXUB_JOB_FILE" in Path(script).read_text(errors="replace")
+    except OSError:
+        return False
+
+
 def attach_settings(spec, run_id: str, write: bool = True):
     """``spec`` with its variables in a settings file instead of on the
     scheduler's command line.
@@ -153,11 +165,13 @@ def attach_settings(spec, run_id: str, write: bool = True):
 
     With ``write=False`` (a dry run) the file is named but not written. If
     it can't be written, ``spec`` is returned unchanged and the variables
-    go on the command line as before.
+    go on the command line as before. So are they for a job script that
+    doesn't read ``QXUB_JOB_FILE``, such as a ``--template`` written for
+    older qxub.
     """
     from dataclasses import replace  # pylint: disable=import-outside-toplevel
 
-    if not spec.env:
+    if not spec.env or not reads_settings_file(spec.script):
         return spec
     path = settings_file(run_id)
     if write:
