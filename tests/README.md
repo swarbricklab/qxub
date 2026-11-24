@@ -24,6 +24,18 @@ This runs in CI (`.github/workflows/tests.yml`) on every push and pull request.
   intentional change, run `python -m pytest --update-golden` and review the
   diff in `tests/golden/` before committing.
 
+### Isolation
+
+`conftest.py` (`pytest_configure`) runs the whole session away from the
+machine's own qxub setup, so a run on a Gadi login node behaves as in CI:
+
+- `HOME` and the `XDG_*` directories are a temporary directory, so no user
+  or site config, platform files, history or job database are read or written.
+- `QXUB_*` (except `QXUB_TEST_*` switches such as `QXUB_TEST_REMOTE=1`),
+  `PBS_*` and `PROJECT` are removed, and `HOSTNAME` never matches a platform.
+- `qxub` on `PATH` is this checkout's CLI, run by the interpreter under test,
+  so tests that run `qxub …` work without it installed.
+
 ## Test Scripts
 
 ### Integration Tests
