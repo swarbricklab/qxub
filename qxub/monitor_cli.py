@@ -366,16 +366,49 @@ class MultiJobMonitor:
             time.sleep(1)
 
 
+DEFAULT_INTERVAL = 5
+
+
+def _monitor_defaults(suffix, interval):
+    """Fill in ``--suffix``/``--interval`` from config when not given.
+
+    Reads ``monitor.default_suffix`` and ``monitor.default_interval``. An
+    option given on the command line always wins.
+    """
+    if suffix is None:
+        suffix = config_manager.get_config_value("monitor.default_suffix") or None
+    if interval is None:
+        configured = config_manager.get_config_value("monitor.default_interval")
+        try:
+            interval = int(configured) if configured is not None else None
+        except (TypeError, ValueError):
+            click.echo(
+                f"Warning: ignoring monitor.default_interval={configured!r} "
+                "(not a whole number of seconds)",
+                err=True,
+            )
+            interval = None
+        if not interval or interval < 1:
+            interval = DEFAULT_INTERVAL
+    return suffix, interval
+
+
 @click.command(name="monitor")
 @click.argument("job_ids", nargs=-1)
 @click.option(
     "--quiet", "-q", is_flag=True, help="Quiet mode: show minimal progress output"
 )
 @click.option(
-    "--interval", "-i", default=5, help="Refresh interval in seconds (default: 5)"
+    "--interval",
+    "-i",
+    type=int,
+    default=None,
+    help="Refresh interval in seconds (default: monitor.default_interval, or 5)",
 )
 @click.option(
-    "--suffix", help="Suffix to remove from job IDs in display (e.g., '.gadi-pbs')"
+    "--suffix",
+    help="Suffix to remove from job IDs in display, e.g. '.gadi-pbs' "
+    "(default: monitor.default_suffix)",
 )
 @click.option("--name-only", is_flag=True, help="Show only job names in display")
 @click.option("--job-id-only", is_flag=True, help="Show only job IDs in display")
@@ -417,23 +450,7 @@ def monitor_cli(ctx, job_ids, quiet, interval, suffix, name_only, job_id_only, s
         click.echo("Error: Cannot specify both --name-only and --job-id-only", err=True)
         return 1
 
-    # Get defaults from config if not provided
-    try:
-        config = config_manager.load_config()
-        monitor_config = config.get("monitor", {})
-
-        if suffix is None:
-            suffix = monitor_config.get("default_suffix", None)
-
-        # Get default interval if not specified or use config default
-        if interval == 5:  # Check if it's the default value
-            config_interval = monitor_config.get("default_interval", None)
-            if config_interval is not None:
-                interval = config_interval
-
-    except Exception:
-        # If config loading fails, use command line defaults
-        pass
+    suffix, interval = _monitor_defaults(suffix, interval)
 
     # Collect job IDs from arguments
     all_job_ids = list(job_ids)

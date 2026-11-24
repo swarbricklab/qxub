@@ -114,7 +114,7 @@ qxub monitor 12345.gadi-pbs 12346.gadi-pbs
 
 Monitor options with defaults:
 - `monitor.default_suffix` - Suffix to remove from job IDs in display
-- `monitor.default_interval` - Refresh interval in seconds (default: 30)
+- `monitor.default_interval` - Refresh interval in seconds (default: 5)
 
 ## Resource Statistics Snapshot
 
