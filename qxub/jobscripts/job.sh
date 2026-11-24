@@ -11,8 +11,8 @@
 # a failure part-way through doesn't stop the step, and its exit status is
 # the last command's. --pre and --post run in this shell, so what --pre sets
 # up (export, cd, source, module load) reaches the command. The command
-# runs in a subshell (inside the container, for an image), so `exit` or
-# `exec` in it ends only the command.
+# runs in a subshell (inside the container, for an image, with its bash or
+# else its sh), so `exit` or `exec` in it ends only the command.
 
 # qxub passes the job's settings in a file (QXUB_JOB_FILE) instead of as
 # qsub -v variables; jobs from older qxub got them with -v and no file.
@@ -333,10 +333,13 @@ qxub_user_step() {
     qxub_status "$1_started" ""
 }
 
-# The command, in a subshell: inside the container if there is one.
+# The command, in a subshell: inside the container if there is one, with
+# the image's bash, or its sh if it has no bash (minimal images).
 qxub_main() {
     if [ -n "$sif_file" ]; then
-        singularity exec "${sing_args[@]}" "$sif_file" bash -c "$cmd"
+        singularity exec "${sing_args[@]}" "$sif_file" /bin/sh -c \
+            'if command -v bash >/dev/null 2>&1; then exec bash -c "$1"; fi
+             exec sh -c "$1"' qxub "$cmd"
     else
         eval "$cmd"
     fi

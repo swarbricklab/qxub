@@ -50,6 +50,13 @@ case "$1" in
     *) [ -e "$1" ] || { echo "FATAL: could not open image $1" >&2; exit 255; } ;;
 esac
 shift
+if [ -n "${FAKE_IMAGE_WITHOUT_BASH:-}" ]; then
+    # An image with sh but no bash: only sh (and what it needs) on PATH
+    mkdir -p "$HOME/nobash"
+    for tool in sh cat; do ln -sf "$(command -v $tool)" "$HOME/nobash/$tool"; done
+    INSIDE_CONTAINER=yes PATH="$HOME/nobash" "$@"
+    exit
+fi
 INSIDE_CONTAINER=yes "$@"
 """
 
@@ -302,3 +309,15 @@ def test_bind_list_reaches_singularity_as_one_argument(job, tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert bound.read_text() == "/g/data/ab12,/scratch/a dir"
+
+
+def test_image_without_bash_runs_the_command_with_sh(job, tmp_path):
+    """#161 review: minimal images have /bin/sh but no bash."""
+    result = job(
+        "singularity",
+        'echo "in ${INSIDE_CONTAINER:-host}" && echo a,b | cat',
+        FAKE_IMAGE_WITHOUT_BASH="1",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "logs" / "job.out").read_text() == "in yes\na,b\n"

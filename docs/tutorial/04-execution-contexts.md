@@ -202,6 +202,8 @@ qxub -v --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from conta
 
 Notice how qxub passes the container path (`sif="/g/data/a56/containers/example.sif"`) to run commands inside the container.
 
+The whole command runs inside the container, pipes and `&&` included: qxub runs it with the image's `bash`, or with its `sh` if the image has no `bash` (some minimal images don't). Anything `--pre` exports reaches the command in the container; `--pre` and `--post` themselves run on the compute node, outside the container.
+
 ## Execution Context Rules and Errors
 
 ### Cannot Mix Contexts
