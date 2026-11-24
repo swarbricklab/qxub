@@ -8,7 +8,7 @@ Package Structure:
     parser.py     - Parse resource specifications (memory, walltime, etc.)
     utils.py      - Resource formatting and manipulation utilities
     tracker.py    - Resource usage tracking and efficiency analysis
-    mappers.py    - Convert between workflow engine and PBS resource formats
+    spec.py       - ResourceSpec, and the one size and duration parser
 
 Public API:
     # Resource Parsing
@@ -22,23 +22,21 @@ Public API:
     # Resource Tracking
     ResourceTracker                       # Track job resource usage
 
-    # Resource Mapping (Workflow Integration)
-    ResourceMapper                        # Convert workflow resources to PBS
+    # Resource requests
+    ResourceSpec                          # What a job asks for, scheduler-neutral
+    parse_size(spec) -> int               # "8GB" -> bytes
+    parse_duration(spec) -> int           # "2h30m" -> seconds
 
 Example Usage:
-    from qxub.resources import parse_memory_size, ResourceMapper
+    from qxub.resources import ResourceSpec, parse_memory_size
 
     # Parse memory specification
     memory_bytes = parse_memory_size("8GB")  # Returns 8589934592
 
-    # Convert workflow resources to PBS
-    mapper = ResourceMapper()
-    mapper.add_memory("8GB")
-    mapper.add_runtime("2h30m")
-    pbs_resources = mapper.get_pbs_resources()  # ["mem=8GB", "walltime=2:30:00"]
+    # Describe a job's resources; the scheduler backend writes its own syntax
+    spec = ResourceSpec.from_options(memory="8GB", walltime="2h30m", cpus=4)
 """
 
-from .mappers import ResourceMapper
 from .parser import (
     bytes_to_human,
     calculate_efficiency,
@@ -49,6 +47,7 @@ from .parser import (
     size_to_bytes,
     time_to_seconds,
 )
+from .spec import ResourceSpec, format_duration, format_size, parse_duration, parse_size
 from .tracker import ResourceTracker, resource_tracker
 
 # Import all public APIs for convenient access
@@ -81,7 +80,12 @@ __all__ = [
     "parse_joblog_resources",
     # Classes
     "ResourceTracker",
-    "ResourceMapper",
+    "ResourceSpec",
+    # Resource requests
+    "parse_size",
+    "parse_duration",
+    "format_size",
+    "format_duration",
     # Global instances
     "resource_tracker",
 ]

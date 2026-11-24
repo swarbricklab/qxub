@@ -5,6 +5,7 @@ import logging
 logger = logging.getLogger(__name__)
 import os
 import shlex
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -69,6 +70,20 @@ def _default_job_name(command):
     return f"{cmd_word}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
 
 
+def as_resource_spec(resources):
+    """``resources`` as a ResourceSpec.
+
+    Accepts a ResourceSpec, or PBS ``-l`` strings as found in config files
+    (``defaults.resources``) and older callers.
+    """
+    from ..backends.pbs import parse_pbs_resources
+    from ..resources.spec import ResourceSpec
+
+    if isinstance(resources, ResourceSpec):
+        return resources
+    return parse_pbs_resources(resources or [])
+
+
 def apply_config_defaults(params, config_manager):
     """Apply configuration defaults to CLI parameters."""
     defaults = config_manager.get_defaults()
@@ -92,8 +107,9 @@ def apply_config_defaults(params, config_manager):
         from .site import default_project
 
         params["project"] = defaults.get("project") or default_project()
-    if not params["resources"]:  # Empty tuple means no resources provided
-        params["resources"] = defaults.get("resources", [])
+    params["resources"] = as_resource_spec(params.get("resources"))
+    if not params["resources"]:  # nothing requested: use defaults.resources
+        params["resources"] = as_resource_spec(defaults.get("resources", []))
 
     # Email notification defaults
     if params.get("email") == "__DISABLED__":
@@ -203,7 +219,7 @@ def select_auto_queue(params):
         from pathlib import Path
 
         from ..platforms import CorePlatformLoader as PlatformLoader
-        from ..resources import parse_walltime  # noqa: F811
+        from ..resources.spec import format_duration, format_size
 
         # Check for QXUB_PLATFORM_PATHS environment variable
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
@@ -220,28 +236,20 @@ def select_auto_queue(params):
             params["queue"] = "normal"
             return params
 
-        # Build requirements from resources
+        # Build requirements from resources. Sizes and durations are passed
+        # as strings, as the platform's selection conditions expect.
         requirements = {}
-        if params.get("resources"):
-            for resource in params["resources"]:
-                if "=" in resource:
-                    key, value = resource.split("=", 1)
-                    if key == "mem":
-                        requirements["memory"] = (
-                            value  # Keep as string for condition parsing
-                        )
-                    elif key == "walltime":
-                        requirements["walltime"] = (
-                            value  # Keep as string for condition parsing
-                        )
-                    elif key == "ncpus":
-                        requirements["cpus"] = int(value)  # Use "cpus" not "ncpus"
-                    elif key in ["ngpus", "gpu"]:
-                        gpu_count = int(value) if value.isdigit() else 1
-                        requirements["gpu_requested"] = (
-                            gpu_count  # Use "gpu_requested" for conditions
-                        )
-                        requirements["gpus"] = gpu_count  # Keep "gpus" for validation
+        resources = as_resource_spec(params.get("resources"))
+        params["resources"] = resources
+        if resources.memory is not None:
+            requirements["memory"] = format_size(resources.memory)
+        if resources.walltime is not None:
+            requirements["walltime"] = format_duration(resources.walltime)
+        if resources.cpus is not None:
+            requirements["cpus"] = resources.cpus
+        if resources.gpus is not None:
+            requirements["gpu_requested"] = resources.gpus  # for conditions
+            requirements["gpus"] = resources.gpus  # for validation
 
         # Add internet connectivity requirement if specified
         if params.get("internet"):
@@ -285,16 +293,7 @@ def select_auto_queue(params):
                     if queue:
                         # Estimate cost based on cores and walltime
                         cores = requirements.get("cpus", 1)
-                        walltime_hours = requirements.get("walltime", 3600)
-                        # Convert walltime to hours if it's a string
-                        if isinstance(walltime_hours, str):
-                            from ..resources import parse_walltime  # noqa: F811
-
-                            walltime_hours = parse_walltime(walltime_hours) or 1.0
-                        elif isinstance(walltime_hours, (int, float)):
-                            walltime_hours = (
-                                walltime_hours / 3600.0
-                            )  # Convert seconds to hours
+                        walltime_hours = (resources.walltime or 3600) / 3600.0
 
                         cost = queue.estimate_su_cost(cores, walltime_hours)
                         if cost < best_cost:
@@ -344,7 +343,7 @@ def job_spec(params, script="", env=None):
         name=params["name"],
         queue=params.get("queue"),
         account=params.get("project") or None,
-        resources=list(params.get("resources") or []),
+        resources=as_resource_spec(params.get("resources")),
         job_log=str(params["joblog"]) if params.get("joblog") else None,
         mail_to=params.get("email") or None,
         mail_events=params.get("email_opts") or "ae",  # default: abort + end
@@ -375,14 +374,8 @@ def adjust_cpus_for_gpus(params):
     if not queue_name or queue_name == "auto":
         return params
 
-    # Find how many GPUs were requested
-    ngpus = 0
-    resources = list(params.get("resources") or [])
-    for r in resources:
-        if r.startswith("ngpus="):
-            ngpus = int(r.split("=", 1)[1])
-            break
-
+    resources = as_resource_spec(params.get("resources"))
+    ngpus = resources.gpus or 0
     if ngpus <= 0:
         return params
 
@@ -405,16 +398,7 @@ def adjust_cpus_for_gpus(params):
             queue = platform.get_queue(queue_name)
             if queue and queue.cpus_per_gpu:
                 required_cpus = ngpus * queue.cpus_per_gpu
-                # Replace or inject ncpus in resources
-                has_ncpus = any(r.startswith("ncpus=") for r in resources)
-                if has_ncpus:
-                    resources = [
-                        f"ncpus={required_cpus}" if r.startswith("ncpus=") else r
-                        for r in resources
-                    ]
-                else:
-                    resources.append(f"ncpus={required_cpus}")
-                params["resources"] = resources
+                params["resources"] = replace(resources, cpus=required_cpus)
                 logger.info(
                     "Auto-set ncpus=%d for %d GPU(s) on queue '%s' "
                     "(%d cpus_per_gpu)",
@@ -454,6 +438,7 @@ def enforce_queue_minimums(params):
 
         from ..platforms.core import PlatformLoader
         from ..resources import parse_memory_size
+        from ..resources.spec import format_size
 
         platform_paths_env = os.environ.get("QXUB_PLATFORM_PATHS")
         if platform_paths_env:
@@ -480,15 +465,11 @@ def enforce_queue_minimums(params):
             else f"queue '{queue_name}'"
         )
 
-        resources = list(params.get("resources") or [])
+        resources = as_resource_spec(params.get("resources"))
 
         # --- CPU enforcement ---
         if queue.cpus_per_gpu or queue.limits.min_cpus:
-            current_ncpus = None
-            for r in resources:
-                if r.startswith("ncpus="):
-                    current_ncpus = int(r.split("=", 1)[1])
-                    break
+            current_ncpus = resources.cpus
 
             if current_ncpus is not None:
                 adjusted = current_ncpus
@@ -522,46 +503,28 @@ def enforce_queue_minimums(params):
                         ),
                         err=True,
                     )
-                    resources = [
-                        f"ncpus={adjusted}" if r.startswith("ncpus=") else r
-                        for r in resources
-                    ]
+                    resources = replace(resources, cpus=adjusted)
                     params["resources"] = resources
 
         # --- Disk (jobfs) enforcement ---
         if queue.limits.min_local_storage:
             min_bytes = parse_memory_size(queue.limits.min_local_storage)
-            current_jobfs = None
-            current_jobfs_str = None
-            for r in resources:
-                if r.startswith("jobfs="):
-                    current_jobfs_str = r.split("=", 1)[1]
-                    current_jobfs = parse_memory_size(current_jobfs_str)
-                    break
+            current_jobfs = resources.disk
 
             if current_jobfs is not None and min_bytes and current_jobfs < min_bytes:
                 click.echo(
                     click.style(
-                        f"Warning: jobfs={current_jobfs_str} overridden to "
+                        f"Warning: jobfs={format_size(current_jobfs)} overridden to "
                         f"jobfs={queue.limits.min_local_storage} "
                         f"for {queue_context} (minimum is {queue.limits.min_local_storage})",
                         fg="yellow",
                     ),
                     err=True,
                 )
-                resources = [
-                    (
-                        f"jobfs={queue.limits.min_local_storage}"
-                        if r.startswith("jobfs=")
-                        else r
-                    )
-                    for r in resources
-                ]
-                params["resources"] = resources
+                params["resources"] = replace(resources, disk=min_bytes)
             elif current_jobfs is None and min_bytes:
                 # User didn't specify jobfs at all — inject the minimum silently
-                resources.append(f"jobfs={queue.limits.min_local_storage}")
-                params["resources"] = resources
+                params["resources"] = replace(resources, disk=min_bytes)
 
     except Exception as e:
         logger.debug("Could not enforce queue minimums: %s", e)
@@ -582,7 +545,7 @@ def adjust_resources_for_queue(params):
         # Auto queue selection handles this differently
         return params
 
-    resources = params.get("resources", [])
+    resources = as_resource_spec(params.get("resources"))
     if not resources:
         return params
 
@@ -603,11 +566,7 @@ def adjust_resources_for_queue(params):
             queue = platform.get_queue(queue_name)
             if queue and queue.limits.max_cpus:
                 # Found the queue - check if we need to adjust CPUs
-                current_ncpus = None
-                for r in resources:
-                    if r.startswith("ncpus="):
-                        current_ncpus = int(r.split("=")[1])
-                        break
+                current_ncpus = resources.cpus
 
                 if current_ncpus and current_ncpus > queue.limits.max_cpus:
                     # Default CPU count exceeds queue limit - adjust it gracefully
@@ -615,16 +574,7 @@ def adjust_resources_for_queue(params):
                         f"Automatically adjusting ncpus from {current_ncpus} to {queue.limits.max_cpus} "
                         f"for queue '{queue_name}' (default exceeds queue maximum)"
                     )
-                    # Replace the ncpus value in resources
-                    new_resources = [
-                        (
-                            f"ncpus={queue.limits.max_cpus}"
-                            if r.startswith("ncpus=")
-                            else r
-                        )
-                        for r in resources
-                    ]
-                    params["resources"] = new_resources
+                    params["resources"] = replace(resources, cpus=queue.limits.max_cpus)
 
     except Exception as e:
         # Platform system not available or other error - don't adjust

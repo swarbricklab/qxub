@@ -1108,7 +1108,8 @@ def interactive_cli(
         - With --tmux: session persists on login node after PBS job ends
         - Reconnect to tmux with: tmux attach -t <session>
     """
-    from .resources import ResourceMapper
+    from .backends.pbs import parse_pbs_resources, pbs_resource_list
+    from .resources import ResourceSpec
 
     # Check for conflicting shortcut/alias usage
     if shortcut and alias:
@@ -1319,39 +1320,16 @@ def interactive_cli(
         # Not in tmux - apply default session from config
         tmux_session = _get_default_tmux_session()
 
-    # Build resources using ResourceMapper
-    mapper = ResourceMapper()
-
-    # Add walltime
+    # Resources: -l requests, then --runtime/--mem/--cpus/--disk, which win
     try:
-        mapper.add_runtime(runtime)
-    except Exception:
-        # Fall back to raw format if parsing fails
-        mapper.pbs_resources.append(f"walltime={runtime}")
-
-    # Add memory if specified
-    if mem:
-        try:
-            mapper.add_memory(mem)
-        except Exception:
-            mapper.pbs_resources.append(f"mem={mem}")
-
-    # Add CPUs if specified
-    if cpus:
-        mapper.add_cpus(cpus)
-
-    # Add jobfs if specified
-    if disk:
-        try:
-            mapper.add_disk(disk)
-        except Exception:
-            mapper.pbs_resources.append(f"jobfs={disk}")
-
-    # Get the combined resource string from mapper
-    mapped_resources = mapper.get_pbs_resources()
-
-    # Combine with any -l resources passed directly
-    all_resources = list(resources) + mapped_resources
+        session_resources = parse_pbs_resources(resources).updated(
+            ResourceSpec.from_options(
+                walltime=runtime, memory=mem, cpus=cpus, disk=disk
+            )
+        )
+    except ValueError as exc:
+        raise click.UsageError(f"Invalid resource request: {exc}")
+    all_resources = pbs_resource_list(session_resources)
 
     # "auto" (from --queue or config) is not a real queue; resolve it here
     # rather than letting qsub reject it.

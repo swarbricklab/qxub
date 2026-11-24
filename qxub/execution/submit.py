@@ -94,10 +94,9 @@ def dispatch(
     from ..queue import create_queue_entry, runs, update_queue_entry
     from ..queue.consolidate import maybe_start_in_background
     from ..resources.tracker import resource_tracker
-    from .context import _parse_cpus_from_resources
 
     backend = backend or backends.get_backend()
-    cpus = _parse_cpus_from_resources(spec.resources)
+    cpus = spec.resources.cpus
 
     virtual_id = None
     try:
@@ -276,12 +275,13 @@ def submit_job(
         template = get_template(template_type)
 
     # ------------------------------------------------------------------
-    # Build PBS resource list from dict
+    # Resources: PBS names and values, e.g. {"ncpus": 4, "mem": "8GB"}
     # ------------------------------------------------------------------
-    pbs_resources: List[str] = []
-    if resources:
-        for key, value in resources.items():
-            pbs_resources.append(f"{key}={value}")
+    from ..backends.pbs import parse_pbs_resources
+
+    resource_spec = parse_pbs_resources(
+        f"{key}={value}" for key, value in (resources or {}).items()
+    )
 
     # ------------------------------------------------------------------
     # Config override
@@ -300,7 +300,7 @@ def submit_job(
     # ------------------------------------------------------------------
     params: Dict[str, Any] = {
         "command": cmd_parts,
-        "resources": tuple(pbs_resources),
+        "resources": resource_spec,
         "queue": queue,
         "name": name,
         "project": project,
@@ -351,7 +351,7 @@ def submit_job(
             "queue": processed_params.get("queue"),
             "job_name": processed_params.get("name"),
             "project": processed_params.get("project"),
-            "resources": list(pbs_resources),
+            "resources": resource_spec.as_dict(),
             "tags": list(tags or []),
             "joblog": processed_params.get("joblog"),
             "out": processed_params.get("out"),

@@ -69,7 +69,7 @@ __all__ = [
     "format_memory_size",
     "format_walltime",
     "ResourceTracker",
-    "ResourceMapper",
+    "ResourceSpec",
     "HistoryManager",
     "ConfigManager",
     "config_manager",
@@ -87,7 +87,7 @@ _COMPAT_IMPORTS = {
     "HistoryManager": (".history", "HistoryManager"),
     # resources
     "ResourceTracker": (".resources", "ResourceTracker"),
-    "ResourceMapper": (".resources", "ResourceMapper"),
+    "ResourceSpec": (".resources", "ResourceSpec"),
     "parse_memory_size": (".resources", "parse_memory_size"),
     "parse_walltime": (".resources", "parse_walltime"),
     "format_memory_size": (".resources", "format_memory_size"),

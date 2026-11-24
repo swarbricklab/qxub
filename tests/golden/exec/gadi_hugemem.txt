@@ -19,9 +19,9 @@ normal
 -P
 ab12
 -l
-mem=600GB
--l
 ncpus=4
+-l
+mem=600GB
 -o
 <CWD>/big_job-<TIMESTAMP>.log
 -W

@@ -5,14 +5,15 @@ one :class:`SchedulerBackend`. The platform definition's ``type`` picks
 which one (see :func:`qxub.backends.get_backend`).
 
 A job to submit is described by a :class:`JobSpec`; the backend turns it
-into its own command line. Resources are still ``key=value`` strings in PBS
-``-l`` form; a typed ``ResourceSpec`` replaces them next (step 4 of
-``docs/dev/pbs-coupling-audit/README.md``).
+into its own command line, including the :class:`ResourceSpec` (PBS writes
+``-l ncpus=…``).
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
+
+from ..resources.spec import ResourceSpec
 
 
 class LiveJob(NamedTuple):
@@ -59,8 +60,7 @@ class JobSpec:
     queue: Optional[str] = None
     #: The account or project the job is charged to (PBS ``-P``).
     account: Optional[str] = None
-    #: Resource requests, for now as PBS ``-l`` ``key=value`` strings.
-    resources: List[str] = field(default_factory=list)
+    resources: ResourceSpec = field(default_factory=ResourceSpec)
     #: Where the scheduler writes its own log of the job (PBS ``-o``).
     job_log: Optional[str] = None
     mail_to: Optional[str] = None

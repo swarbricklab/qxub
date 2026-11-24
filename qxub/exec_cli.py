@@ -60,12 +60,12 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--mem",
     "--memory",
-    help="Memory requirement (workflow-friendly). Examples: '4GB', '2000MB', '16g'. (default: configured). Converted to PBS format automatically.",
+    help="Memory requirement (workflow-friendly). Examples: '4GB', '2000MB', '16g'; a plain number is MB. (default: configured). Converted to PBS format automatically.",
 )
 @click.option(
     "--runtime",
     "--time",
-    help="Runtime/walltime limit (workflow-friendly). Examples: '2h', '30m', '1h30m', '02:30:00'. (default: configured). Converted to PBS format automatically.",
+    help="Runtime/walltime limit (workflow-friendly). Examples: '2h', '30m', '1h30m', '02:30:00'; a plain number is minutes. (default: configured). Converted to PBS format automatically.",
 )
 @click.option(
     "--cpus",
@@ -76,7 +76,7 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--disk",
     "--jobfs",
-    help="Local disk/jobfs requirement (workflow-friendly). Examples: '10GB', '500MB'. (default: configured). Converted to PBS format automatically.",
+    help="Local disk/jobfs requirement (workflow-friendly). Examples: '10GB', '500MB'; a plain number is MB. (default: configured). Converted to PBS format automatically.",
 )
 @click.option(
     "--gpus",
@@ -690,34 +690,16 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
     # ── Local execution path ────────────────────────────────────────────
 
-    # Process workflow-friendly resource options with config defaults
-    workflow_resources = []
+    # Resources: raw PBS -l requests first, then qxub's own options, which
+    # win over -l. Config defaults (defaults.mem, ...) fill in only what
+    # neither gave.
+    from .backends.pbs import parse_pbs_resources
+    from .resources import ResourceSpec
 
-    # Parse existing --resources to see what's already specified
-    existing_resource_keys = set()
-    if options["resources"]:
-        for resource in options["resources"]:
-            # Split by comma in case of comma-separated resources (e.g., "ncpus=48,mem=128GB")
-            for part in resource.split(","):
-                if "=" in part:
-                    key = part.split("=", 1)[0].strip()
-                    existing_resource_keys.add(key)
-
-    # Map resource key aliases (e.g., ncpus -> cpus, walltime -> runtime)
-    resource_key_map = {
-        "ncpus": "cpus",
-        "walltime": "runtime",
-        "mem": "mem",
-        "jobfs": "disk",
-        "storage": "volumes",
-        "ngpus": "gpus",
-    }
-
-    # Check which resources are already specified (considering aliases)
-    specified_resources = set()
-    for key in existing_resource_keys:
-        canonical_key = resource_key_map.get(key, key)
-        specified_resources.add(canonical_key)
+    try:
+        raw_resources = parse_pbs_resources(options["resources"] or [])
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="'-l' / '--resources'")
 
     # Helper function to get workflow-friendly config values with backward compatibility
     def get_workflow_resource_config(key):
@@ -741,87 +723,55 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
 
         return None
 
-    # Collect all resource values (CLI args take precedence over config)
-    # Only use config defaults if the resource wasn't already specified in --resources
-    resource_values = {
-        "mem": options.get("mem")
-        or options.get("memory")
-        or (
-            get_workflow_resource_config("mem")
-            if "mem" not in specified_resources
-            else None
-        ),
-        "runtime": options.get("runtime")
-        or options.get("time")
-        or (
-            get_workflow_resource_config("runtime")
-            if "runtime" not in specified_resources
-            else None
-        ),
-        "cpus": options.get("cpus")
-        or options.get("threads")
-        or (
-            get_workflow_resource_config("cpus")
-            if "cpus" not in specified_resources
-            else None
-        ),
-        "disk": options.get("disk")
-        or options.get("jobfs")
-        or (
-            get_workflow_resource_config("disk")
-            if "disk" not in specified_resources
-            else None
-        ),
-        "volumes": options.get("volumes")
-        or options.get("storage")
-        or (
-            get_workflow_resource_config("volumes")
-            if "volumes" not in specified_resources
-            else None
-        ),
-        "gpus": options.get("gpus")
-        or (
-            get_workflow_resource_config("gpus")
-            if "gpus" not in specified_resources
-            else None
-        ),
-    }
+    def resource_value(cli_value, config_key, given_by_l):
+        if cli_value:
+            return cli_value
+        return None if given_by_l else get_workflow_resource_config(config_key)
 
-    # Only create mapper if we have any resource values to process
-    if any(resource_values.values()):
-        from .resources import ResourceMapper
+    try:
+        option_resources = ResourceSpec.from_options(
+            memory=resource_value(
+                options.get("mem") or options.get("memory"),
+                "mem",
+                raw_resources.memory is not None,
+            ),
+            walltime=resource_value(
+                options.get("runtime") or options.get("time"),
+                "runtime",
+                raw_resources.walltime is not None,
+            ),
+            cpus=resource_value(
+                options.get("cpus") or options.get("threads"),
+                "cpus",
+                raw_resources.cpus is not None,
+            ),
+            disk=resource_value(
+                options.get("disk") or options.get("jobfs"),
+                "disk",
+                raw_resources.disk is not None,
+            ),
+            gpus=resource_value(
+                options.get("gpus"), "gpus", raw_resources.gpus is not None
+            ),
+        )
+    except ValueError as exc:
+        raise click.UsageError(f"Invalid resource request: {exc}")
+    volumes = resource_value(
+        options.get("volumes") or options.get("storage"),
+        "volumes",
+        "storage" in raw_resources.native,
+    )
+    if volumes:
+        # NCI storage mounts; PBS-only for now, so kept as a native request
+        option_resources.native["storage"] = str(volumes)
 
-        mapper = ResourceMapper()
-
-        if resource_values["mem"]:
-            mapper.add_memory(resource_values["mem"])
-
-        if resource_values["runtime"]:
-            mapper.add_runtime(resource_values["runtime"])
-
-        if resource_values["cpus"]:
-            mapper.add_cpus(resource_values["cpus"])
-
-        if resource_values["disk"]:
-            mapper.add_disk(resource_values["disk"])
-
-        if resource_values["volumes"]:
-            mapper.add_storage(resource_values["volumes"])
-
-        if resource_values["gpus"]:
-            mapper.add_gpus(resource_values["gpus"])
-
-        workflow_resources.extend(mapper.get_pbs_resources())
-
-    # Merge workflow resources with existing PBS resources
-    all_resources = list(options["resources"]) if options["resources"] else []
-    all_resources.extend(workflow_resources)
+    all_resources = raw_resources.updated(option_resources)
 
     # Track whether CPUs were explicitly specified (for graceful queue adjustment)
     cpus_explicit = (
         options.get("cpus") is not None
         or options.get("threads") is not None
-        or any(r.startswith("ncpus=") for r in (options["resources"] or []))
+        or raw_resources.cpus is not None
     )
 
     # Resolve email from --notify/--no-notify/--email options
@@ -835,7 +785,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     # Extract PBS-specific options for processing
     params = {
         "command": command,
-        "resources": tuple(all_resources),  # Use merged resources
+        "resources": all_resources,
         "queue": options["queue"],
         "name": options["name"],
         "project": options["project"],

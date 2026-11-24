@@ -282,16 +282,16 @@ The key feature of v3.2.3+ is **per-resource-type intelligence**:
 
 # Specify only cpus on CLI
 qxub exec --cpus 48 -- python script.py
-# Result: ncpus=48 (CLI), mem=8GB (config), walltime=2:00:00 (config)
+# Result: ncpus=48 (CLI), mem=8GB (config), walltime=02:00:00 (config)
 
 # Mix --resources and workflow options
 qxub exec --resources ncpus=48 --mem 32GB -- python script.py
-# Result: ncpus=48 (--resources), mem=32GB (--mem override), walltime=2:00:00 (config)
+# Result: ncpus=48 (--resources), mem=32GB (--mem override), walltime=02:00:00 (config)
 
 # Shortcut with partial CLI override
 # Shortcut 'bigdata': resources=[mem=64GB, ncpus=24]
 qxub exec --shortcut bigdata --cpus 48 -- process.py
-# Result: mem=64GB (shortcut), ncpus=48 (CLI override), walltime=2:00:00 (config)
+# Result: mem=64GB (shortcut), ncpus=48 (CLI override), walltime=02:00:00 (config)
 ```
 
 ### Config Merging

@@ -22,7 +22,7 @@ jq '.commands[] | select(.command | contains("exec"))' modules.json
 
 # Find a module by keyword in its description or exports
 jq '.modules[] | select(.description | ascii_downcase | contains("scheduler"))' modules.json
-jq '.modules[] | select(.exports[]? | contains("ResourceMapper"))' modules.json
+jq '.modules[] | select(.exports[]? | contains("ResourceSpec"))' modules.json
 
 # List all top-level CLI commands
 jq -r '.commands[].command' modules.json

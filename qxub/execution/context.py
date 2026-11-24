@@ -13,7 +13,7 @@ import shlex
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 import click
 
@@ -30,18 +30,6 @@ from .submit import dispatch, exec_context_summary
 
 def _b64(text: str) -> str:
     return base64.b64encode(text.encode("utf-8")).decode("ascii")
-
-
-def _parse_cpus_from_resources(resources: list) -> Optional[int]:
-    """Extract ncpus value from a PBS resources list like ['ncpus=2', 'mem=4gb']."""
-    import re  # pylint: disable=import-outside-toplevel
-
-    for item in resources or []:
-        for part in str(item).split(","):
-            m = re.match(r"ncpus=(\d+)", part.strip())
-            if m:
-                return int(m.group(1))
-    return None
 
 
 class ExecutionContext:
@@ -210,6 +198,8 @@ def _run_record_fields(ctx_obj: dict, command, execution_context) -> dict:
     """What the run file records at submission (see ``qxub.queue.runs``)."""
     from datetime import datetime
 
+    from ..config.handler import as_resource_spec
+
     cmd_str = " ".join(command)
     return {
         "state": "submitted",
@@ -225,7 +215,7 @@ def _run_record_fields(ctx_obj: dict, command, execution_context) -> dict:
         "queue": ctx_obj.get("queue"),
         "job_name": ctx_obj.get("name"),
         "project": ctx_obj.get("project"),
-        "resources": list(ctx_obj.get("resources") or []),
+        "resources": as_resource_spec(ctx_obj.get("resources")).as_dict(),
         "tags": list(ctx_obj.get("tags") or []),
         "joblog": ctx_obj.get("joblog"),
         "out": ctx_obj.get("out"),
