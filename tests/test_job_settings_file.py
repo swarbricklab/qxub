@@ -51,7 +51,7 @@ def test_unwritable_runs_dir_falls_back_to_qsub_v(monkeypatch, tmp_path):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("")
     monkeypatch.setattr(runs, "runs_dir", lambda: blocker / "runs")
-    script = JOBSCRIPTS / "qdefault.pbs"  # reads QXUB_JOB_FILE
+    script = JOBSCRIPTS / "job.sh"  # reads QXUB_JOB_FILE
     spec = JobSpec(script=str(script), name="n", env={"a": "1"})
 
     assert runs.attach_settings(spec, "qx-1") is spec
@@ -82,7 +82,7 @@ def _run_template(tmp_path, template, env_file, **env):
     base = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PBS_JOBID": "1.x"}
     return (
         subprocess.run(
-            ["bash", str(JOBSCRIPTS / f"{template}.pbs")],
+            ["bash", str(JOBSCRIPTS / "job.sh")],
             env={**base, "QXUB_JOB_FILE": str(env_file), **env},
             capture_output=True,
             text=True,
@@ -111,7 +111,7 @@ def test_job_reads_everything_from_the_settings_file(tmp_path):
     env_file = tmp_path / "qx-1.env"
     env_file.write_text(runs.format_settings(settings))
 
-    result, _ = _run_template(tmp_path, "qdefault", env_file)
+    result, _ = _run_template(tmp_path, "default", env_file)
 
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "seen").read_text() == AWKWARD
@@ -119,7 +119,7 @@ def test_job_reads_everything_from_the_settings_file(tmp_path):
 
 
 def test_missing_settings_file_fails_the_job_clearly(tmp_path):
-    result, _ = _run_template(tmp_path, "qdefault", tmp_path / "gone.env")
+    result, _ = _run_template(tmp_path, "default", tmp_path / "gone.env")
 
     assert result.returncode == 1
     assert "Cannot read the job settings file" in result.stderr
@@ -151,3 +151,18 @@ def test_custom_template_that_reads_the_file_gets_it(sandbox):
 
     (call,) = sandbox.pbs_calls("qsub")
     assert "QXUB_JOB_FILE" in job_variables(call["argv"])
+
+
+def test_only_scripts_that_source_the_file_get_it(tmp_path):
+    cases = {
+        '. "$QXUB_JOB_FILE"\n': True,
+        'if ! . "$QXUB_JOB_FILE"; then exit 1; fi\n': True,
+        "source ${QXUB_JOB_FILE}\n": True,
+        "# reads QXUB_JOB_FILE? not yet\necho $cmd_b64\n": False,
+        'echo "$QXUB_JOB_FILE"\n': False,
+    }
+    for i, (text, expected) in enumerate(cases.items()):
+        script = tmp_path / f"t{i}.sh"
+        script.write_text("#!/bin/bash\n" + text)
+        assert runs.reads_settings_file(script) is expected, text
+    assert runs.reads_settings_file(JOBSCRIPTS / "job.sh")

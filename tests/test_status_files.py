@@ -59,7 +59,7 @@ def test_jobs_from_older_qxub_keep_the_old_names(job, tmp_path, template):
 
 def test_readers_find_a_job_by_its_pbs_id_or_run_id(job, tmp_path):
     status = tmp_path / "status"
-    job("qdefault", "sh -c 'exit 3'", QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status))
+    job("default", "sh -c 'exit 3'", QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status))
 
     assert status_file_key(PBS_ID, status) == "qx-1"
     assert status_file_key("qx-1", status) == "qx-1"
@@ -71,9 +71,9 @@ def test_readers_find_a_job_by_its_pbs_id_or_run_id(job, tmp_path):
 
 def test_jobs_sharing_a_dir_report_their_own_steps(job, tmp_path):
     status = tmp_path / "status"
-    job("qdefault", "true", QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status))
+    job("default", "true", QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status))
     job(
-        "qdefault",
+        "default",
         "true",
         QXUB_RUN_ID="qx-2",
         QXUB_STATUS_DIR=str(status),
@@ -143,7 +143,7 @@ def test_unreachable_status_dir_does_not_fail_the_job(job, tmp_path):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("")
     result = job(
-        "qdefault",
+        "default",
         QXUB_RUN_ID="qx-1",
         QXUB_STATUS_DIR=str(blocker / "status"),
         QXUB_RUN_FILE=str(blocker / "runs" / "qx-1.run"),
@@ -206,10 +206,10 @@ def test_exit_0_in_the_command_still_runs_post(job, tmp_path, template):
 
 @pytest.mark.parametrize("step", ["pre", "post"])
 def test_exit_in_pre_or_post_is_recorded(job, tmp_path, step):
-    """qdefault evals --pre/--post in the job's shell, so exit ends the job."""
+    """--pre/--post run in the job's shell, so exit ends the job."""
     status = tmp_path / "status"
     result = job(
-        "qdefault",
+        "default",
         "true",
         QXUB_RUN_ID="qx-1",
         QXUB_STATUS_DIR=str(status),
@@ -246,10 +246,10 @@ def test_summary_names_the_failed_step(
     assert message.endswith(summary), message
 
 
-def test_exit_in_qdefault_post_is_named(job, tmp_path):
+def test_exit_in_post_is_named(job, tmp_path):
     status = tmp_path / "status"
     job(
-        "qdefault",
+        "default",
         "true",
         QXUB_RUN_ID="qx-1",
         QXUB_STATUS_DIR=str(status),

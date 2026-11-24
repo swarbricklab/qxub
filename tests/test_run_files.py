@@ -21,7 +21,7 @@ from qxub.config import site
 from qxub.queue import connection, db, runs
 from qxub.resources.tracker import ResourceTracker
 
-TEMPLATE = REPO_ROOT / "qxub" / "jobscripts" / "qdefault.pbs"
+TEMPLATE = REPO_ROOT / "qxub" / "jobscripts" / "job.sh"
 
 
 @pytest.fixture

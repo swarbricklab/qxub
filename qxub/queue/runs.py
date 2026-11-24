@@ -36,6 +36,9 @@ SUFFIX = ".run"
 # The job's settings, next to its run file (see attach_settings).
 SETTINGS_SUFFIX = ".env"
 _NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SOURCES_SETTINGS_RE = re.compile(
+    r"""^[^#\n]*(?:^|[\s;&|!])(?:\.|source)\s+["']?\$\{?QXUB_JOB_FILE\b""", re.M
+)
 _warned = False
 
 
@@ -149,9 +152,11 @@ def reads_settings_file(script) -> bool:
     qxub expects its variables from the scheduler (``qsub -v``) instead.
     """
     try:
-        return "QXUB_JOB_FILE" in Path(script).read_text(errors="replace")
+        text = Path(script).read_text(errors="replace")
     except OSError:
         return False
+    # `. "$QXUB_JOB_FILE"` or `source ${QXUB_JOB_FILE}`, not just a mention
+    return bool(_SOURCES_SETTINGS_RE.search(text))
 
 
 def attach_settings(spec, run_id: str, write: bool = True):

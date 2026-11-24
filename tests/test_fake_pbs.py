@@ -25,7 +25,7 @@ def test_terse_submit_prints_the_job_id(sandbox):
     assert result.stdout.strip() == "1000.gadi-pbs"
     (call,) = sandbox.pbs_calls("qsub")
     assert call["argv"][0] == "-v"
-    assert call["argv"][-1].endswith("qdefault.pbs")
+    assert call["argv"][-1].endswith("job.sh")
     assert Path(call["cwd"]) == sandbox.cwd
 
 
@@ -175,7 +175,7 @@ def test_paths_with_spaces_reach_qsub_whole(sandbox, context):
 
     assert result.returncode == 0, result.stdout + result.stderr
     (call,) = sandbox.pbs_calls("qsub")
-    assert call["argv"][-1].endswith(".pbs")
+    assert call["argv"][-1].endswith("job.sh")
     # The default joblog is inside the execdir and goes to -o (#140 retest).
     joblog = call["argv"][call["argv"].index("-o") + 1]
     assert joblog.startswith(str(execdir) + "/"), call["argv"]

@@ -181,7 +181,12 @@ def _get_shortcut_context_description(definition: dict) -> str:
 @click.option(
     "--mods", "--modules", help="Comma or space-separated list of modules to load"
 )
-@click.option("--sif", "--container", help="Singularity container (.sif file) to use")
+@click.option(
+    "--sif",
+    "--container",
+    help="Singularity container (.sif file) to use. The whole command runs "
+    "inside it, with the image's bash (or sh if it has none).",
+)
 @click.option(
     "--default", is_flag=True, help="Use default execution (no special environment)"
 )

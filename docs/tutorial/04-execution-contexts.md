@@ -43,7 +43,7 @@ qxub -v --dry --env dvc3 -- dvc doctor
 🔧 Full qsub command: qsub -v cmd_b64="ZHZjIGRvY3Rvcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181306/out,err=/scratch/a56/jr9959/qt/20251018_181306/err,quiet=false,env="dvc3" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qconda.pbs
 ```
 
-Notice how qxub automatically uses the `qconda.pbs` job script template and passes the conda environment name (`env="dvc3"`) to activate the specified environment.
+Notice how qxub passes the conda environment name (`env="dvc3"`) to activate the specified environment.
 
 ### Running the Conda Job
 
@@ -126,7 +126,7 @@ qxub -v --dry --mod python3/3.11.7 -- python --version
 🔧 Full qsub command: qsub -v cmd_b64="cHl0aG9uIC0tdmVyc2lvbg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181557/out,err=/scratch/a56/jr9959/qt/20251018_181557/err,quiet=false,mods="python3/3.11.7" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qmod.pbs
 ```
 
-Notice how qxub uses the `qmod.pbs` job script template and passes the module list (`mods="python3/3.11.7"`) to load the specified modules.
+Notice how qxub passes the module list (`mods="python3/3.11.7"`) to load the specified modules.
 
 ### Multiple Modules (`--mods`)
 
@@ -200,7 +200,9 @@ qxub -v --dry --sif /g/data/a56/containers/example.sif -- echo "Hello from conta
 🔧 Full qsub command: qsub -v cmd_b64="ZWNobyBIZWxsbyBmcm9tIGNvbnRhaW5lcg==",cwd=/g/data/a56/software/qsub_tools,out=/scratch/a56/jr9959/qt/20251018_181659/out,err=/scratch/a56/jr9959/qt/20251018_181659/err,quiet=false,sif="/g/data/a56/containers/example.sif" -N qt -q normal -P a56 -o qt.log /g/data/a56/software/qsub_tools/qxub/jobscripts/qsing.pbs
 ```
 
-Notice how qxub uses the `qsing.pbs` job script template and passes the container path (`sif="/g/data/a56/containers/example.sif"`) to run commands inside the container.
+Notice how qxub passes the container path (`sif="/g/data/a56/containers/example.sif"`) to run commands inside the container.
+
+The whole command runs inside the container, pipes and `&&` included: qxub runs it with the image's `bash`, or with its `sh` if the image has no `bash` (some minimal images don't). Anything `--pre` exports reaches the command in the container; `--pre` and `--post` themselves run on the compute node, outside the container.
 
 ## Execution Context Rules and Errors
 
