@@ -76,3 +76,27 @@ def test_fastest_of_retries_only_until_under_the_limit():
 
     always_slow = iter([4.0, 3.5, 3.9])
     assert fastest_of(lambda: next(always_slow), limit=3.0) == 3.5  # still fails
+
+
+def test_timed_run_returns_the_fastest_run_and_retries_timeouts(tmp_path):
+    """#165 review: return the fastest run's result; a timeout is a slow try."""
+    import sys
+
+    from conftest import timed_run
+
+    # Each run reads and bumps a counter: the first sleeps past the
+    # timeout, the second is quick and exits 8, the third is not needed.
+    counter = tmp_path / "n"
+    counter.write_text("0")
+    script = (
+        "import pathlib, sys, time\n"
+        f"p = pathlib.Path({str(counter)!r}); n = int(p.read_text()) + 1\n"
+        "p.write_text(str(n))\n"
+        "if n == 1: time.sleep(5)\n"
+        "sys.exit(6 + n)\n"
+    )
+    result, elapsed = timed_run([sys.executable, "-c", script], limit=1.0)
+
+    assert result.returncode == 8  # the second, fast run
+    assert elapsed < 1.0
+    assert counter.read_text() == "2"  # stopped once under the limit
