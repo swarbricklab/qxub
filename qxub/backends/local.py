@@ -5,7 +5,9 @@ the terminal, with its output going to the job log, and records the job in
 ``<status dir>/local/<job id>/``:
 
 - ``pid``: the process group running the job;
-- ``meta.json``: name, queue, job log, submission time;
+- ``meta.json``: name, queue, job log, submission time, and host: the PID
+  is checked only there (with a shared home, other machines see the job
+  as running until it records an exit status);
 - ``exit_status``: written when the job ends.
 
 When the job ends, its exit status is also appended to the job log as
@@ -18,6 +20,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import uuid
 from datetime import datetime
@@ -100,6 +103,8 @@ class LocalBackend(SchedulerBackend):
                     {
                         "name": spec.name,
                         "queue": QUEUE,
+                        # A PID means something only on this machine
+                        "host": socket.gethostname(),
                         "job_log": str(job_log),
                         "submitted": datetime.now().isoformat(timespec="seconds"),
                     }
@@ -147,9 +152,12 @@ class LocalBackend(SchedulerBackend):
             )
         except (OSError, ValueError):
             exit_status = None
-        if exit_status is None and not _alive(pid):
+        here = meta.get("host") in (None, socket.gethostname())
+        if exit_status is None and here and not _alive(pid):
             exit_status = -1  # ended without recording a status (killed)
-        return {**meta, "pid": pid, "exit_status": exit_status}
+        # On another host (a shared home), the job runs until it records an
+        # exit status; its PID can't be checked from here.
+        return {**meta, "pid": pid, "exit_status": exit_status, "here": here}
 
     def list_jobs(
         self, user: Optional[str] = None, full_names: bool = False
@@ -178,6 +186,7 @@ class LocalBackend(SchedulerBackend):
                     "job_state": "F" if finished else "R",
                     "job_name": job["name"],
                     "queue": job["queue"],
+                    "host": job.get("host"),
                 },
                 "timing": {"submitted": job["submitted"]},
                 "resources_requested": {},
@@ -199,6 +208,11 @@ class LocalBackend(SchedulerBackend):
             return False, f"no such local job: {job_id}"
         if job["exit_status"] is not None:
             return False, f"job {job_id} has already finished"
+        if not job["here"]:
+            return False, (
+                f"job {job_id} runs on {job['host']}; cancel it there "
+                f"(this is {socket.gethostname()})"
+            )
         try:
             # The job script's TERM trap records the exit (143)
             os.killpg(job["pid"], signal.SIGTERM)
