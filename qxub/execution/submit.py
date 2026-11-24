@@ -293,8 +293,13 @@ def submit_job(
         set_config_override(config_path)
 
     from ..config import manager as config_mod
+    from ..config.handler import resolve_resources
 
     config_manager = config_mod.config_manager
+
+    # The configured defaults (defaults.mem, defaults.volumes, ...) apply
+    # as they do for ``qxub exec``.
+    resource_spec = resolve_resources(resource_spec, config_manager)
 
     # ------------------------------------------------------------------
     # Build params dict (mimics what exec_cli constructs)

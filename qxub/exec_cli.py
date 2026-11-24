@@ -6,7 +6,6 @@ options and contexts (conda, modules, singularity, default) into a single
 comprehensive interface.
 """
 
-import logging
 
 import click
 
@@ -694,78 +693,27 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
     # win over -l. Config defaults (defaults.mem, ...) fill in only what
     # neither gave.
     from .backends.pbs import parse_pbs_resources
-    from .resources import ResourceSpec
 
     try:
         raw_resources = parse_pbs_resources(options["resources"] or [])
     except ValueError as exc:
         raise click.BadParameter(str(exc), param_hint="'-l' / '--resources'")
 
-    # Helper function to get workflow-friendly config values with backward compatibility
-    def get_workflow_resource_config(key):
-        """
-        Get workflow resource from config, checking new location first (defaults.KEY),
-        then falling back to old root-level location with deprecation warning.
-        """
-        # Try new location: defaults.mem, defaults.cpus, etc.
-        value = config_manager.get_config_value(f"defaults.{key}")
-        if value is not None:
-            return value
-
-        # Fall back to old root-level location for backward compatibility
-        value = config_manager.get_config_value(key)
-        if value is not None:
-            logging.getLogger(__name__).warning(
-                f"Config key '{key}' at root level is deprecated. "
-                f"Please move to 'defaults.{key}' in your config file."
-            )
-            return value
-
-        return None
-
-    def resource_value(cli_value, config_key, given_by_l):
-        if cli_value:
-            return cli_value
-        return None if given_by_l else get_workflow_resource_config(config_key)
+    from .config.handler import resolve_resources
 
     try:
-        option_resources = ResourceSpec.from_options(
-            memory=resource_value(
-                options.get("mem") or options.get("memory"),
-                "mem",
-                raw_resources.memory is not None,
-            ),
-            walltime=resource_value(
-                options.get("runtime") or options.get("time"),
-                "runtime",
-                raw_resources.walltime is not None,
-            ),
-            cpus=resource_value(
-                options.get("cpus") or options.get("threads"),
-                "cpus",
-                raw_resources.cpus is not None,
-            ),
-            disk=resource_value(
-                options.get("disk") or options.get("jobfs"),
-                "disk",
-                raw_resources.disk is not None,
-            ),
-            gpus=resource_value(
-                options.get("gpus"), "gpus", raw_resources.gpus is not None
-            ),
+        all_resources = resolve_resources(
+            raw_resources,
+            config_manager,
+            memory=options.get("mem") or options.get("memory"),
+            walltime=options.get("runtime") or options.get("time"),
+            cpus=options.get("cpus") or options.get("threads"),
+            disk=options.get("disk") or options.get("jobfs"),
+            gpus=options.get("gpus"),
+            volumes=options.get("volumes") or options.get("storage"),
         )
     except ValueError as exc:
         raise click.UsageError(f"Invalid resource request: {exc}")
-    volumes = resource_value(
-        options.get("volumes") or options.get("storage"),
-        "volumes",
-        "storage" in raw_resources.native,
-    )
-    if volumes:
-        # NCI storage mounts; PBS-only for now, so kept as a native request
-        option_resources.native["storage"] = str(volumes)
-
-    all_resources = raw_resources.updated(option_resources)
 
     # Track whether CPUs were explicitly specified (for graceful queue adjustment)
     cpus_explicit = (
