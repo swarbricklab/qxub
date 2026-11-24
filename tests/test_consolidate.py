@@ -135,6 +135,26 @@ def test_finished_run_with_joblog_is_published_with_usage(area, tmp_path):
     assert (runs_dir / "qx-a.run").exists(), "kept for the grace period"
 
 
+def test_published_rows_record_the_backend(area, tmp_path):
+    """#167 review: from the run file, or the job ID for older run files."""
+    runs_dir, snapshot = area
+    for run_id, job_id, extra in [
+        ("qx-a", "1.gadi-pbs", {"backend": "pbs"}),
+        ("qx-b", "local-abc", {"backend": "local"}),
+        ("qx-c", "2.gadi-pbs", {}),  # written before run files had it
+    ]:
+        joblog = tmp_path / f"{run_id}.log"
+        joblog.write_text(JOBLOG.format(when=NOW, job_id=job_id, code=0))
+        finished(runs_dir, run_id, job_id, joblog=joblog, **extra)
+
+    assert run(area).added == 3
+    assert {r["job_id"]: r["backend"] for r in rows(snapshot)} == {
+        "1.gadi-pbs": "pbs",
+        "local-abc": "local",
+        "2.gadi-pbs": "pbs",
+    }
+
+
 def test_usage_comes_from_one_batched_qstat_when_there_is_no_joblog(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs")

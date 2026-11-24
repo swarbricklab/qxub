@@ -83,8 +83,13 @@ def default_status_dir() -> Path:
     scratch = scratch_dir()
     if scratch is not None:
         return scratch / "qxub" / "status"
+    return state_dir() / "status"
+
+
+def state_dir() -> Path:
+    """``$XDG_STATE_HOME/qxub``: this machine's state, whatever the platform."""
     state_home = os.getenv("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(state_home) / "qxub" / "status"
+    return Path(state_home) / "qxub"
 
 
 def default_directives() -> List[str]:

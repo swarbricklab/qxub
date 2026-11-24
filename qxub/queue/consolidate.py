@@ -680,6 +680,13 @@ def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> 
     return changed
 
 
+def _backend_name(job_id: str) -> str:
+    """For run files written before they recorded the backend."""
+    from .. import backends  # pylint: disable=import-outside-toplevel
+
+    return backends.backend_for_job(job_id).name
+
+
 def _insert_job(conn, job_id, record, status, code, usage, stamp) -> None:
     try:
         tags = json.dumps(json.loads(record.get("tags") or "[]"))
@@ -700,6 +707,7 @@ def _insert_job(conn, job_id, record, status, code, usage, stamp) -> None:
         "tags": tags,
         "username": record.get("user") or None,
         "joblog_path": record.get("joblog") or None,
+        "backend": record.get("backend") or _backend_name(job_id),
         **{k: v for k, v in usage.items() if v is not None},
     }
     columns = ", ".join(row)

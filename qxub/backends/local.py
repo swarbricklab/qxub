@@ -2,7 +2,8 @@
 
 No scheduler is involved. ``submit`` starts the job script detached from
 the terminal, with its output going to the job log, and records the job in
-``<status dir>/local/<job id>/``:
+``$XDG_STATE_HOME/qxub/local/<job id>/`` (not under the platform's status
+directory, so every platform finds it):
 
 - ``pid``: the process group running the job;
 - ``meta.json``: name, queue, job log, submission time, and host: the PID
@@ -51,12 +52,15 @@ exit "$code"
 
 
 def jobs_dir() -> Path:
-    """Where local jobs are recorded."""
-    from ..config.site import (  # pylint: disable=import-outside-toplevel
-        default_status_dir,
-    )
+    """Where local jobs are recorded.
 
-    return default_status_dir() / "local"
+    The same under every platform: a local job is cancelled or looked up
+    while another platform is current (#167 review), and the status
+    directory moves with the platform's scratch path.
+    """
+    from ..config.site import state_dir  # pylint: disable=import-outside-toplevel
+
+    return state_dir() / "local"
 
 
 def _job_env(spec: JobSpec, job_id: str) -> Dict[str, str]:
