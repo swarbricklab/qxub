@@ -82,7 +82,7 @@ def _run_template(tmp_path, template, env_file, **env):
     base = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PBS_JOBID": "1.x"}
     return (
         subprocess.run(
-            ["bash", str(JOBSCRIPTS / f"{template}.pbs")],
+            ["bash", str(JOBSCRIPTS / "job.sh")],
             env={**base, "QXUB_JOB_FILE": str(env_file), **env},
             capture_output=True,
             text=True,
@@ -111,7 +111,7 @@ def test_job_reads_everything_from_the_settings_file(tmp_path):
     env_file = tmp_path / "qx-1.env"
     env_file.write_text(runs.format_settings(settings))
 
-    result, _ = _run_template(tmp_path, "qdefault", env_file)
+    result, _ = _run_template(tmp_path, "default", env_file)
 
     assert result.returncode == 0, result.stderr
     assert (tmp_path / "seen").read_text() == AWKWARD
@@ -119,7 +119,7 @@ def test_job_reads_everything_from_the_settings_file(tmp_path):
 
 
 def test_missing_settings_file_fails_the_job_clearly(tmp_path):
-    result, _ = _run_template(tmp_path, "qdefault", tmp_path / "gone.env")
+    result, _ = _run_template(tmp_path, "default", tmp_path / "gone.env")
 
     assert result.returncode == 1
     assert "Cannot read the job settings file" in result.stderr

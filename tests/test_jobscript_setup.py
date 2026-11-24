@@ -14,7 +14,9 @@ import pytest
 from conftest import REPO_ROOT
 
 JOBSCRIPTS = REPO_ROOT / "qxub" / "jobscripts"
-TEMPLATES = ["qdefault", "qmod", "qconda", "qconda_mod", "qsing"]
+JOB_SCRIPT = JOBSCRIPTS / "job.sh"
+# Every execution context runs the same job script with different settings.
+TEMPLATES = ["default", "module", "conda", "conda_module", "singularity"]
 
 FAKE_MODULE = """#!/bin/bash
 # module load NAME: fails for names starting with "bad"
@@ -36,15 +38,19 @@ fi
 """
 
 FAKE_SINGULARITY = """#!/bin/bash
-# singularity exec [--bind X] IMAGE CMD...: the image must be one argument
+# singularity exec [--bind X] IMAGE CMD...: the image must be one argument.
+# Records the bind list, and marks what runs "inside" the container.
 shift
-[ "$1" = --bind ] && shift 2
+if [ "$1" = --bind ]; then
+    printf '%s' "$2" > "${FAKE_SING_BIND:-/dev/null}"
+    shift 2
+fi
 case "$1" in
     *://*) ;;
     *) [ -e "$1" ] || { echo "FATAL: could not open image $1" >&2; exit 255; } ;;
 esac
 shift
-"$@"
+INSIDE_CONTAINER=yes "$@"
 """
 
 
@@ -75,14 +81,18 @@ def job(tmp_path):
             "err": str(logs / "job.err"),
             "quiet": "false",
             "PBS_JOBID": "123.gadi-pbs",
-            "mods": "python3",
-            "env": "myenv",
-            "sif": str(image),
             "QXUB_RUN_FILE": str(tmp_path / "runs" / "qx-1.run"),
         }
+        # The settings qxub passes for each context
+        if template in ("module", "conda_module"):
+            env["mods"] = "python3"
+        if template in ("conda", "conda_module"):
+            env["env"] = "myenv"
+        if template == "singularity":
+            env["sif"] = str(image)
         env.update(overrides)
         result = subprocess.run(
-            ["bash", str(JOBSCRIPTS / f"{template}.pbs")],
+            ["bash", str(JOB_SCRIPT)],
             env=env,
             capture_output=True,
             text=True,
@@ -133,7 +143,7 @@ def test_create_execdir_with_spaces(job, tmp_path, template):
     assert (workdir / "ran").exists()
 
 
-@pytest.mark.parametrize("template", ["qmod", "qconda_mod"])
+@pytest.mark.parametrize("template", ["module", "conda_module"])
 def test_module_that_wont_load_is_named(job, tmp_path, template):
     result = job(template, mods="python3 bad-module")
 
@@ -143,7 +153,7 @@ def test_module_that_wont_load_is_named(job, tmp_path, template):
     assert not (tmp_path / "ran").exists()
 
 
-@pytest.mark.parametrize("template", ["qconda", "qconda_mod"])
+@pytest.mark.parametrize("template", ["conda", "conda_module"])
 def test_conda_env_that_wont_activate_is_named(job, tmp_path, template):
     result = job(template, env="missing")
 
@@ -154,7 +164,7 @@ def test_conda_env_that_wont_activate_is_named(job, tmp_path, template):
 
 
 def test_missing_singularity_image_is_named(job, tmp_path):
-    result = job("qsing", sif=str(tmp_path / "nope.sif"))
+    result = job("singularity", sif=str(tmp_path / "nope.sif"))
 
     assert result.returncode == 1
     assert f"Singularity image not found: {tmp_path / 'nope.sif'}" in result.err_file
@@ -167,21 +177,21 @@ def test_singularity_image_path_with_spaces_reaches_singularity(job, tmp_path):
     image.parent.mkdir()
     image.write_text("")
     for quiet in ("false", "true"):
-        result = job("qsing", sif=str(image), quiet=quiet)
+        result = job("singularity", sif=str(image), quiet=quiet)
         assert result.returncode == 0, result.stdout + result.stderr + result.err_file
         assert (tmp_path / "ran").exists()
         (tmp_path / "ran").unlink()
 
 
 def test_singularity_uri_is_not_checked_as_a_file(job, tmp_path):
-    result = job("qsing", sif="docker://ubuntu:22.04")
+    result = job("singularity", sif="docker://ubuntu:22.04")
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "ran").exists()
 
 
 def test_quiet_mode_reports_on_stderr_only(job, tmp_path):
     missing = tmp_path / "gone"
-    result = job("qdefault", cwd=str(missing), quiet="true")
+    result = job("default", cwd=str(missing), quiet="true")
 
     assert result.returncode == 1
     assert "execution directory does not exist" in result.stderr
@@ -216,7 +226,7 @@ def test_pre_and_post_keep_the_main_commands_output(job, tmp_path, template):
 
 def test_user_vars_reach_the_main_command_with_post(job, tmp_path):
     job(
-        "qdefault",
+        "default",
         command='echo "FOO=$FOO"',
         user_vars_b64=_b64("FOO=1"),
         post_cmd_b64=_b64("echo POST"),
@@ -236,3 +246,59 @@ def test_out_and_err_start_empty_on_a_rerun(job, tmp_path, template):
 
     assert (logs / "job.out").read_text() == "new\n"
     assert result.err_file == ""
+
+
+# -- one job script: how the steps run (step 6b) -------------------------------
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_what_pre_sets_up_reaches_the_command(job, tmp_path, template):
+    (tmp_path / "sub").mkdir()
+    result = job(
+        template,
+        'echo "$GREETING from ${PWD##*/}" > "$HOME/seen"',
+        pre_cmd_b64=_b64("export GREETING=hello; cd sub"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "seen").read_text() == "hello from sub\n"
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_steps_run_like_a_plain_shell(job, tmp_path, template):
+    """A failure part-way through a step doesn't stop it."""
+    result = job(
+        template,
+        "false; echo main-went-on",
+        pre_cmd_b64=_b64("false; touch pre-went-on"),
+        post_cmd_b64=_b64("false; touch post-went-on"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "logs" / "job.out").read_text() == "main-went-on\n"
+    assert (tmp_path / "pre-went-on").exists()
+    assert (tmp_path / "post-went-on").exists()
+
+
+def test_the_whole_command_runs_inside_the_container(job, tmp_path):
+    """Pipes and && used to be run by the host shell around singularity."""
+    result = job(
+        "singularity",
+        'echo x | (read; echo "${INSIDE_CONTAINER:-host}") && echo "${INSIDE_CONTAINER:-host}"',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "logs" / "job.out").read_text() == "yes\nyes\n"
+
+
+def test_bind_list_reaches_singularity_as_one_argument(job, tmp_path):
+    bound = tmp_path / "bound"
+    result = job(
+        "singularity",
+        "true",
+        bind="/g/data/ab12,/scratch/a dir",
+        FAKE_SING_BIND=str(bound),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert bound.read_text() == "/g/data/ab12,/scratch/a dir"

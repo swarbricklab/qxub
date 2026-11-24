@@ -89,6 +89,8 @@ Adding a backend would mean changing all four.
 
 ## C. Job script templates (`qxub/jobscripts/*.pbs`)
 
+*(Since step 6b there is one job script, `qxub/jobscripts/job.sh`; the line numbers below refer to the five templates it replaced.)*
+
 **C1. Lines 1-7 of all five templates: `#PBS` directives. High.**
 Every template starts with:
 `#PBS -N <name>`, `#PBS -P a56`, `#PBS -l storage=gdata/a56`, `#PBS -S /bin/bash`, `#PBS -W umask=0027`, `#PBS -j oe`.

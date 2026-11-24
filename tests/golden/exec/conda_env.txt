@@ -9,7 +9,7 @@ normal
 ab12
 -o
 <CWD>/python-<TIMESTAMP>.log
-<JOBSCRIPTS>/qconda.pbs
+<JOBSCRIPTS>/job.sh
 --- job settings (QXUB_JOB_FILE) ---
 # qxub job settings, read by the job script (QXUB_JOB_FILE)
 export env=myenv

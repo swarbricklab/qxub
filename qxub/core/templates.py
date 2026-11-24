@@ -9,6 +9,10 @@ import os
 from pathlib import Path
 
 
+JOB_SCRIPT = "job.sh"
+TEMPLATE_TYPES = ("conda", "module", "conda_module", "singularity", "default")
+
+
 def get_template(template_type: str, custom_template: str = None) -> str:
     """
     Get the appropriate job script template path.
@@ -29,19 +33,12 @@ def get_template(template_type: str, custom_template: str = None) -> str:
 
         raise FileNotFoundError(f"Custom template not found: {custom_template}")
 
-    # Template filename mapping
-    template_files = {
-        "conda": "qconda.pbs",
-        "module": "qmod.pbs",
-        "conda_module": "qconda_mod.pbs",
-        "singularity": "qsing.pbs",
-        "default": "qdefault.pbs",
-    }
-
-    if template_type not in template_files:
+    # One job script for every context: it sets up modules, a conda
+    # environment or a Singularity image from the job's settings.
+    if template_type not in TEMPLATE_TYPES:
         raise ValueError(f"Unknown template type: {template_type}")
 
-    template_filename = template_files[template_type]
+    template_filename = JOB_SCRIPT
 
     # Try importlib.resources first (modern approach)
     try:

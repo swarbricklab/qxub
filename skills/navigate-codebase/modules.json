@@ -328,10 +328,7 @@
   ],
 
   "jobscript_templates": [
-    { "path": "qxub/jobscripts/qconda.pbs",  "context": "conda" },
-    { "path": "qxub/jobscripts/qmod.pbs",     "context": "module" },
-    { "path": "qxub/jobscripts/qsing.pbs",    "context": "singularity" },
-    { "path": "qxub/jobscripts/qdefault.pbs", "context": "default" }
+    { "path": "qxub/jobscripts/job.sh", "context": "all (default, module, conda, conda_module, singularity)" }
   ],
 
   "platform_definitions": [

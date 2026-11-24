@@ -18,7 +18,7 @@ from conftest import REPO_ROOT, job_variables
 from qxub.config import site
 from qxub.platforms import core as platform_core
 
-JOBSCRIPTS = sorted((REPO_ROOT / "qxub" / "jobscripts").glob("*.pbs"))
+JOBSCRIPTS = sorted((REPO_ROOT / "qxub" / "jobscripts").glob("*.sh"))
 
 PLATFORM_YAML = """\
 platform:

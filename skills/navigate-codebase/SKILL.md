@@ -51,7 +51,7 @@ Run these from the skill directory, or pass the full path to `modules.json`.
   `config/aliases.py` and registered as entry points in `setup.py`.
 - **PBS interaction**: Always via `subprocess.run(['qsub', …])` /
   `subprocess.run(['qdel', …])` in `core/scheduler.py` — never direct API.
-- **Template system**: Job script templates in `qxub/jobscripts/*.pbs`.
+- **Template system**: one job script, `qxub/jobscripts/job.sh`, for every execution context.
   Selected by execution context (conda, module, singularity, default).
 - **Lazy imports**: `__init__.py` uses `__getattr__` to defer heavy CLI
   imports until actually invoked.
