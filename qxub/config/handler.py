@@ -84,6 +84,64 @@ def as_resource_spec(resources):
     return parse_pbs_resources(resources or [])
 
 
+def _resource_default(config_manager, key):
+    """``defaults.<key>`` (or the deprecated root-level ``<key>``)."""
+    value = config_manager.get_config_value(f"defaults.{key}")
+    if value is not None:
+        return value
+    value = config_manager.get_config_value(key)
+    if value is not None:
+        logger.warning(
+            "Config key '%s' at root level is deprecated. "
+            "Please move to 'defaults.%s' in your config file.",
+            key,
+            key,
+        )
+    return value
+
+
+def resolve_resources(
+    requested,
+    config_manager,
+    *,
+    memory=None,
+    walltime=None,
+    cpus=None,
+    disk=None,
+    gpus=None,
+    volumes=None,
+):
+    """A job's resources: ``requested`` (a ResourceSpec from ``-l`` or a
+    ``resources=`` dict), then qxub's own options, which win, then the
+    configured ``defaults.mem``, ``defaults.volumes``, ... for whatever
+    neither gave.
+
+    ``qxub exec`` and :func:`qxub.execution.submit_job` both use this, so a
+    job submitted from Python gets the same defaults (on Gadi, the
+    ``storage=`` its conda environment lives on) as one from the CLI.
+    Raises ``ValueError`` for an invalid value.
+    """
+    from ..resources.spec import ResourceSpec
+
+    def value(given, key, already_requested):
+        if given:
+            return given
+        return None if already_requested else _resource_default(config_manager, key)
+
+    options = ResourceSpec.from_options(
+        memory=value(memory, "mem", requested.memory is not None),
+        walltime=value(walltime, "runtime", requested.walltime is not None),
+        cpus=value(cpus, "cpus", requested.cpus is not None),
+        disk=value(disk, "disk", requested.disk is not None),
+        gpus=value(gpus, "gpus", requested.gpus is not None),
+    )
+    volumes = value(volumes, "volumes", "storage" in requested.native)
+    if volumes:
+        # NCI storage mounts; PBS-only for now, so kept as a native request
+        options.native["storage"] = str(volumes)
+    return requested.updated(options)
+
+
 def apply_config_defaults(params, config_manager):
     """Apply configuration defaults to CLI parameters."""
     defaults = config_manager.get_defaults()
