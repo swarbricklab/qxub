@@ -574,10 +574,41 @@ def monitor_job_single_thread(
     # Track job state
     job_started_notified = False
 
+    # A job that dies before it writes any status file (its status directory
+    # can't be created, the shell can't start, ...) would leave us waiting
+    # forever: also look for the exit status PBS appends to the joblog. One
+    # small file read, while the job is queued usually a missing file.
+    joblog_wait_check = min(joblog_check_interval, 15)
+    last_joblog_check = time.monotonic()
+
     # 4. Spinner while waiting for job to start - check status files every 0.5 seconds
     spinner = SimpleSpinner(quiet=quiet)
     try:
         while True:
+            if (
+                joblog_file
+                and time.monotonic() - last_joblog_check >= joblog_wait_check
+            ):
+                last_joblog_check = time.monotonic()
+                pbs_exit = read_exit_from_joblog_file(joblog_file)
+                if pbs_exit is not None and not (
+                    job_started_file.exists() or final_exit_code_file.exists()
+                ):
+                    # The job ended without writing status files here (it
+                    # may have written them elsewhere, or none at all).
+                    spinner.clear()
+                    if not quiet:
+                        if pbs_exit == 0:
+                            message = "✅ Job completed successfully"
+                        else:
+                            message = f"❌ Job failed with exit code {pbs_exit}"
+                        print_status(
+                            f"{message} (from its log, {joblog_file}; "
+                            f"no status files in {status_dir})",
+                            final=True,
+                        )
+                    return pbs_exit
+
             # Show spinner frame
             spinner.show_next_frame()
 

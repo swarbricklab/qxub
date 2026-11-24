@@ -333,6 +333,23 @@ def select_auto_queue(params):
     return params
 
 
+def with_status_dir_storage(resources, project):
+    """``resources`` plus the storage the job needs to reach qxub's status
+    directory, if it is charged to another project (see
+    :func:`qxub.config.site.status_dir_storage`)."""
+    from .site import status_dir_storage
+
+    needed = status_dir_storage(project)
+    if not needed:
+        return resources
+    volumes = [v for v in resources.native.get("storage", "").split("+") if v]
+    if needed in volumes:
+        return resources
+    return replace(
+        resources, native={**resources.native, "storage": "+".join(volumes + [needed])}
+    )
+
+
 def job_spec(params, script="", env=None):
     """The :class:`~qxub.backends.JobSpec` for processed job options."""
     from ..backends import JobSpec
@@ -343,7 +360,9 @@ def job_spec(params, script="", env=None):
         name=params["name"],
         queue=params.get("queue"),
         account=params.get("project") or None,
-        resources=as_resource_spec(params.get("resources")),
+        resources=with_status_dir_storage(
+            as_resource_spec(params.get("resources")), params.get("project")
+        ),
         job_log=str(params["joblog"]) if params.get("joblog") else None,
         mail_to=params.get("email") or None,
         mail_events=params.get("email_opts") or "ae",  # default: abort + end

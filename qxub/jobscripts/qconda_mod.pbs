@@ -52,12 +52,12 @@ set -e
 qxub_run_update() {
     [ -n "${QXUB_RUN_FILE:-}" ] || return 0
     local tmp="${QXUB_RUN_FILE%/*}/.${QXUB_RUN_FILE##*/}.$$.tmp"
-    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null
+    mkdir -p "${QXUB_RUN_FILE%/*}" 2>/dev/null || true
     {
         if [ -f "$QXUB_RUN_FILE" ]; then cat "$QXUB_RUN_FILE"; fi
         printf '%s
 ' "$@"
-    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+    } > "$tmp" 2>/dev/null && mv -f "$tmp" "$QXUB_RUN_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
     return 0
 }
 
@@ -91,7 +91,13 @@ trap 'error_handler' ERR
 # Create status directory for file-based monitoring
 # qxub passes the status directory; jobs from older qxub derive it from $out.
 STATUS_DIR="${QXUB_STATUS_DIR:-${out%/*}/status}"
-mkdir -p "$STATUS_DIR"
+if ! mkdir -p "$STATUS_DIR" 2>/dev/null; then
+    # e.g. another project's scratch, not mounted for this job: carry on
+    # next to $out rather than failing the job.
+    echo "⚠️  Cannot create the status directory $STATUS_DIR; using ${out%/*}/status instead" >&2
+    STATUS_DIR="${out%/*}/status"
+    mkdir -p "$STATUS_DIR"
+fi
 # Status files are named after the qxub run ID, not the scheduler's job ID.
 # native_<job ID> lets readers that only know the job ID find the run ID.
 STATUS_KEY="${QXUB_RUN_ID:-${PBS_JOBID:-unknown}}"

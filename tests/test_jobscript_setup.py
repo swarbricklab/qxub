@@ -91,7 +91,8 @@ def job(tmp_path):
         )
         err = logs / "job.err"
         result.err_file = err.read_text() if err.exists() else ""
-        result.run_file = (tmp_path / "runs" / "qx-1.run").read_text()
+        run_file = Path(env["QXUB_RUN_FILE"])
+        result.run_file = run_file.read_text() if run_file.exists() else ""
         return result
 
     return run

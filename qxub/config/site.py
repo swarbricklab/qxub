@@ -56,6 +56,24 @@ def scratch_dir() -> Optional[Path]:
     return Path(template.format(project=project or "", user=_user()))
 
 
+def status_dir_storage(job_project: Optional[str]) -> Optional[str]:
+    """The storage request a job charged to ``job_project`` needs to reach
+    :func:`default_status_dir`, or ``None`` if it needs none.
+
+    On Gadi the status directory is under the *default* project's scratch,
+    and a job only sees its own project's scratch plus what ``storage=``
+    asks for. The platform's ``paths.scratch_storage`` names the request.
+    """
+    platform = current_platform()
+    template = platform.paths.get("scratch_storage") if platform else None
+    project = default_project()
+    if not template or not project or not job_project or job_project == project:
+        return None
+    if scratch_dir() is None:
+        return None
+    return template.format(project=project, user=_user())
+
+
 def default_status_dir() -> Path:
     """Where status files for interactive sessions and monitoring live.
 

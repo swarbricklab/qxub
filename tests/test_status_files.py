@@ -8,6 +8,7 @@ so jobs sharing an output directory overwrote each other's.
 """
 
 import pytest
+from test_golden_pbs_submission import dry_run_qsub_argv
 from test_jobscript_setup import TEMPLATES, _b64, job  # noqa: F401 (fixture)
 
 from qxub.core.scheduler import (
@@ -110,3 +111,64 @@ def test_job_env_names_the_status_dir(monkeypatch, tmp_path):
     env = runs.job_env("qx-1", tmp_path / "st" / "runs" / "qx-1.run")
     assert env["QXUB_STATUS_DIR"] == str(tmp_path / "st")
     assert env["QXUB_RUN_ID"] == "qx-1"
+
+
+# -- jobs charged to another project (review of #154) -------------------------
+
+
+def _storage(argv):
+    values = [argv[i + 1] for i, a in enumerate(argv) if a == "-l"]
+    return [v for v in values if v.startswith("storage=")]
+
+
+@pytest.mark.parametrize(
+    "args, expected",
+    [
+        (["-P", "px14"], ["storage=scratch/a56"]),
+        (["-P", "px14", "--volumes", "gdata/px14"], ["storage=gdata/px14+scratch/a56"]),
+        (["-P", "px14", "--volumes", "scratch/a56"], ["storage=scratch/a56"]),
+        (["-P", "a56"], []),  # the default project: its scratch is mounted
+    ],
+)
+def test_another_project_gets_the_status_dirs_scratch(sandbox, args, expected):
+    """Gadi mounts only the job's own scratch; qxub's status dir is under $PROJECT's."""
+    sandbox.use_gadi_platform()
+    result = sandbox.run(
+        "exec", "--dry-run", *args, "--", "true", env={"PROJECT": "a56"}
+    )
+    assert _storage(dry_run_qsub_argv(result)) == expected
+
+
+def test_unreachable_status_dir_does_not_fail_the_job(job, tmp_path):
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    result = job(
+        "qdefault",
+        QXUB_RUN_ID="qx-1",
+        QXUB_STATUS_DIR=str(blocker / "status"),
+        QXUB_RUN_FILE=str(blocker / "runs" / "qx-1.run"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "ran").exists()
+    assert "Cannot create the status directory" in result.stderr
+    assert _first_line(tmp_path / "logs" / "status" / "final_exit_code_qx-1") == "0"
+
+
+@pytest.mark.parametrize("pbs_exit", [1, 0])
+def test_exec_monitor_stops_when_the_joblog_ends_first(tmp_path, pbs_exit):
+    """No status file ever appears: the joblog's exit status ends the wait."""
+    joblog = tmp_path / "job.log"
+    joblog.write_text(f"=====\nExit Status:        {pbs_exit}\n")
+
+    exit_status = monitor_job_single_thread(
+        PBS_ID,
+        tmp_path / "job.out",
+        tmp_path / "job.err",
+        quiet=True,
+        joblog_file=joblog,
+        joblog_check_interval=0,
+        run_id="qx-9",
+        status_dir=tmp_path / "status",
+    )
+    assert exit_status == pbs_exit
