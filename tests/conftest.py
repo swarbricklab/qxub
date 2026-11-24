@@ -61,10 +61,21 @@ def pytest_configure(config):
         QXUB_AUTO_CONSOLIDATE="0",
     )
 
+    # Every Python the tests start imports this checkout's qxub first, not
+    # an installed one the interpreter can also see (#163 review: a venv on
+    # Gadi saw qxub 3.9.1 in another environment's site-packages).
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        p for p in [str(REPO_ROOT), os.environ.get("PYTHONPATH", "")] if p
+    )
+
     # `qxub` on PATH is this checkout's CLI, run by the interpreter under
     # test, whether or not (and whichever) qxub is installed.
     shim = bin_dir / "qxub"
-    shim.write_text(f"#!{sys.executable}\n{_CLI_SHIM.replace('; ', chr(10))}\n")
+    shim.write_text(
+        f"#!{sys.executable}\n"
+        f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        f"{_CLI_SHIM.replace('; ', chr(10))}\n"
+    )
     shim.chmod(0o755)
     os.environ["PATH"] = os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")])
 
