@@ -116,20 +116,33 @@ def fastest_of(measure, limit: float, attempts: int = 3) -> float:
     return best
 
 
-def timed_run(argv, limit: float, timeout: float, attempts: int = 3):
-    """Run ``argv``; return its last result and its fastest time (see
-    :func:`fastest_of`)."""
-    results = []
+def timed_run(argv, limit: float, timeout=None, attempts: int = 3):
+    """Run ``argv`` up to ``attempts`` times (see :func:`fastest_of`).
+
+    Returns the fastest run's result and time. A run that hits ``timeout``
+    (default: twice ``limit``) counts as a slow try, not an error; only if
+    every try times out does the test fail.
+    """
+    timeout = timeout if timeout is not None else 2 * limit
+    runs = []  # (seconds, result or None if it timed out)
 
     def measure():
         start = time.perf_counter()
-        results.append(
-            subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-        )
-        return time.perf_counter() - start
+        try:
+            result = subprocess.run(
+                argv, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            runs.append((float(timeout), None))
+        else:
+            runs.append((time.perf_counter() - start, result))
+        return runs[-1][0]
 
-    elapsed = fastest_of(measure, limit, attempts)
-    return results[-1], elapsed
+    fastest_of(measure, limit, attempts)
+    elapsed, result = min(runs, key=lambda run: run[0])
+    if result is None:
+        pytest.fail(f"{' '.join(argv)} timed out after {timeout}s on every try")
+    return result, elapsed
 
 
 @pytest.fixture
