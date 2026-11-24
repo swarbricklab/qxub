@@ -172,3 +172,89 @@ def test_exec_monitor_stops_when_the_joblog_ends_first(tmp_path, pbs_exit):
         status_dir=tmp_path / "status",
     )
     assert exit_status == pbs_exit
+
+
+# -- a command that calls exit ------------------------------------------------
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_exit_in_the_command_is_recorded(job, tmp_path, template):
+    """``exit N`` ends the command, not the job script before it records N."""
+    status = tmp_path / "status"
+    result = job(template, "exit 3", QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status))
+
+    assert result.returncode == 3
+    assert _first_line(status / "final_exit_code_qx-1") == "3"
+    assert "exit_code=3" in result.run_file
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_exit_0_in_the_command_still_runs_post(job, tmp_path, template):
+    status = tmp_path / "status"
+    result = job(
+        template,
+        "exit 0",
+        QXUB_RUN_ID="qx-1",
+        QXUB_STATUS_DIR=str(status),
+        post_cmd_b64=_b64("touch post_ran"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "post_ran").exists()
+    assert _first_line(status / "final_exit_code_qx-1") == "0"
+
+
+@pytest.mark.parametrize("step", ["pre", "post"])
+def test_exit_in_pre_or_post_is_recorded(job, tmp_path, step):
+    """qdefault evals --pre/--post in the job's shell, so exit ends the job."""
+    status = tmp_path / "status"
+    result = job(
+        "qdefault",
+        "true",
+        QXUB_RUN_ID="qx-1",
+        QXUB_STATUS_DIR=str(status),
+        **{f"{step}_cmd_b64": _b64("exit 4")},
+    )
+
+    assert result.returncode == 4
+    assert _first_line(status / "final_exit_code_qx-1") == "4"
+
+
+# -- the summary names the failed step (review of #155) -----------------------
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+@pytest.mark.parametrize(
+    "command, post, code, summary",
+    [
+        ("sh -c 'exit 3'", None, 3, "(main ❌(3))"),
+        ("exit 3", None, 3, "(main ❌(3))"),
+        ("true", "sh -c 'exit 4'", 4, "(main ✅, post ❌(4))"),
+    ],
+)
+def test_summary_names_the_failed_step(
+    job, tmp_path, template, command, post, code, summary
+):
+    status = tmp_path / "status"
+    extra = {"post_cmd_b64": _b64(post)} if post else {}
+    result = job(
+        template, command, QXUB_RUN_ID="qx-1", QXUB_STATUS_DIR=str(status), **extra
+    )
+
+    assert result.returncode == code
+    message = _format_completion_message(PBS_ID, code, status)
+    assert message.endswith(summary), message
+
+
+def test_exit_in_qdefault_post_is_named(job, tmp_path):
+    status = tmp_path / "status"
+    job(
+        "qdefault",
+        "true",
+        QXUB_RUN_ID="qx-1",
+        QXUB_STATUS_DIR=str(status),
+        post_cmd_b64=_b64("exit 4"),
+    )
+    assert _format_completion_message(PBS_ID, 4, status).endswith(
+        "(main ✅, post ❌(4))"
+    )
