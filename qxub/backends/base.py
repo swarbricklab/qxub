@@ -1,6 +1,6 @@
 """The interface qxub uses to ask a scheduler about jobs and to cancel them.
 
-Each scheduler (PBS Pro, and later Slurm, a local runner and others) gets
+Each scheduler (PBS Pro, Slurm, a local runner, and later others) gets
 one :class:`SchedulerBackend`. The platform definition's ``type`` picks
 which one (see :func:`qxub.backends.get_backend`).
 
@@ -9,6 +9,7 @@ A job to submit, or an interactive session to start, is described by a
 ``-l ncpus=…``).
 """
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, fields
 from datetime import datetime
@@ -44,10 +45,12 @@ class JobState(str, Enum):
 #: :attr:`JobInfo.ended_by` values, when the scheduler can tell.
 ENDED_BY_WALLTIME = "walltime"  # killed for running past its walltime
 ENDED_BY_CANCEL = "cancelled"  # cancelled (qxub cancel, qdel, ...)
+ENDED_BY_MEMORY = "memory"  # killed for using more memory than it asked for
 
 _ENDED_BY_TEXT = {
     ENDED_BY_WALLTIME: "stopped at its walltime limit",
     ENDED_BY_CANCEL: "cancelled",
+    ENDED_BY_MEMORY: "stopped for exceeding its memory limit",
 }
 
 
@@ -128,6 +131,34 @@ class JobInfo:
         if self.started and self.finished:
             return int((self.finished - self.started).total_seconds())
         return None
+
+
+class JobEnd(NamedTuple):
+    """How a job ended, as its scheduler reports it."""
+
+    exit_status: int
+    ended_by: Optional[str] = None
+
+
+_JOB_LOG_EXIT_RE = re.compile(r"Exit Status:\s*(-?\d+)")
+
+
+def read_job_log_exit(path) -> Optional[int]:
+    """The exit status in a job log's ``Exit Status:`` line, if it has one.
+
+    Gadi's PBS appends that line when a job ends, however it ended; the
+    local backend writes it too. One read of one file.
+    """
+    try:
+        with open(str(path), "r", encoding="utf-8") as f:
+            found = _JOB_LOG_EXIT_RE.search(f.read())
+    except (OSError, ValueError):
+        return None
+    return int(found.group(1)) if found else None
+
+
+# The state letters `qxub cancel all --status` takes (PBS's)
+_LIVE_STATES = {"Q": JobState.QUEUED, "R": JobState.RUNNING, "H": JobState.HELD}
 
 
 class SchedulerQueryError(Exception):
@@ -266,6 +297,26 @@ class SchedulerBackend(ABC):
         directory, which may not be the one the job was submitted with.
         """
         return None
+
+    def live_state(self, state: str) -> JobState:
+        """What a :class:`LiveJob`'s ``state`` (the scheduler's own code)
+        means, so jobs can be filtered the same way on every scheduler."""
+        return _LIVE_STATES.get(state, JobState.UNKNOWN)
+
+    def job_end(self, job_id: str, job_log=None) -> Optional[JobEnd]:
+        """How ``job_id`` ended, once the scheduler has ended it; ``None``
+        while it is queued or running, or if that can't be told.
+
+        ``qxub exec`` asks this every so often, for a job that ends without
+        recording its exit in qxub's status files (killed at its walltime,
+        cancelled outside qxub, or unable to start). It should be cheap. By
+        default it reads the job log's ``Exit Status:`` line
+        (:func:`read_job_log_exit`).
+        """
+        exit_status = read_job_log_exit(job_log) if job_log else None
+        if exit_status is None:
+            return None
+        return JobEnd(exit_status, self.ended_by(exit_status))
 
     def ended_by(self, exit_status: Optional[int]) -> Optional[str]:
         """Why the scheduler ended a job, if its exit status says

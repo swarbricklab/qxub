@@ -16,7 +16,7 @@ from typing import Optional
 
 import click
 
-from .config.site import default_project, default_status_dir
+from .config.site import default_project, default_queue, default_status_dir
 
 
 def _get_config_manager():
@@ -90,7 +90,7 @@ def _get_default_cpus() -> int | None:
         return None
 
 
-def _get_default_queue() -> str:
+def _get_default_queue() -> Optional[str]:
     """Get default queue from config or fallback."""
     try:
         config_mgr = _get_config_manager()
@@ -102,7 +102,7 @@ def _get_default_queue() -> str:
         general_queue = config_mgr.get_config_value("defaults.queue")
         if general_queue:
             return general_queue
-        return "normal"
+        return default_queue()
     except Exception:
         return "normal"
 

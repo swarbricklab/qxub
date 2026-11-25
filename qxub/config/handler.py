@@ -142,6 +142,13 @@ def resolve_resources(
     return requested.updated(options)
 
 
+def _fallback_queue():
+    """The queue when auto-selection finds none (``site.default_queue``)."""
+    from .site import default_queue
+
+    return default_queue()
+
+
 def apply_config_defaults(params, config_manager):
     """Apply configuration defaults to CLI parameters."""
     defaults = config_manager.get_defaults()
@@ -154,7 +161,9 @@ def apply_config_defaults(params, config_manager):
     if params["joblog"] is None:
         params["joblog"] = defaults.get("joblog")
     if params["queue"] is None:
-        params["queue"] = defaults.get("queue", "normal")
+        from .site import default_queue
+
+        params["queue"] = defaults.get("queue") or default_queue()
     if params["name"] is None:
         configured_name = defaults.get("name")
         if configured_name:
@@ -291,7 +300,7 @@ def select_auto_queue(params):
 
         if not platform_names:
             _warn_auto_queue_fallback("No platforms available for auto queue selection")
-            params["queue"] = "normal"
+            params["queue"] = _fallback_queue()
             return params
 
         # Build requirements from resources. Sizes and durations are passed
@@ -375,18 +384,18 @@ def select_auto_queue(params):
             )
         else:
             _warn_auto_queue_fallback("No suitable queue found for requirements")
-            params["queue"] = "normal"
+            params["queue"] = _fallback_queue()
 
     except ImportError:
         _warn_auto_queue_fallback(
             "Platform system not available for auto queue selection"
         )
-        params["queue"] = "normal"
+        params["queue"] = _fallback_queue()
     except click.ClickException:
         raise
     except Exception as e:
         _warn_auto_queue_fallback(f"Auto queue selection failed: {e}")
-        params["queue"] = "normal"
+        params["queue"] = _fallback_queue()
 
     return params
 

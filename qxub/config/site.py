@@ -40,6 +40,22 @@ def default_project() -> Optional[str]:
     return None
 
 
+def default_queue() -> Optional[str]:
+    """The queue a job goes to when none is asked for.
+
+    The platform's ``default_queue``; else ``normal`` (Gadi's, and qxub's
+    old fixed default) if there is no platform or it has a queue of that
+    name; else ``None``, leaving it to the scheduler (Slurm's default
+    partition).
+    """
+    platform = current_platform()
+    if platform is None:
+        return "normal"
+    if platform.default_queue:
+        return platform.default_queue
+    return "normal" if "normal" in platform.queues else None
+
+
 def scratch_dir() -> Optional[Path]:
     """The per-user shared scratch directory, if the platform defines one.
 

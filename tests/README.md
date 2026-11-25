@@ -14,11 +14,15 @@ This runs in CI (`.github/workflows/tests.yml`) on every push and pull request.
   commands. They record each call and print realistic output, so submit,
   cancel and accounting code runs without PBS. Failures are injected with
   environment variables; see `tests/fakes/pbs/_fake_pbs.py`.
+- **Fake Slurm:** `tests/fakes/slurm/` does the same for `sbatch`, `squeue`,
+  `sacct` and `scancel` (`tests/fakes/slurm/_fake_slurm.py`).
 - **`sandbox` fixture** (`tests/conftest.py`): runs `qxub` in a subprocess
   with its own `HOME`, XDG config and working directory, and the fake PBS
-  first on `PATH`, so `qsub`, `qstat` and `qdel` never reach a real
-  scheduler, even on Gadi.
-  `sandbox.pbs_calls("qsub")` returns what was submitted.
+  and Slurm first on `PATH`, so their commands never reach a real
+  scheduler, even on a cluster.
+  `sandbox.pbs_calls("qsub")` returns what was submitted;
+  `sandbox.use_slurm_platform()` selects `docs/platforms/slurm/slurm.yaml`,
+  and `sandbox.slurm_calls("sbatch")` returns what it submitted.
 - **Golden files** (`tests/golden/`): `test_golden_pbs_submission.py` pins
   the exact `qsub` command line for a set of `qxub exec` calls. After an
   intentional change, run `python -m pytest --update-golden` and review the

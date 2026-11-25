@@ -629,6 +629,14 @@ def cancel_by_filter(
     )
 
 
+# `cancel all --status` letters, as each backend reads its jobs' states
+_STATUS = {
+    "Q": backends.JobState.QUEUED,
+    "R": backends.JobState.RUNNING,
+    "H": backends.JobState.HELD,
+}
+
+
 @cancel_cli.command(name="all")
 @click.option(
     "--user", "-u", help="Cancel only jobs for specific user (default: current user)"
@@ -638,7 +646,8 @@ def cancel_by_filter(
     "--status",
     "-s",
     type=click.Choice(["Q", "R", "H"]),
-    help="Cancel only jobs with specific status (Q=queued, R=running, H=held)",
+    help="Cancel only jobs with specific status (Q=queued, R=running, H=held; "
+    "each scheduler's own states map to these)",
 )
 @click.option(
     "--all-backends",
@@ -675,7 +684,7 @@ def cancel_all(
             (backend, job.job_id)
             for backend, job in live
             if (accepted_queues is None or job.queue in accepted_queues)
-            and (status is None or job.state == status)
+            and (status is None or backend.live_state(job.state) is _STATUS[status])
         ]
     except SchedulerQueryError as exc:
         click.echo(f"❌ Failed to get job list for user '{user}': {exc}", err=True)

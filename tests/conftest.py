@@ -48,7 +48,7 @@ def pytest_configure(config):
     for name in list(os.environ):
         if name.startswith("QXUB_TEST_"):
             continue
-        if name.startswith(("QXUB_", "PBS_")) or name == "PROJECT":
+        if name.startswith(("QXUB_", "PBS_", "SLURM_")) or name == "PROJECT":
             del os.environ[name]
     os.environ.update(
         HOME=str(home),
@@ -157,7 +157,9 @@ def cold_import_time():
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FAKE_PBS_BIN = Path(__file__).resolve().parent / "fakes" / "pbs"
+FAKE_SLURM_BIN = Path(__file__).resolve().parent / "fakes" / "slurm"
 GADI_PLATFORM_DIR = REPO_ROOT / "docs" / "platforms"
+SLURM_PLATFORM = GADI_PLATFORM_DIR / "slurm" / "slurm.yaml"
 
 # Run the CLI the way the console script does, but with a stable prog name.
 _CLI_SHIM = "import sys; sys.argv[0] = 'qxub'; from qxub.cli import qxub; qxub()"
@@ -168,8 +170,9 @@ class QxubSandbox:
 
     Each sandbox has its own ``HOME``, XDG config directories and working
     directory, so no user or system qxub config leaks in. The fake ``qsub``,
-    ``qstat`` and ``qdel`` from ``tests/fakes/pbs`` come first on ``PATH``,
-    so nothing can reach a real scheduler even on a PBS login node.
+    ``qstat`` and ``qdel`` from ``tests/fakes/pbs``, and the fake Slurm
+    commands from ``tests/fakes/slurm``, come first on ``PATH``, so nothing
+    can reach a real scheduler even on a cluster login node.
     """
 
     def __init__(self, root: Path):
@@ -177,21 +180,25 @@ class QxubSandbox:
         self.home = self.root / "home"
         self.cwd = self.root / "work"
         self.pbs_state = self.root / "pbs"
+        self.slurm_state = self.root / "slurm"
         for path in (self.home, self.cwd, self.pbs_state, self.root / "xdg"):
             path.mkdir(parents=True, exist_ok=True)
 
         env = {
             k: v
             for k, v in os.environ.items()
-            if not k.startswith(("QXUB_", "PBS_", "FAKE_"))
+            if not k.startswith(("QXUB_", "PBS_", "SLURM_", "FAKE_"))
             and k not in ("PROJECT", "HOSTNAME", "XDG_STATE_HOME")
         }
         env.update(
             HOME=str(self.home),
             XDG_CONFIG_HOME=str(self.home / ".config"),
             XDG_CONFIG_DIRS=str(self.root / "xdg"),
-            PATH=os.pathsep.join([str(FAKE_PBS_BIN), env.get("PATH", "")]),
+            PATH=os.pathsep.join(
+                [str(FAKE_PBS_BIN), str(FAKE_SLURM_BIN), env.get("PATH", "")]
+            ),
             FAKE_PBS_STATE=str(self.pbs_state),
+            FAKE_SLURM_STATE=str(self.slurm_state),
             NO_COLOR="1",
             XDG_STATE_HOME=str(self.home / ".local" / "state"),
             # Never match a platform's host pattern by accident (e.g. on Gadi)
@@ -224,6 +231,10 @@ class QxubSandbox:
             f"    definition: {definition}\n" + extra_config
         )
 
+    def use_slurm_platform(self) -> None:
+        """Select the example Slurm platform (``docs/platforms/slurm``)."""
+        self.env["QXUB_PLATFORM_FILE"] = str(SLURM_PLATFORM)
+
     def run(self, *args: str, env: dict = None, input: str = None, timeout=60):
         """Run ``qxub *args`` and return the ``CompletedProcess``."""
         return subprocess.run(
@@ -245,6 +256,25 @@ class QxubSandbox:
             return []
         calls = [json.loads(line) for line in log.read_text().splitlines()]
         return [c for c in calls if command is None or c["cmd"] == command]
+
+    def slurm_calls(self, command: str = None) -> list:
+        """Calls the fake Slurm commands received, oldest first."""
+        log = self.slurm_state / "calls.jsonl"
+        if not log.exists():
+            return []
+        calls = [json.loads(line) for line in log.read_text().splitlines()]
+        return [c for c in calls if command is None or c["cmd"] == command]
+
+    def slurm_live_jobs(self) -> dict:
+        """Jobs the fake Slurm still lists: ``{job_id: {name, queue, state}}``."""
+        path = self.slurm_state / "live.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def set_sacct(self, job_id: str, text: str) -> None:
+        """Set what ``sacct --jobs=job_id`` prints."""
+        sacct_dir = self.slurm_state / "sacct"
+        sacct_dir.mkdir(parents=True, exist_ok=True)
+        (sacct_dir / f"{job_id}.txt").write_text(text)
 
     def fail_qsub(self, exit_code: int, stderr: str) -> None:
         self.env["FAKE_QSUB_EXIT"] = str(exit_code)

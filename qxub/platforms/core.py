@@ -218,6 +218,8 @@ class Platform:
     paths: Dict[str, str] = field(default_factory=dict)
     # Scheduler arguments added to every submission, e.g. "-W umask=0027".
     default_directives: List[str] = field(default_factory=list)
+    # The queue a job goes to when none is asked for (``site.default_queue``)
+    default_queue: Optional[str] = None
 
     def matches_host(self, hostname: str) -> bool:
         """Whether ``hostname`` belongs to this platform.
@@ -430,6 +432,7 @@ class PlatformLoader:
             account_env=data.get("account_env"),
             paths=dict(data.get("paths") or {}),
             default_directives=list(data.get("default_directives") or []),
+            default_queue=data.get("default_queue") or None,
         )
 
     def _create_queue(self, data: Dict[str, Any]) -> Queue:

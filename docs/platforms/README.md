@@ -28,6 +28,19 @@ export QXUB_PLATFORM_FILE=/path/to/qxub/docs/platforms/local/local.yaml
 It lives in its own directory so that a search path pointing at
 `docs/platforms` loads only real clusters.
 
+### A Slurm cluster (`slurm/slurm.yaml`)
+An example for `type: slurm` (`qxub.backends.slurm.SlurmBackend`). Copy it
+and replace its partitions and limits with your cluster's. qxub's queues are
+partitions and `--project/-P` is `--account`. Jobs are submitted with
+`sbatch`, listed with `squeue`, looked up with `sacct` and cancelled with
+`scancel`; interactive sessions use `srun --pty`. `-l name=value` requests
+other than qxub's own become `--name=value` (`-l constraint=skylake`).
+
+With no `--queue`, a job goes to the platform's `default_queue`, else to a
+queue named `normal` if the platform has one, else to Slurm's default
+partition. The status directory must be visible from the compute nodes:
+set `paths.scratch`, or rely on `~/.local/state/qxub` where home is shared.
+
 ## Installation
 
 ### System-Level (Recommended)
