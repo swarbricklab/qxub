@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 import json
 import re
 import time
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import List
 
@@ -638,9 +639,17 @@ def cancel_by_filter(
     type=click.Choice(["Q", "R", "H"]),
     help="Cancel only jobs with specific status (Q=queued, R=running, H=held)",
 )
+@click.option(
+    "--all-backends",
+    is_flag=True,
+    help="Also cancel jobs of other schedulers on this machine (local jobs "
+    "under a cluster platform, cluster jobs under the local one)",
+)
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompt")
 @click.option("--quiet", is_flag=True, help="Minimize output messages")
-def cancel_all(user, queue, status, force, quiet):
+def cancel_all(
+    user, queue, status, all_backends, force, quiet
+):  # pylint: disable=too-many-arguments,too-many-positional-arguments
     """Cancel all jobs matching criteria (DANGEROUS - use with caution)."""
     import os
 
@@ -653,16 +662,26 @@ def cancel_all(user, queue, status, force, quiet):
     # -> `copyq-exec`). Accept either so `--queue copyq` works as users expect.
     accepted_queues = {queue, f"{queue}-exec"} if queue else None
 
+    # Only the current platform's jobs unless asked: trying jobs out on the
+    # local platform, `cancel all -f` shouldn't kill your cluster jobs.
     try:
-        matching_jobs = [
-            job.job_id
-            for _backend, job in backends.live_jobs(user)
+        if all_backends:
+            live = backends.live_jobs(user)
+        else:
+            current = backends.get_backend()
+            live = [(current, job) for job in current.list_jobs(user)]
+        matching = [
+            (backend, job.job_id)
+            for backend, job in live
             if (accepted_queues is None or job.queue in accepted_queues)
             and (status is None or job.state == status)
         ]
     except SchedulerQueryError as exc:
         click.echo(f"❌ Failed to get job list for user '{user}': {exc}", err=True)
         return 1
+
+    matching_jobs = [job_id for _backend, job_id in matching]
+    by_backend = Counter(backend.name for backend, _job_id in matching)
 
     if not matching_jobs:
         if not quiet:
@@ -676,6 +695,12 @@ def cancel_all(user, queue, status, force, quiet):
     # Safety check and confirmation
     click.echo(
         f"⚠️  WARNING: This will cancel {len(matching_jobs)} job(s) for user '{user}'"
+        # Which scheduler's, when there is more than one
+        + (
+            " (" + ", ".join(f"{n} {name}" for name, n in by_backend.items()) + ")"
+            if len(by_backend) > 1
+            else ""
+        )
     )
     if queue:
         click.echo(f"   Queue filter: {queue}")

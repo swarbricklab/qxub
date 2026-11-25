@@ -319,7 +319,7 @@ class PlatformRemoteExecutor:
             )
             print(
                 f"⚠️  Remote command on {self.hostname} {reason}. "
-                f"No job was submitted, so retrying is safe. "
+                f"No submission was reported, so retrying. "
                 f"Retrying ({attempt}/{max_retries}) in {delay:.1f}s.",
                 file=sys.stderr,
             )

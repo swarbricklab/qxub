@@ -42,7 +42,9 @@ def _local_job_finished(sandbox, job_id, timeout=10):
 # -- cancelling ---------------------------------------------------------------
 
 
-def test_cancel_all_cancels_local_and_pbs_jobs_under_gadi(sandbox):
+def test_cancel_all_cancels_only_this_platforms_jobs_unless_asked(sandbox):
+    """#168 review: under the local platform, `cancel all -f` shouldn't
+    also kill your cluster jobs; other backends' jobs are opt-in."""
     local_id = _local_job(sandbox)
     sandbox.use_gadi_platform()
     sandbox.env["PROJECT"] = "a56"
@@ -50,10 +52,16 @@ def test_cancel_all_cancels_local_and_pbs_jobs_under_gadi(sandbox):
     pbs_id = pbs.stdout.strip()
     assert pbs.returncode == 0 and pbs_id in sandbox.live_jobs(), pbs.stderr
 
-    result = sandbox.run("cancel", "all", "-f")
+    only_pbs = sandbox.run("cancel", "all", input="n\n")
+    assert pbs_id in only_pbs.stdout and local_id not in only_pbs.stdout
+    assert "(1 " not in only_pbs.stdout, "no breakdown for one backend"
 
+    asked = sandbox.run("cancel", "all", "--all-backends", input="n\n")
+    assert "2 job(s)" in asked.stdout and "(1 pbs, 1 local)" in asked.stdout
+    assert sandbox.pbs_calls("qdel") == [], "answered no"
+
+    result = sandbox.run("cancel", "all", "--all-backends", "-f")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert local_id in result.stdout and pbs_id in result.stdout
     assert [c["argv"][-1] for c in sandbox.pbs_calls("qdel")] == [pbs_id]
     assert _local_job_finished(sandbox, local_id)
 
@@ -168,13 +176,14 @@ def test_dropped_connection_after_an_announced_job_is_not_retried(
     assert handshake.MARKER not in out + err.replace("already submitted", "")
 
 
-def test_dropped_connection_before_any_job_is_retried(monkeypatch, tmp_path):
+def test_dropped_connection_before_any_job_is_retried(monkeypatch, capfd, tmp_path):
     attempts = tmp_path / "attempts"
     executor = _executor(monkeypatch, f"echo x >> {attempts}; exit 255")
     monkeypatch.setenv("QXUB_REMOTE_EXEC_MAX_RETRIES", "1")
 
     assert executor.execute("qxub exec -- true") == 255
     assert attempts.read_text().count("x") == 2
+    assert "No submission was reported" in capfd.readouterr().err
 
 
 def test_remote_command_asks_for_the_announcement():
