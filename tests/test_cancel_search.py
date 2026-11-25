@@ -6,6 +6,7 @@ long ago. Now candidates are the rows whose job the scheduler still lists,
 from one ``qstat -w -u`` call, and job names come from the DB.
 """
 
+import os
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -226,3 +227,48 @@ def test_quoted_status_is_normalised():
 
 def test_cancelled_has_a_label():
     assert _format_status("cancelled") == "🚫 Cancelled"
+
+
+def test_joblog_outcome_reads_only_this_users_regular_file(tmp_path):
+    """Security: the name is opened once, without following a link, and
+    that open file is what is checked and read."""
+    from qxub.resources.tracker import _joblog_outcome
+
+    joblog = tmp_path / "job.log"
+    joblog.write_text(JOBLOG.format(job_id="1.gadi-pbs", code=3))
+    assert _joblog_outcome("1.gadi-pbs", str(joblog)) == ("failed", 3, None)
+    assert _joblog_outcome("2.gadi-pbs", str(joblog)) is None
+
+    link = tmp_path / "link.log"
+    link.symlink_to(joblog)
+    assert _joblog_outcome("1.gadi-pbs", str(link)) is None
+
+    fifo = tmp_path / "fifo.log"
+    os.mkfifo(fifo)
+    assert _joblog_outcome("1.gadi-pbs", str(fifo)) is None  # doesn't block
+
+
+def test_joblog_outcome_uses_the_last_usage_block(tmp_path):
+    """The job's own output can imitate the scheduler's footer."""
+    from qxub.resources.tracker import _joblog_outcome
+
+    joblog = tmp_path / "job.log"
+    joblog.write_text(
+        JOBLOG.format(job_id="1.gadi-pbs", code=0)
+        + JOBLOG.format(job_id="1.gadi-pbs", code=137)
+    )
+    assert _joblog_outcome("1.gadi-pbs", str(joblog)) == ("failed", 137, None)
+
+
+def test_only_the_end_of_a_joblog_is_read(tmp_path, monkeypatch):
+    from qxub.resources import parser
+
+    monkeypatch.setattr(parser, "JOBLOG_TAIL_BYTES", 2000)
+    joblog = tmp_path / "job.log"
+    early = JOBLOG.format(job_id="1.gadi-pbs", code=0)
+    joblog.write_text(
+        early + "x" * 5000 + "\n" + JOBLOG.format(job_id="1.gadi-pbs", code=2)
+    )
+    assert parser.parse_joblog_resources(str(joblog))["exit_status"] == 2
+    joblog.write_text(early + "x" * 5000 + "\n")
+    assert parser.parse_joblog_resources(str(joblog)) is None

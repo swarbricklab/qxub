@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 import os
 import re
 import sqlite3
+import stat
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -197,16 +198,29 @@ def _joblog_outcome(job_id: str, joblog_path: Optional[str]) -> Optional[tuple]:
     """
     if not joblog_path:
         return None
-    try:
-        if os.stat(joblog_path).st_uid != os.getuid():
-            return None
-    except OSError:
-        return None
     from .parser import (  # pylint: disable=import-outside-toplevel
-        parse_joblog_resources,
+        parse_joblog_text,
+        read_joblog_tail,
     )
 
-    data = parse_joblog_resources(joblog_path)
+    # Checked and read through one descriptor: the joblog's directory may
+    # let others swap the name for a link or another file in between.
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(joblog_path, flags | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            text = read_joblog_tail(f, st.st_size)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    data = parse_joblog_text(text)
     if not data or data.get("job_id") != job_id:
         return None
     code = data.get("exit_status")
