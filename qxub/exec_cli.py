@@ -38,6 +38,23 @@ def _get_shortcut_context_description(definition: dict) -> str:
         return "default"
 
 
+def _read_stdin_vars() -> tuple:
+    """The KEY=VALUE variables a local qxub sent over ssh (``--vars-stdin``)."""
+    import json
+    import sys
+
+    line = sys.stdin.readline()
+    try:
+        variables = json.loads(line) if line.strip() else []
+    except ValueError as e:
+        raise click.ClickException(f"--vars-stdin: not a JSON list: {e}")
+    if not isinstance(variables, list) or not all(
+        isinstance(v, str) for v in variables
+    ):
+        raise click.ClickException("--vars-stdin: expected a JSON list of strings")
+    return tuple(variables)
+
+
 @click.command(name="exec")
 @click.option(
     "--config",
@@ -206,6 +223,13 @@ def _get_shortcut_context_description(definition: dict) -> str:
     metavar="VAR_STRING",
     help='Comma-separated environment variables, e.g. --vars "FOO=bar,BAZ=qux"',
 )
+@click.option(
+    "--vars-stdin",
+    is_flag=True,
+    hidden=True,
+    help="Read more KEY=VALUE variables from stdin as a JSON list (used by "
+    "remote execution, so the values stay off the command line)",
+)
 @click.option("--cmd", help="Command to execute (alternative to positional arguments)")
 @click.option("--shortcut", help="Use a predefined shortcut for execution settings")
 @click.option("--alias", help="Use a predefined alias for execution settings")
@@ -273,6 +297,9 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
         setup_logging(verbosity=0)  # ERROR level
     else:
         setup_logging(verbosity=verbose)
+
+    if options.pop("vars_stdin", False):
+        options["var"] = tuple(options.get("var") or ()) + _read_stdin_vars()
 
     # Handle command specification
     if cmd and command:
@@ -617,7 +644,10 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
             execution_mode = get_execution_mode(platform_config)
 
             if execution_mode in (ExecutionMode.REMOTE, ExecutionMode.REMOTE_DELEGATED):
-                from .remote.command_builder import build_remote_command
+                from .remote.command_builder import (
+                    build_remote_command,
+                    job_vars_payload,
+                )
                 from .remote.platform_executor import PlatformRemoteExecutor
 
                 remote_config_dict = platform_config.get("remote")
@@ -666,6 +696,7 @@ def exec_cli(ctx, command, cmd, shortcut, alias, verbose, config, **options):
                         remote_command,
                         stream_output=not options.get("quiet", False),
                         verbose=verbose,
+                        stdin_data=job_vars_payload(remote_options),
                     )
                     if verbose >= 3:
                         click.echo(

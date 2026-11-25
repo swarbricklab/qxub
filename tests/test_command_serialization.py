@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, "/g/data/a56/software/qsub_tools")
 
 from qxub.execution.context import ExecutionContext
-from qxub.remote.command_builder import build_remote_command
+from qxub.remote.command_builder import build_remote_command, job_vars
 
 
 def test_command_serialization():
@@ -100,9 +100,10 @@ def test_command_serialization():
     assert "--tag rule=align" in result
     assert "--tag workflow=brca" in result
     assert "--tags" in result
-    assert "--var FOO=bar" in result
-    assert "--var BAZ=qux" in result
-    assert "--vars" in result
+    # Variable values travel over stdin, never on the command line
+    assert "FOO=bar" not in result and "X=1" not in result
+    assert "--vars-stdin" in result
+    assert job_vars(options) == ["FOO=bar", "BAZ=qux", "X=1", "Y=2"]
 
     # Test 8: Notification and log-dir options
     print("\n8. Notification and log-dir options:")

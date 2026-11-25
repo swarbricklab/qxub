@@ -5,8 +5,9 @@ This module converts parsed qxub execution context and options back into
 CLI arguments suitable for remote execution via SSH.
 """
 
+import json
 import shlex
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..execution import ExecutionContext
 
@@ -68,6 +69,12 @@ def build_remote_command(
 
     # Serialize job configuration options
     _add_job_options(parts, options)
+
+    # Job environment variables can hold secrets, and a command line is
+    # visible to every user of both hosts (ps, /proc). They go over the ssh
+    # session's stdin instead (see job_vars_payload).
+    if job_vars(options):
+        parts.append("--vars-stdin")
 
     # Add command separator and command
     if command:
@@ -212,10 +219,18 @@ def _add_job_options(parts: List[str], options: Dict[str, Any]) -> None:
     if options.get("tags"):
         parts.extend(["--tags", shlex.quote(str(options["tags"]))])
 
-    # Environment variables (multiple --var KEY=VALUE)
-    var_list = options.get("var")
-    if var_list:
-        for var in var_list:
-            parts.extend(["--var", shlex.quote(str(var))])
-    if options.get("vars"):
-        parts.extend(["--vars", shlex.quote(str(options["vars"]))])
+
+def job_vars(options: Dict[str, Any]) -> List[str]:
+    """The job's KEY=VALUE variables from --var (repeated) and --vars."""
+    variables = [str(var) for var in options.get("var") or ()]
+    vars_str = options.get("vars") or ""
+    variables += [v.strip() for v in str(vars_str).split(",") if v.strip()]
+    return variables
+
+
+def job_vars_payload(options: Dict[str, Any]) -> Optional[str]:
+    """What to write to the remote qxub's stdin for ``--vars-stdin``, if any."""
+    variables = job_vars(options)
+    if not variables:
+        return None
+    return json.dumps(variables) + "\n"

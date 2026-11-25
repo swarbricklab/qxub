@@ -14,7 +14,7 @@ import select
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from . import handshake
 
@@ -202,6 +202,7 @@ class PlatformRemoteExecutor:
         remote_command: str,
         stream_output: bool = True,
         verbose: int = 0,
+        stdin_data: Optional[str] = None,
     ) -> int:
         """
         Execute qxub command on remote platform via SSH.
@@ -210,6 +211,8 @@ class PlatformRemoteExecutor:
             remote_command: The qxub command to execute (e.g., "qxub exec --env pytorch -- python train.py")
             stream_output: Whether to stream output in real-time (default: True)
             verbose: Verbosity level for execution details
+            stdin_data: Sent to the remote command's stdin (each attempt),
+                for values that must not appear on a command line
 
         Returns:
             Exit code from remote execution
@@ -245,7 +248,7 @@ class PlatformRemoteExecutor:
             try:
                 if stream_output:
                     exit_code, hung, captured_stdout = self._execute_with_streaming(
-                        ssh_command, idle_timeout=idle_timeout
+                        ssh_command, idle_timeout=idle_timeout, stdin_data=stdin_data
                     )
                 else:
                     # Non-streaming path: rely on subprocess timeout = idle_timeout
@@ -257,6 +260,7 @@ class PlatformRemoteExecutor:
                             ssh_command,
                             capture_output=True,
                             text=True,
+                            input=stdin_data,
                             timeout=idle_timeout if idle_timeout > 0 else None,
                         )
                         if result.stdout:
@@ -458,7 +462,7 @@ class PlatformRemoteExecutor:
         return False
 
     def _execute_with_streaming(
-        self, ssh_command: list, idle_timeout: int = 0
+        self, ssh_command: list, idle_timeout: int = 0, stdin_data: str = None
     ) -> tuple[int, bool, str]:
         """
         Execute SSH command with real-time output streaming and idle watchdog.
@@ -468,6 +472,8 @@ class PlatformRemoteExecutor:
             idle_timeout: Seconds of no stdout/stderr output before the remote
                 command is considered hung and the SSH process is terminated.
                 Set to 0 to disable the watchdog.
+            stdin_data: Written to the remote command's stdin, which is then
+                closed. Without it, stdin is inherited as before.
 
         Returns:
             Tuple of (exit_code, hung, captured_stdout) where ``hung`` is True
@@ -482,12 +488,21 @@ class PlatformRemoteExecutor:
         try:
             process = subprocess.Popen(
                 ssh_command,
+                stdin=subprocess.PIPE if stdin_data is not None else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,  # Line buffered
                 universal_newlines=True,
             )
+            if stdin_data is not None:
+                try:
+                    process.stdin.write(stdin_data)
+                    process.stdin.close()
+                except BrokenPipeError:
+                    pass  # ssh failed early; its exit code says why
+                # Done with it; communicate() below must not touch it
+                process.stdin = None
 
             last_output = time.monotonic()
 
