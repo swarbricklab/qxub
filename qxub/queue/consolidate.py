@@ -487,15 +487,15 @@ def consolidate(
     result = Result(snapshot=snapshot)
     _touch(runs_dir / ATTEMPT_MARKER)
     consolidated: Dict[str, str] = {}
-    # Run files added this round, to mark once they are published.
+    # Run files added this round, to mark once they are published, and
+    # run files the snapshot already held, to mark without re-adding.
     added: Dict[Path, str] = {}
+    adopted: Dict[Path, str] = {}
 
     def add(conn) -> bool:
         done = {
             r[0]: r[1]
-            for r in conn.execute(
-                "SELECT run_id, consolidated_at FROM consolidated_runs"
-            )
+            for r in conn.execute("SELECT run_id, job_id FROM consolidated_runs")
         }
         changed = _add_runs(
             conn,
@@ -507,6 +507,7 @@ def consolidate(
             result,
             dry_run,
             added,
+            adopted,
         )
         consolidated.update(
             (r[0], r[1])
@@ -516,10 +517,15 @@ def consolidate(
         )
         return changed
 
-    if _round(snapshot, now, result, add, dry_run) and not dry_run:
+    def mark() -> None:
+        # Still under the lease, so an overlapping round can't add these
+        # runs again between the publish and the mark.
         stamp = now.isoformat(timespec="seconds")
-        for path, status in (added if result.published else {}).items():
+        marks = {**adopted, **(added if result.published else {})}
+        for path, status in marks.items():
             runs.update(path, {CONSOLIDATED_AT: stamp, CONSOLIDATED_AS: status})
+
+    if _round(snapshot, now, result, add, dry_run, mark) and not dry_run:
         try:
             result.removed = _remove_consolidated(
                 runs_dir, consolidated, now - timedelta(days=grace_days)
@@ -529,12 +535,15 @@ def consolidate(
     return result
 
 
-def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
+def _round(
+    snapshot: Path, now: datetime, result, add, dry_run: bool, done=None
+) -> bool:
     """Take the lease, apply ``add(conn)`` to a private copy, publish it.
 
     ``add`` returns True if it changed anything; only then is a copy
-    published. Records a skip or an error on ``result``; returns True if the
-    round finished (published or unchanged).
+    published. ``done()``, if given, runs once the round has finished
+    (published or unchanged), before the lease is released. Records a skip
+    or an error on ``result``; returns True if the round finished.
     """
     problem = writable_problem(snapshot)
     if problem:
@@ -589,6 +598,8 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
                 raise OSError(f"lost the lease {lease.path}; not publishing")
             _publish(private, snapshot)
             result.published = True
+        if done is not None and not dry_run:
+            done()
         return True
     except (OSError, sqlite3.Error) as exc:
         result.errors.append(str(exc))
@@ -626,15 +637,22 @@ def _copy_snapshot(snapshot: Path, private: Path) -> None:
 
 
 def _add_runs(
-    conn, runs_dir, done, now, lookup, batch_size, result, dry_run, added
+    conn, runs_dir, done, now, lookup, batch_size, result, dry_run, added, adopted
 ) -> bool:
     """Add finished runs to the private copy. True if anything was added.
 
+    ``done`` maps the snapshot's consolidated run IDs to their job IDs.
     Records in ``added`` the run files it added (path -> status). A run is
     skipped as already published only if the snapshot holds it *and* its
     own file carries this user's mark: anyone in the group can put rows in
-    the snapshot. (Runs published before run files were marked are added
-    once more, which replaces their rows with the same data.)
+    the snapshot.
+
+    A run published before run files were marked (by an older qxub) is not
+    added again if its own file says it finished and the snapshot holds its
+    job: re-adding it now, after its joblog may be gone and the scheduler
+    has forgotten it, would lose its usage. It goes in ``adopted``, to be
+    marked. Such a run is past running, so a planted row can at most keep
+    its usage out of the statistics, as replacing the snapshot could anyway.
     """
     pending = []
     for path in _run_files(runs_dir):
@@ -643,6 +661,9 @@ def _add_runs(
         if record is None:
             continue
         if run_id in done and record.get(CONSOLIDATED_AT):
+            continue
+        if run_id in done and _held_finished(conn, done[run_id], record):
+            adopted[path] = "finished"
             continue
         pending.append((run_id, path, record))
         if len(pending) >= batch_size:
@@ -720,6 +741,22 @@ def _add_runs(
     return changed
 
 
+def _held_finished(conn, held_job_id, record) -> bool:
+    """True if the run file says it finished and the snapshot already has a
+    ``job_resources`` row for the same job as the run file names."""
+    if record.get("state") != "finished":
+        return False
+    job_id = record.get("native_job_id") or None
+    if job_id is None or held_job_id != job_id:
+        return False
+    return (
+        conn.execute(
+            "SELECT 1 FROM job_resources WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        is not None
+    )
+
+
 def _ended_by(job_id, record, joblog, info) -> Optional[str]:
     """Why the job ended: as its run file says (``qxub cancel``, or qx
     from the job log), the scheduler said, or its backend reads the job
@@ -771,8 +808,11 @@ def _insert_job(conn, job_id, record, status, code, usage, stamp) -> None:
     }
     columns = ", ".join(row)
     marks = ", ".join("?" * len(row))
+    # A job added again (its usage now unknown) keeps the usage it had.
+    keep = ", ".join(f"{c} = COALESCE(excluded.{c}, {c})" for c in row if c != "job_id")
     conn.execute(
-        f"INSERT OR REPLACE INTO job_resources ({columns}) VALUES ({marks})",
+        f"INSERT INTO job_resources ({columns}) VALUES ({marks})"
+        f" ON CONFLICT(job_id) DO UPDATE SET {keep}",
         list(row.values()),
     )
 

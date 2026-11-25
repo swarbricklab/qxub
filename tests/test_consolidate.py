@@ -735,3 +735,87 @@ def test_published_runs_are_marked_in_their_run_file(area):
     record = runs.read_run(path)
     assert record[cons.CONSOLIDATED_AT] == NOW.isoformat()
     assert record[cons.CONSOLIDATED_AS] == "finished"
+
+
+def unmark(path):
+    """A run file as an older qxub left it after publishing it."""
+    record = {
+        k: v
+        for k, v in runs.read_run(path).items()
+        if k not in (cons.CONSOLIDATED_AT, cons.CONSOLIDATED_AS)
+    }
+    path.write_text(runs.format_fields(record))
+
+
+def test_run_published_before_marks_keeps_its_usage(area, tmp_path):
+    """Upgrading: a run an older qxub published, whose joblog is gone and
+    which the scheduler has forgotten, is marked, not added again empty."""
+    runs_dir, snapshot = area
+    joblog = tmp_path / "job.log"
+    joblog.write_text(JOBLOG.format(when=NOW, job_id="1.gadi-pbs", code=0))
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", joblog=joblog)
+    assert run(area).added == 1
+    unmark(path)
+    joblog.unlink()
+
+    later = NOW + timedelta(days=1)
+    result = run(area, lookup=lambda ids: {}, now=later)
+
+    assert result.added == 0 and result.removed == 0, result.summary()
+    (job,) = rows(snapshot)
+    assert job["mem_used_mb"] == 2048
+    assert runs.read_run(path)[cons.CONSOLIDATED_AT] == later.isoformat()
+    # ... and goes once its own grace period is over.
+    gone = run(area, now=later + timedelta(days=cons.GRACE_DAYS + 1))
+    assert gone.removed == 1 and not path.exists()
+
+
+def test_unfinished_run_with_planted_rows_is_not_adopted(area):
+    """Security: a planted job row doesn't make an unfinished run done."""
+    runs_dir, snapshot = area
+    path = write_run(runs_dir, "qx-a", state="running", native_job_id="1.gadi-pbs")
+    plant_rows(snapshot, "qx-a")
+    conn = sqlite3.connect(snapshot)
+    conn.execute("UPDATE consolidated_runs SET job_id = '1.gadi-pbs'")
+    conn.execute(
+        "INSERT INTO job_resources (job_id, timestamp, status) VALUES"
+        " ('1.gadi-pbs', '2000-01-01', 'completed')"
+    )
+    conn.commit()
+    conn.close()
+
+    result = run(area, lookup=lambda ids: {}, now=NOW + timedelta(days=20))
+
+    assert result.in_progress == 1 and result.removed == 0 and path.exists()
+    assert cons.CONSOLIDATED_AT not in runs.read_run(path)
+
+
+def test_adding_a_job_again_keeps_known_usage(area):
+    conn = sqlite3.connect(":memory:")
+    cons._create_schema(conn)
+    record = runs.read_run(finished(area[0], "qx-a", "1.gadi-pbs"))
+    cons._insert_job(
+        conn, "1.gadi-pbs", record, "completed", 0, {"mem_used_mb": 2048}, "t1"
+    )
+    cons._insert_job(
+        conn, "1.gadi-pbs", record, "completed", 0, {"mem_used_mb": None}, "t2"
+    )
+    assert conn.execute(
+        "SELECT mem_used_mb, last_status_update FROM job_resources"
+    ).fetchall() == [(2048, "t2")]
+
+
+def test_runs_are_marked_before_the_lease_is_released(area, monkeypatch):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    held = []
+    real_update = runs.update
+
+    def update(path, fields):
+        if cons.CONSOLIDATED_AT in fields:
+            held.append(cons.lease_path(snapshot).exists())
+        return real_update(path, fields)
+
+    monkeypatch.setattr(runs, "update", update)
+    run(area, lookup=lambda ids: {})
+    assert held == [True]
