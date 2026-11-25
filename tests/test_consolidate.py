@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from qxub.backends.pbs import parse_qstat_fx_output
+from qxub.backends.pbs import job_info_from_details, parse_qstat_fx_output
 from qxub.queue import consolidate as cons
 from qxub.queue import runs
 
@@ -92,13 +92,20 @@ def finished(runs_dir, run_id, job_id, code=0, ago=timedelta(hours=1), **fields)
     )
 
 
+def pbs_info(job_id, **fields):
+    """What PbsBackend.job_info reports for QSTAT."""
+    return job_info_from_details(
+        job_id, parse_qstat_fx_output(QSTAT.format(job_id=job_id, **fields))
+    )
+
+
 def no_qstat(job_ids):
     raise AssertionError(f"qstat should not be called: {job_ids}")
 
 
 def run(area, **kwargs):
     runs_dir, snapshot = area
-    kwargs.setdefault("qstat", no_qstat)
+    kwargs.setdefault("lookup", no_qstat)
     kwargs.setdefault("now", NOW)
     return cons.consolidate(runs_dir, snapshot, **kwargs)
 
@@ -163,12 +170,9 @@ def test_usage_comes_from_one_batched_qstat_when_there_is_no_joblog(area):
 
     def qstat(job_ids):
         calls.append(list(job_ids))
-        return {
-            j: parse_qstat_fx_output(QSTAT.format(job_id=j, state="F", code=0))
-            for j in job_ids
-        }
+        return {j: pbs_info(j, state="F", code=0) for j in job_ids}
 
-    result = run(area, qstat=qstat)
+    result = run(area, lookup=qstat)
 
     assert calls == [["1.gadi-pbs", "2.gadi-pbs"]]
     assert result.added == 2
@@ -184,7 +188,7 @@ def test_query_qstat_parses_several_jobs_from_one_call(sandbox, monkeypatch):
     monkeypatch.setenv("PATH", sandbox.env["PATH"])
     monkeypatch.setenv("FAKE_PBS_STATE", sandbox.env["FAKE_PBS_STATE"])
 
-    found = cons.query_qstat(["1.gadi-pbs", "2.gadi-pbs", "3.gadi-pbs"])
+    found = cons.query_jobs(["1.gadi-pbs", "2.gadi-pbs", "3.gadi-pbs"])
 
     assert sorted(found) == ["1.gadi-pbs", "2.gadi-pbs"]
     assert len(sandbox.pbs_calls("qstat")) == 1
@@ -195,7 +199,7 @@ def test_recent_run_without_usage_waits_and_old_one_goes_in_without(area):
     finished(runs_dir, "qx-new", "1.gadi-pbs", ago=timedelta(hours=1))
     finished(runs_dir, "qx-old", "2.gadi-pbs", ago=timedelta(days=3))
 
-    result = run(area, qstat=lambda ids: {})
+    result = run(area, lookup=lambda ids: {})
 
     assert (result.added, result.waiting) == (1, 1)
     (job,) = rows(snapshot)
@@ -208,7 +212,7 @@ def test_joblog_of_another_run_with_the_same_name_is_ignored(area, tmp_path):
     joblog.write_text(JOBLOG.format(when=NOW, job_id="99.gadi-pbs", code=0))
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3), joblog=joblog)
 
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     assert rows(snapshot)[0]["mem_used_mb"] is None
 
@@ -240,11 +244,7 @@ def test_job_pbs_reports_finished_is_settled_from_qstat(area):
 
     run(
         area,
-        qstat=lambda ids: {
-            "1.gadi-pbs": parse_qstat_fx_output(
-                QSTAT.format(job_id="1.gadi-pbs", state="F", code=271)
-            )
-        },
+        lookup=lambda ids: {"1.gadi-pbs": pbs_info("1.gadi-pbs", state="F", code=271)},
     )
 
     assert runs.exit_code(runs.read_run(path)) == 271
@@ -259,11 +259,7 @@ def test_runs_in_progress_are_left_alone(area):
 
     result = run(
         area,
-        qstat=lambda ids: {
-            "1.gadi-pbs": parse_qstat_fx_output(
-                QSTAT.format(job_id="1.gadi-pbs", state="R", code="")
-            )
-        },
+        lookup=lambda ids: {"1.gadi-pbs": pbs_info("1.gadi-pbs", state="R", code="")},
         grace_days=0,
     )
 
@@ -296,10 +292,10 @@ def test_run_that_never_started_is_abandoned_and_later_removed(area):
 def test_rounds_are_idempotent_and_unchanged_snapshots_are_not_republished(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
     inode = snapshot.stat().st_ino
 
-    again = run(area, qstat=lambda ids: {})
+    again = run(area, lookup=lambda ids: {})
 
     assert not again.published and again.added == 0
     assert snapshot.stat().st_ino == inode
@@ -309,10 +305,10 @@ def test_rounds_are_idempotent_and_unchanged_snapshots_are_not_republished(area)
 def test_new_runs_are_added_to_what_is_already_published(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
     finished(runs_dir, "qx-b", "2.gadi-pbs", ago=timedelta(days=3))
 
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     assert [r["job_id"] for r in rows(snapshot)] == ["1.gadi-pbs", "2.gadi-pbs"]
 
@@ -322,7 +318,7 @@ def test_run_files_are_removed_only_after_the_grace_period(area):
     path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
     settings = path.with_suffix(".env")  # the job's settings file
     settings.write_text("export cmd_b64=x\n")
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     run(area, now=NOW + timedelta(days=cons.GRACE_DAYS - 1))
     assert path.exists() and settings.exists()
@@ -351,7 +347,7 @@ def test_dry_run_changes_nothing(area, tmp_path):
 def test_published_file_is_private_copy_renamed(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     names = sorted(p.name for p in snapshot.parent.iterdir())
     assert names == ["qxub-stats.db"], "no journal, temp copy or lease left behind"
@@ -363,7 +359,7 @@ def test_published_file_is_private_copy_renamed(area):
 def test_open_snapshot_is_read_only(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     conn = cons.open_snapshot(snapshot)
     with pytest.raises(sqlite3.OperationalError, match="readonly"):
@@ -380,7 +376,7 @@ def test_round_skips_while_another_holds_the_lease(area):
     other = cons.Lease(cons.lease_path(snapshot))
     assert other.acquire()
 
-    result = run(area, qstat=lambda ids: {})
+    result = run(area, lookup=lambda ids: {})
 
     assert result.skipped and "another consolidation" in result.skipped
     assert not snapshot.exists()
@@ -397,7 +393,7 @@ def test_stale_lease_is_broken(area):
     old = time.time() - cons.LEASE_STALE_SECONDS - 60
     os.utime(cons.lease_path(snapshot), (old, old))
 
-    result = run(area, qstat=lambda ids: {})
+    result = run(area, lookup=lambda ids: {})
 
     assert result.published
     assert [p.name for p in snapshot.parent.iterdir()] == ["qxub-stats.db"]
@@ -414,7 +410,7 @@ def test_round_that_lost_its_lease_does_not_publish(area):
         assert cons.Lease(lease).acquire()
         return {}
 
-    result = run(area, qstat=qstat_while_lease_is_taken_over)
+    result = run(area, lookup=qstat_while_lease_is_taken_over)
 
     assert not result.published and "lost the lease" in result.errors[0]
     assert not snapshot.exists()
@@ -428,7 +424,7 @@ def test_unwritable_snapshot_directory_is_reported(area):
     snapshot.parent.mkdir()
     snapshot.parent.chmod(0o555)
     try:
-        result = run(area, qstat=lambda ids: {})
+        result = run(area, lookup=lambda ids: {})
     finally:
         snapshot.parent.chmod(0o755)
 
@@ -440,7 +436,7 @@ def test_snapshot_directory_is_created_group_writable(area):
     runs_dir, snapshot = area
     finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
 
-    run(area, qstat=lambda ids: {})
+    run(area, lookup=lambda ids: {})
 
     assert snapshot.parent.stat().st_mode & 0o070 == 0o070
     assert snapshot.stat().st_mode & 0o040
@@ -460,7 +456,7 @@ WORKER = textwrap.dedent(
     """
     import sys
     from qxub.queue import consolidate as cons
-    result = cons.consolidate(sys.argv[1], sys.argv[2], qstat=lambda ids: {})
+    result = cons.consolidate(sys.argv[1], sys.argv[2], lookup=lambda ids: {})
     print("published" if result.published else (result.skipped or "unchanged"))
     """
 )

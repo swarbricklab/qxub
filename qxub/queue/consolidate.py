@@ -9,7 +9,7 @@ then, one process per round folds finished runs into ``qxub-stats.db``:
    lease older than ``LEASE_STALE_SECONDS`` is broken by renaming it away;
    only one rename wins.
 2. It copies the published snapshot to a private file, adds the new runs and
-   their resource usage (from the joblog, or one batched ``qstat -fx``), and
+   their resource usage (from the joblog, or one batched query of the scheduler), and
    checks ``PRAGMA integrity_check``.
 3. It publishes the copy with ``rename``. The published file is never
    written in place, so readers (``open_snapshot``, ``immutable=1``) never
@@ -284,71 +284,35 @@ def usage_from_joblog(data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def usage_from_qstat(data: Dict[str, Any]) -> Dict[str, Any]:
-    """``job_resources`` columns from ``parse_qstat_fx_output`` output."""
-    from ..resources.parser import (  # pylint: disable=import-outside-toplevel
-        size_to_bytes,
-        time_to_seconds,
-    )
-
-    def size(value):
-        try:
-            return size_to_bytes(value) if value else None
-        except Exception:  # pylint: disable=broad-except
-            return None
-
-    def seconds(value):
-        try:
-            return time_to_seconds(value) if value else None
-        except Exception:  # pylint: disable=broad-except
-            return None
-
-    def integer(value):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
-
-    requested = data.get("resources_requested") or {}
-    used = data.get("resources_used") or {}
-    efficiency = data.get("efficiency") or {}
-    timing = data.get("timing") or {}
-    mem_req, mem_used = size(requested.get("mem")), size(used.get("mem"))
-    wall_req, wall_used = seconds(requested.get("walltime")), seconds(
-        used.get("walltime")
-    )
-    jobfs_req, jobfs_used = size(requested.get("jobfs")), size(used.get("jobfs"))
-    try:
-        cpu_percent = float(used["cpupercent"])
-    except (KeyError, TypeError, ValueError):
-        cpu_percent = None
-    ncpus = integer(used.get("ncpus")) or integer(requested.get("ncpus"))
-    cpu_time = seconds(used.get("cput"))
+def usage_from_info(info) -> Dict[str, Any]:
+    """``job_resources`` columns from a backend's :class:`~qxub.backends.JobInfo`."""
+    usage = info.usage
+    wall_used = usage.walltime_used
+    ncpus = usage.cpus_used or usage.cpus_requested
     return {
-        "mem_requested_mb": _mb(mem_req),
-        "mem_used_mb": _mb(mem_used),
-        "time_requested_sec": wall_req,
+        "mem_requested_mb": _mb(usage.memory_requested),
+        "mem_used_mb": _mb(usage.memory_used),
+        "time_requested_sec": usage.walltime_requested,
         "time_used_sec": wall_used,
-        "cpus_requested": integer(requested.get("ncpus")),
-        "cpus_used": integer(used.get("ncpus")),
-        "jobfs_requested_mb": _mb(jobfs_req),
-        "jobfs_used_mb": _mb(jobfs_used),
-        "cpu_percent": cpu_percent,
-        "mem_efficiency": efficiency.get("memory_efficiency", _pct(mem_used, mem_req)),
-        "time_efficiency": efficiency.get("time_efficiency", _pct(wall_used, wall_req)),
+        "cpus_requested": usage.cpus_requested,
+        "cpus_used": usage.cpus_used,
+        "jobfs_requested_mb": _mb(usage.disk_requested),
+        "jobfs_used_mb": _mb(usage.disk_used),
+        "cpu_percent": usage.cpu_percent,
+        "mem_efficiency": _pct(usage.memory_used, usage.memory_requested),
+        "time_efficiency": _pct(wall_used, usage.walltime_requested),
         # As for the joblog: CPU time / (walltime x CPUs). PBS's cpupercent,
         # which the tracker stores as cpu_efficiency, is not divided by CPUs.
-        "cpu_efficiency": _pct(cpu_time, (wall_used or 0) * (ncpus or 0)),
-        "jobfs_efficiency": efficiency.get(
-            "jobfs_efficiency", _pct(jobfs_used, jobfs_req)
-        ),
-        "queue_wait_sec": timing.get("queue_wait_seconds"),
-        "execution_sec": timing.get("execution_seconds"),
+        "cpu_efficiency": _pct(usage.cpu_time, (wall_used or 0) * (ncpus or 0)),
+        "jobfs_efficiency": _pct(usage.disk_used, usage.disk_requested),
+        "queue_wait_sec": info.queue_wait,
+        "execution_sec": info.run_time,
     }
 
 
-def query_qstat(job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-    """What the scheduler remembers about many jobs. Never raises.
+def query_jobs(job_ids: Iterable[str]) -> Dict[str, Any]:
+    """What the schedulers remember about many jobs (:class:`JobInfo` by
+    job ID). Never raises.
 
     Asks each job's backend in batches (PBS: ``qstat -fx``, 100 jobs per
     call). ``job_ids`` may be a dict of job ID to the backend its run file
@@ -368,17 +332,8 @@ def query_qstat(job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
         by_backend.setdefault(key, []).append(job_id)
     found: Dict[str, Dict[str, Any]] = {}
     for key, ids in by_backend.items():
-        found.update(owners[key].job_details(ids))
+        found.update(owners[key].job_info(ids))
     return found
-
-
-def _qstat_finished(data: Optional[Dict[str, Any]]) -> bool:
-    if not data:
-        return False
-    from .. import backends  # pylint: disable=import-outside-toplevel
-
-    # PBS and local details both mark a finished job metadata.job_state "F"
-    return backends.get_backend().is_finished(data)
 
 
 # -- the snapshot ---------------------------------------------------------------------
@@ -427,7 +382,7 @@ class Result:
             return f"Skipped: {self.skipped}"
         parts = [
             f"{self.added} run(s) added",
-            f"{self.settled} settled from the joblog or qstat",
+            f"{self.settled} settled from the joblog or scheduler",
             f"{self.abandoned} abandoned",
             f"{self.waiting} waiting for resource usage",
             f"{self.in_progress} still in progress",
@@ -489,7 +444,7 @@ def consolidate(
     runs_dir: Optional[Path] = None,
     snapshot: Optional[Path] = None,
     *,
-    qstat: Callable[[Iterable[str]], Dict[str, Dict[str, Any]]] = query_qstat,
+    lookup: Callable[[Iterable[str]], Dict[str, Any]] = query_jobs,
     now: Optional[datetime] = None,
     grace_days: float = GRACE_DAYS,
     batch_size: int = BATCH_SIZE,
@@ -511,7 +466,7 @@ def consolidate(
             )
         }
         changed = _add_runs(
-            conn, runs_dir, done, now, qstat, batch_size, result, dry_run
+            conn, runs_dir, done, now, lookup, batch_size, result, dry_run
         )
         consolidated.update(
             (r[0], r[1])
@@ -601,7 +556,7 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
         lease.release()
 
 
-def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> bool:
+def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) -> bool:
     """Add finished runs to the private copy. True if anything was added."""
     pending = []
     for path in _run_files(runs_dir):
@@ -615,30 +570,30 @@ def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> 
         if len(pending) >= batch_size:
             break
 
-    # Usage from joblogs first; one batched qstat for the rest.
+    # Usage from joblogs first; one batched scheduler query for the rest.
     joblogs = {}
-    need_qstat: Dict[str, Optional[str]] = {}  # job ID -> recorded backend
+    ask: Dict[str, Optional[str]] = {}  # job ID -> recorded backend
     for run_id, _path, record in pending:
         job_id = record.get("native_job_id") or None
         joblogs[run_id] = _joblog_data(record, job_id)
         if job_id and not joblogs[run_id]:
-            need_qstat[job_id] = record.get("backend") or None
-    pbs = qstat(need_qstat) if need_qstat else {}
+            ask[job_id] = record.get("backend") or None
+    known = lookup(ask) if ask else {}
 
     changed = False
     stamp = now.isoformat(timespec="seconds")
     for run_id, path, record in pending:
         job_id = record.get("native_job_id") or None
         joblog = joblogs[run_id]
-        from_pbs = pbs.get(job_id) if job_id else None
+        info = known.get(job_id) if job_id else None
         state = record.get("state")
         status = None
 
         if state != "finished":
             if joblog and joblog.get("exit_status") is not None:
                 code = joblog["exit_status"]
-            elif _qstat_finished(from_pbs) and from_pbs.get("exit_status") is not None:
-                code = from_pbs["exit_status"]
+            elif info and info.is_finished and info.exit_status is not None:
+                code = info.exit_status
             else:
                 code = None
             if code is not None:
@@ -659,8 +614,8 @@ def _add_runs(conn, runs_dir, done, now, qstat, batch_size, result, dry_run) -> 
             usage = None
             if joblog:
                 usage = usage_from_joblog(joblog)
-            elif from_pbs and from_pbs.get("resources_used"):
-                usage = usage_from_qstat(from_pbs)
+            elif info and info.usage.has_used():
+                usage = usage_from_info(info)
             finished = _parse_time(record.get("finished_at")) or _mtime(path)
             if usage is None and finished and now - finished < USAGE_WAIT:
                 result.waiting += 1

@@ -329,9 +329,17 @@ def _check_pbs_job_log_for_exit(job_id, log_dir):
     return None
 
 
+def get_job_info(job_id):
+    """What the job's scheduler knows about it (a :class:`~qxub.backends.JobInfo`),
+    or ``None``."""
+    return backends.backend_for_job(job_id).find_info(job_id)
+
+
 def get_job_resource_data(job_id):
     """
-    Everything the scheduler knows about a job, or ``None``.
+    The scheduler's own record of a job, or ``None``.
+
+    Prefer :func:`get_job_info`, which doesn't depend on the scheduler.
 
     Asks the platform's scheduler backend (PBS: ``qstat -fx``).
 

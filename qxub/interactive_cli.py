@@ -296,41 +296,42 @@ def _process_session_completion(session_id: str, ctx=None) -> dict | None:
     # was killed (e.g. at walltime). Ask the scheduler once the job is over.
     job_id = session_info.get("job_id")
     if job_id:
-        final = _final_job_data(job_id)
+        final = _final_job_info(job_id)
         if final:
-            session_info["resources"] = final
+            # The scheduler's own record, which history stores
+            session_info["resources"] = final.native
             # PBS reports Exit_status = 0 for any 'qsub -I' session that
             # ends normally, so the status file's value is the real one.
-            # A negative value means PBS killed the job (e.g. -29 at
-            # walltime), which the status file cannot know about.
-            exit_status = final.get("exit_status")
+            # If the scheduler ended the job (e.g. at walltime; PBS gives a
+            # negative value), the status file cannot know about it.
+            exit_status = final.exit_status
             if exit_status is not None and (
-                exit_status < 0 or "exit_code" not in session_info
+                final.ended_by or exit_status < 0 or "exit_code" not in session_info
             ):
                 session_info["exit_code"] = exit_status
 
     return session_info
 
 
-def _final_job_data(job_id: str, attempts: int = 3, delay: float = 2.0):
-    """Finished-job data from ``qstat -fx``, or ``None``.
+def _final_job_info(job_id: str, attempts: int = 3, delay: float = 2.0):
+    """What the scheduler knows about the finished job, or ``None``.
 
     The server may take a moment to record the exit status after an
     interactive session ends, so retry briefly until it appears.
     """
     import time
 
-    from .core.scheduler import get_job_resource_data
+    from .core.scheduler import get_job_info
 
     data = None
     for attempt in range(attempts):
         try:
-            data = get_job_resource_data(job_id) or data
+            data = get_job_info(job_id) or data
         except Exception:  # pylint: disable=broad-except
             pass
         if data is None:
             return None  # the scheduler doesn't know the job; waiting won't help
-        if data.get("exit_status") is not None:
+        if data.exit_status is not None:
             return data
         if attempt < attempts - 1:
             time.sleep(delay)

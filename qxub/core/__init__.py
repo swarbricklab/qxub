@@ -2,6 +2,7 @@
 
 from .scheduler import (
     get_default_status_dir,
+    get_job_info,
     get_job_resource_data,
     job_status_from_files,
     monitor_job_single_thread,
@@ -15,6 +16,7 @@ __all__ = [
     "monitor_job_single_thread",
     "print_status",
     "qdel",
+    "get_job_info",
     "get_job_resource_data",
     "job_status_from_files",
     "get_default_status_dir",
