@@ -9,7 +9,7 @@ v2.3 adds parallel job execution with --terse output and 'qxub monitor' for pipe
 
 # __init__.py
 
-__version__ = "3.9.2"
+__version__ = "4.0.0"
 
 # Library-standard NullHandler: prevents "No handler found" warnings and
 # avoids triggering basicConfig() when qxub is used as a library.
