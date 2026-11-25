@@ -114,16 +114,35 @@ def test_qsub_v_refuses_what_it_cannot_carry():
         qsub_argv(JobSpec(script="s", name="n", env={"a,b": "1"}))
 
 
-def test_unwritable_runs_dir_falls_back_to_qsub_v(monkeypatch, tmp_path):
+def test_unwritable_runs_dir_refuses_the_job(monkeypatch, tmp_path):
+    """The settings never fall back to qsub -v: other users may read them
+    there (qstat -f), and its quoting is weaker than the file's."""
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("")
     monkeypatch.setattr(runs, "runs_dir", lambda: blocker / "runs")
     script = JOBSCRIPTS / "job.sh"  # reads QXUB_JOB_FILE
     spec = JobSpec(script=str(script), name="n", env={"a": "1"})
 
-    assert runs.attach_settings(spec, "qx-1") is spec
+    with pytest.raises(SubmitError, match="Cannot write the job settings file"):
+        runs.attach_settings(spec, "qx-1")
     monkeypatch.setattr(runs, "runs_dir", lambda: tmp_path / "runs")
     assert runs.attach_settings(spec, "qx-1").env_file  # writable: used
+
+
+def test_exec_with_unwritable_runs_dir_submits_nothing(sandbox):
+    runs_path = sandbox.home / ".local" / "state" / "qxub" / "status" / "runs"
+    runs_path.parent.mkdir(parents=True)
+    runs_path.write_text("")  # a file, so nothing can be written under it
+    execdir = sandbox.cwd / "x,QXUB_JOB_FILE=evil,'\"y"
+    execdir.mkdir()
+    result = sandbox.run(
+        "exec", "--terse", "-P", "ab12", "--execdir", str(execdir),
+        "--var", "TOKEN=s3cret", "--", "echo", "hi",
+    )  # fmt: skip
+
+    assert result.returncode != 0
+    assert "Cannot write the job settings file" in result.stderr
+    assert sandbox.pbs_calls("qsub") == []
 
 
 def test_exec_writes_the_settings_file(sandbox):
@@ -202,6 +221,7 @@ def test_custom_template_without_the_file_still_gets_qsub_v(sandbox):
     )  # fmt: skip
     assert result.returncode == 0, result.stdout + result.stderr
 
+    assert "doesn't read $QXUB_JOB_FILE" in result.stderr  # said, visibly
     (call,) = sandbox.pbs_calls("qsub")
     variables = job_variables(call["argv"])
     assert "QXUB_JOB_FILE" not in variables
