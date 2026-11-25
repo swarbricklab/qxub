@@ -11,11 +11,16 @@ file mid-rewrite could wipe it. Here each record is its own file:
 
 No locks are needed, so this does not depend on ``flock``/``fcntl`` working
 across nodes on NFS or Lustre. Rename within one directory is atomic on both.
+
+Records hold full command lines, so directories are created ``0700`` and
+files ``0600`` whatever the umask. A directory left readable by older qxub is
+tightened, with the records in it, the first time it is used.
 """
 
 import json
 import logging
 import os
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -27,6 +32,48 @@ SUFFIX = ".json"
 # Temporary files start with "." so listings skip them.
 _TMP_PREFIX = "."
 _STALE_TMP_SECONDS = 3600
+_FILE_MODE = 0o600
+_DIR_MODE = 0o700
+
+
+def make_owner_only(path: Path) -> bool:
+    """Remove group and other permissions from ``path`` if it is ours.
+
+    Returns True if the mode was changed. Symlinks are left alone.
+    """
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode) or st.st_uid != os.getuid():
+        return False
+    if not st.st_mode & 0o077:
+        return False
+    try:
+        os.chmod(path, stat.S_IMODE(st.st_mode) & 0o700)
+    except OSError:
+        return False
+    return True
+
+
+def ensure_private_dir(directory: Path) -> bool:
+    """Create ``directory`` (and missing parents) owner-only, or tighten it.
+
+    Returns True if an existing directory had to be tightened, meaning files
+    in it may still be readable by others.
+    """
+    directory = Path(directory)
+    missing = []
+    p = directory
+    while not p.exists() and p != p.parent:
+        missing.append(p)
+        p = p.parent
+    for p in reversed(missing):
+        try:
+            p.mkdir(mode=_DIR_MODE)
+        except FileExistsError:
+            pass
+    return make_owner_only(directory)
 
 
 class RecordStore:
@@ -34,19 +81,28 @@ class RecordStore:
 
     def __init__(self, directory: Path):
         self.directory = Path(directory)
+        self._dir_ready = False
 
     def _path(self, key: str) -> Path:
         return self.directory / f"{key}{SUFFIX}"
 
     def _ensure_dir(self) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True)
+        """Create the directory owner-only; tighten it and its records once."""
+        if self._dir_ready and self.directory.is_dir():
+            return
+        if ensure_private_dir(self.directory):
+            # Written by older qxub with the umask's mode: tighten the records
+            for name in os.listdir(self.directory):
+                make_owner_only(self.directory / name)
+        self._dir_ready = True
 
     def write(self, key: str, record: Dict[str, Any]) -> None:
         """Atomically create or replace the record ``key``."""
         self._ensure_dir()
         tmp = self.directory / f"{_TMP_PREFIX}{key}.{uuid.uuid4().hex}.tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, _FILE_MODE)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(record, f, default=str, indent=1)
                 f.flush()
                 os.fsync(f.fileno())
@@ -68,7 +124,7 @@ class RecordStore:
         self._ensure_dir()
         while True:
             try:
-                fd = os.open(self._path(str(key)), os.O_CREAT | os.O_EXCL, 0o644)
+                fd = os.open(self._path(str(key)), os.O_CREAT | os.O_EXCL, _FILE_MODE)
             except FileExistsError:
                 key += 1
                 continue

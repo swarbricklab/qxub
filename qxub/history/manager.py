@@ -26,12 +26,13 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from .store import RecordStore
+from .store import RecordStore, ensure_private_dir, make_owner_only
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,63 @@ PRUNE_SLACK = 50
 # A record with no job ID yet may still be updated (qxi fills it in when the
 # session ends), so pruning leaves it alone for this long.
 AWAITING_UPDATE_SECONDS = 24 * 3600
+
+
+# Values of --var/--vars often carry credentials; history keeps only names.
+REDACTED = "***"
+_VAR_NAME_RE = re.compile(r"(?:^|,)\s*([^=,\s]+)\s*=")
+
+
+def _redact_var(item: str) -> str:
+    """``NAME=value`` -> ``NAME=***``; a bare ``NAME`` is kept."""
+    name, sep, _ = str(item).partition("=")
+    return f"{name}={REDACTED}" if sep else name
+
+
+def _redact_vars(value: str) -> str:
+    """``A=1,B=2`` -> ``A=***,B=***``. Values may contain commas, so only
+    the names are kept rather than splitting the string."""
+    names = _VAR_NAME_RE.findall(str(value))
+    return ",".join(f"{n}={REDACTED}" for n in names) if names else REDACTED
+
+
+def redact_argv(args: List[str]) -> List[str]:
+    """``args`` with the values of ``--var``/``--vars`` replaced.
+
+    Arguments after ``--`` belong to the job's command and are kept.
+    """
+    out: List[str] = []
+    redact_next = None
+    for i, arg in enumerate(args):
+        if redact_next is not None:
+            out.append(redact_next(arg))
+            redact_next = None
+        elif arg == "--":
+            out.extend(args[i:])
+            break
+        elif arg == "--var":
+            out.append(arg)
+            redact_next = _redact_var
+        elif arg == "--vars":
+            out.append(arg)
+            redact_next = _redact_vars
+        elif arg.startswith("--var="):
+            out.append("--var=" + _redact_var(arg[len("--var=") :]))
+        elif arg.startswith("--vars="):
+            out.append("--vars=" + _redact_vars(arg[len("--vars=") :]))
+        else:
+            out.append(arg)
+    return out
+
+
+def redact_params(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Click parameters with the values of ``var``/``vars`` replaced."""
+    params = dict(params)
+    if params.get("var"):
+        params["var"] = [_redact_var(v) for v in params["var"]]
+    if params.get("vars"):
+        params["vars"] = _redact_vars(params["vars"])
+    return params
 
 
 def _with_imported_baseline(recipe: Dict[str, Any], until: str) -> Dict[str, Any]:
@@ -81,11 +139,28 @@ class HistoryManager:
         # Written by older qxub; imported on first use
         self.recipes_file = self.config_dir / "recipes.yaml"
         self.executions_file = self.config_dir / "executions.yaml"
-        self._recipes = RecordStore(self.config_dir / "history" / "recipes")
-        self._executions = RecordStore(self.config_dir / "history" / "executions")
+        self._history_dir = self.config_dir / "history"
+        self._recipes = RecordStore(self._history_dir / "recipes")
+        self._executions = RecordStore(self._history_dir / "executions")
+        self._private = False
 
-        # Ensure config directory exists
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure config directory exists (owner-only if we create it)
+        self.config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    def _ensure_private(self) -> None:
+        """Make the history directories owner-only, once per process.
+
+        Records hold full command lines. Directories and records written by
+        older qxub with the umask's mode are tightened here.
+        """
+        if self._private:
+            return
+        if ensure_private_dir(self._history_dir):
+            for legacy in (self.recipes_file, self.executions_file):
+                make_owner_only(legacy.with_name(legacy.name + ".imported"))
+        for store in (self._recipes, self._executions):
+            store._ensure_dir()  # pylint: disable=protected-access
+        self._private = True
 
     def compute_recipe_hash(self, recipe_data: Dict[str, Any]) -> str:
         """Compute stable hash for a recipe based on executor and target."""
@@ -106,7 +181,7 @@ class HistoryManager:
         recipe = {"executor": {}, "target": {}}
 
         if len(sys.argv) > 1:
-            args = sys.argv[1:]  # Skip script name
+            args = redact_argv(sys.argv[1:])  # Skip script name
 
             # Handle new v3 CLI structure: qxub exec --env test "command"
             if len(args) > 0 and args[0] == "exec":
@@ -216,7 +291,7 @@ class HistoryManager:
         try:
             import sys
 
-            command_line = " ".join(sys.argv)
+            command_line = " ".join(redact_argv(sys.argv))
             recipe_data = self._extract_recipe_from_command(ctx, command_line)
 
             # Only proceed if we have a valid executor (not config commands, etc.)
@@ -225,6 +300,7 @@ class HistoryManager:
             ) not in ["conda", "module", "sing", "default"]:
                 return execution_timestamp
 
+            self._ensure_private()
             self._import_legacy_yaml()
 
             recipe_hash = self.compute_recipe_hash(recipe_data)
@@ -244,7 +320,9 @@ class HistoryManager:
                     "user": os.getenv("USER", "unknown"),
                 },
                 "requested": {
-                    "main_options": dict(ctx.params) if ctx and ctx.params else {}
+                    "main_options": (
+                        redact_params(ctx.params) if ctx and ctx.params else {}
+                    )
                 },
                 "execution": {
                     "job_id": job_id,
@@ -324,6 +402,7 @@ class HistoryManager:
 
     def _all_executions(self) -> Iterator[Dict[str, Any]]:
         """Execution records, newest first, each with its ``timestamp`` key."""
+        self._ensure_private()
         self._import_legacy_yaml()
         for ts, record in self._executions.items_newest_first():
             record["timestamp"] = ts
@@ -342,6 +421,7 @@ class HistoryManager:
         counting, so for recipes created after the import ``run_count`` is
         the number of runs still in history, not a lifetime total.
         """
+        self._ensure_private()
         self._import_legacy_yaml()
         recipes = {}
         for recipe_hash in self._recipes.keys():
@@ -444,10 +524,12 @@ class HistoryManager:
                 if key == "recipes":
                     record = _with_imported_baseline(record, until)
                 store.write_if_absent(str(record_key), record)
+            imported_path = path.with_name(path.name + ".imported")
             try:
-                os.replace(path, path.with_name(path.name + ".imported"))
+                os.replace(path, imported_path)
             except FileNotFoundError:
                 pass  # another process got there first
+            make_owner_only(imported_path)
 
     def convert_recipe_to_alias(self, recipe_hash: str) -> Optional[Dict[str, Any]]:
         """Convert a recipe to alias format for backward compatibility."""
