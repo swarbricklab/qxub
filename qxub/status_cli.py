@@ -169,15 +169,20 @@ def summary():
     console.print(table)
 
 
+def _full_job_id(job_id):
+    """A bare PBS number gets Gadi's server suffix (12345 -> 12345.gadi-pbs);
+    other IDs (local-..., another server's, a Slurm job's) are used as given."""
+    if job_id.isdigit() and backends.get_backend().name == "pbs":
+        return f"{job_id}.gadi-pbs"
+    return job_id
+
+
 @status_cli.command()
 @click.argument("job_id")
 def show(job_id):
     """Show detailed status for a specific job."""
 
-    # A bare PBS number gets Gadi's server suffix (12345 -> 12345.gadi-pbs);
-    # other IDs (local-..., another server's) are used as given.
-    if job_id.isdigit():
-        job_id = f"{job_id}.gadi-pbs"
+    job_id = _full_job_id(job_id)
 
     resource_tracker.sync_from_run_files([job_id])
     job = resource_tracker.get_job_status(job_id)
@@ -336,10 +341,7 @@ def check(job_id, output_format, snakemake, log_dir, audit):
     # -----------------------------------------------------------------------
     # Standard PBS job ID lookup — files-first to minimise DB pressure
     # -----------------------------------------------------------------------
-    # A bare PBS number gets Gadi's server suffix (12345 -> 12345.gadi-pbs);
-    # other IDs (local-..., another server's) are used as given.
-    if job_id.isdigit():
-        job_id = f"{job_id}.gadi-pbs"
+    job_id = _full_job_id(job_id)
 
     # -------------------------------------------------------------------
     # 1. Check status files on disk FIRST (no DB, no locking)

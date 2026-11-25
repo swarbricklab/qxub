@@ -5,7 +5,7 @@
 # The job script for every qxub job. What it sets up comes from its
 # settings: modules ($mods), a conda environment ($env) and/or a
 # Singularity image ($sif, with $bind). The #PBS lines above are comments
-# to any other scheduler.
+# to any other scheduler (Slurm already joins stderr into the job log).
 #
 # Each step (--pre, the command, --post) runs as it would in a plain shell:
 # a failure part-way through doesn't stop the step, and its exit status is
@@ -121,17 +121,18 @@ qxub_status() {
 # Record that the job is running
 qxub_run_update state=running "started_at=$(date -Iseconds)" "host=$(hostname)" "native_job_id=$QXUB_JOB_ID"
 # Every exit path (success, the ERR trap's exit, an explicit exit) records
-# the final state. PBS stops a job (walltime, qdel, memory) with SIGTERM;
-# without a TERM trap bash would run the EXIT trap with the last completed
-# command's status, often 0, so a killed job looked successful. The signal
-# traps exit with 128+signal instead. A job that gets SIGKILL records
-# nothing and stays "running"; the joblog settles it. A --pre or --post
-# that sets its own EXIT trap replaces this one, because it runs here.
+# the final state. PBS and Slurm stop a job (walltime, cancel, memory) with
+# SIGTERM; without a TERM trap bash would run the EXIT trap with the last
+# completed command's status, often 0, so a killed job looked successful.
+# The signal traps exit with 128+signal instead. A job that gets SIGKILL
+# records nothing and stays "running"; the scheduler settles it (PBS: the
+# joblog; Slurm: sacct). A --pre or --post that sets its own EXIT trap
+# replaces this one, because it runs here.
 #
 # --pre and --post run in this shell, so an `exit` in one ends the job
 # before any status file says so. Record the exit code then, so `qxub exec`
-# doesn't wait for the joblog. Signal exits are left to the joblog, whose
-# exit status says why PBS stopped the job.
+# doesn't wait for the joblog. Signal exits are left to the scheduler,
+# which says why it stopped the job.
 qxub_on_exit() {
     local code=$?
     if [ -z "${QXUB_SIGNAL:-}" ] && [ -n "${STATUS_DIR:-}" ] && [ -n "${STATUS_KEY:-}" ] \

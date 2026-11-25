@@ -106,9 +106,9 @@ def test_pbs_platform_types_select_the_pbs_backend(kind):
 
 def test_unknown_platform_type_warns_and_uses_pbs(caplog):
     with caplog.at_level(logging.WARNING, logger="qxub.backends"):
-        backend = backends.backend_for_type("slurm")
+        backend = backends.backend_for_type("lsf")
     assert isinstance(backend, PbsBackend)
-    assert "No scheduler backend for platform type 'slurm'" in caplog.text
+    assert "No scheduler backend for platform type 'lsf'" in caplog.text
 
 
 def test_platform_type_picks_the_backend(monkeypatch):

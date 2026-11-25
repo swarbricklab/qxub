@@ -15,7 +15,9 @@ from typing import Dict, List, Optional, Tuple, Type
 from ..resources.spec import ResourceSpec
 from .base import (
     ENDED_BY_CANCEL,
+    ENDED_BY_MEMORY,
     ENDED_BY_WALLTIME,
+    JobEnd,
     JobInfo,
     JobSpec,
     JobState,
@@ -25,9 +27,11 @@ from .base import (
     SchedulerQueryError,
     SubmitError,
     describe_ended_by,
+    read_job_log_exit,
 )
 from .local import LocalBackend
 from .pbs import PbsBackend
+from .slurm import SlurmBackend
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,7 @@ BACKENDS: Dict[str, Type[SchedulerBackend]] = {
     "pbs_pro": PbsBackend,
     "pbspro": PbsBackend,
     "torque": PbsBackend,
+    "slurm": SlurmBackend,
     # Jobs as background processes on this machine
     "local": LocalBackend,
 }
@@ -128,7 +133,9 @@ def live_jobs(
 __all__ = [
     "BACKENDS",
     "ENDED_BY_CANCEL",
+    "ENDED_BY_MEMORY",
     "ENDED_BY_WALLTIME",
+    "JobEnd",
     "describe_ended_by",
     "JobInfo",
     "JobSpec",
@@ -140,9 +147,11 @@ __all__ = [
     "ResourceSpec",
     "SchedulerBackend",
     "SchedulerQueryError",
+    "SlurmBackend",
     "SubmitError",
     "backend_for_job",
     "backend_for_type",
     "get_backend",
     "live_jobs",
+    "read_job_log_exit",
 ]

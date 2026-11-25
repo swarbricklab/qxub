@@ -98,6 +98,7 @@ def test_another_backend_that_fails_is_skipped(monkeypatch):
     monkeypatch.setattr(backends, "get_backend", lambda platform=None: LocalBackend())
     monkeypatch.setattr(LocalBackend, "list_jobs", lambda *a, **k: [])
     monkeypatch.setattr(backends.PbsBackend, "available", lambda self: False)
+    monkeypatch.setattr(backends.SlurmBackend, "available", lambda self: False)
 
     assert backends.live_jobs() == []
 

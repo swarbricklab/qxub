@@ -1,0 +1,46 @@
+# Example Slurm platform (qxub.backends.slurm.SlurmBackend).
+#
+# Copy it, rename the partitions and limits to your cluster's, and select it
+# with QXUB_PLATFORM_FILE=/path/to/slurm.yaml or by putting it in a platform
+# search path and setting `defaults.platform: <name>`. qxub's queues are
+# Slurm partitions; --project/-P is --account.
+#
+# qxub needs a directory that both this machine and the compute nodes see
+# for its status files: `paths.scratch` below, else ~/.local/state/qxub
+# (fine where home directories are shared, as on most clusters).
+
+platform:
+  name: slurm_example
+  type: slurm
+  host: login  # matches a hostname containing "login"
+  description: "An example Slurm cluster"
+
+  # The variable holding the account to charge, if your site sets one at
+  # login. Without it, Slurm charges your default account.
+  # account_env: SLURM_ACCOUNT
+  # paths:
+  #   scratch: "/scratch/{user}"
+  # Added to every sbatch, e.g. a site-wide constraint or QOS.
+  # default_directives:
+  #   - "--qos=normal"
+
+  queues:
+    - name: cpu
+      type: standard
+      priority: normal
+      default_walltime: "1:00:00"
+      limits:
+        max_cpus: 64
+        max_memory: "256GB"
+        max_walltime: "48:00:00"
+
+    - name: gpu
+      type: gpu
+      priority: normal
+      default_walltime: "1:00:00"
+      limits:
+        max_cpus: 32
+        max_gpus: 4
+        min_gpus: 1
+        max_memory: "512GB"
+        max_walltime: "24:00:00"

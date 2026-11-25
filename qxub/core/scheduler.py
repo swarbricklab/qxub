@@ -308,17 +308,7 @@ def read_exit_from_joblog_file(joblog_path):
     Returns:
         int: Exit code if the resource-usage block has been written, else None
     """
-    import re
-
-    try:
-        with open(str(joblog_path), "r", encoding="utf-8") as f:
-            content = f.read()
-        exit_match = re.search(r"Exit Status:\s*(-?\d+)", content)
-        if exit_match:
-            return int(exit_match.group(1))
-    except (IOError, OSError):
-        pass
-    return None
+    return backends.read_job_log_exit(joblog_path)
 
 
 def _check_pbs_job_log_for_exit(job_id, log_dir):
@@ -396,10 +386,11 @@ def get_job_resource_data(job_id):
     return backend.find_details(backend.job_details([job_id]), job_id)
 
 
-def job_end_reason(job_id, exit_status, run_file=None):
+def job_end_reason(job_id, exit_status, run_file=None, ended_by=None):
     """Why a job ended (``ENDED_BY_*``), or ``None`` if it isn't known.
 
-    The run file says if ``qxub cancel`` stopped it; otherwise the job's
+    The run file says if ``qxub cancel`` stopped it; otherwise ``ended_by``
+    if the scheduler said (Slurm: a ``TIMEOUT`` state), else the job's
     backend may tell from the exit status (PBS: -29 from the job log is a
     walltime kill). A reason found that way is added to a finished run
     file, so ``status`` and the statistics see it too.
@@ -409,9 +400,10 @@ def job_end_reason(job_id, exit_status, run_file=None):
     record = runs.read_run(run_file) if run_file else None
     if record and record.get("ended_by"):
         return record["ended_by"]
-    if exit_status in (None, 0):
-        return None
-    ended_by = backends.backend_for_job(job_id).ended_by(exit_status)
+    if ended_by is None:
+        if exit_status in (None, 0):
+            return None
+        ended_by = backends.backend_for_job(job_id).ended_by(exit_status)
     if ended_by and record and record.get("state") == "finished":
         runs.update(run_file, {"ended_by": ended_by})
     return ended_by
@@ -631,13 +623,16 @@ def monitor_job_single_thread(
     walltime_offset_sec=0,
     run_id=None,
     status_dir=None,
+    backend=None,
 ):
     """
     Single-thread job monitoring with proper spinner integration using status files.
 
     The job writes its status files to ``status_dir`` (default: the
     platform's status directory, passed to it as ``QXUB_STATUS_DIR``),
-    named after ``run_id`` (``QXUB_RUN_ID``).
+    named after ``run_id`` (``QXUB_RUN_ID``). A job that ends without
+    writing them is noticed by asking ``backend`` (default: the one its ID
+    suggests) every so often (:meth:`~qxub.backends.SchedulerBackend.job_end`).
 
     Flow:
     1. "Job constructed" progress message (handled by caller)
@@ -655,6 +650,7 @@ def monitor_job_single_thread(
 
     status_dir = Path(status_dir) if status_dir else get_default_status_dir()
     key = run_id or job_id
+    backend = backend or backends.backend_for_job(job_id)
 
     # Status files to monitor
     job_started_file = status_dir / f"job_started_{key}"
@@ -665,9 +661,10 @@ def monitor_job_single_thread(
     job_started_notified = False
 
     # A job that dies before it writes any status file (its status directory
-    # can't be created, the shell can't start, ...) would leave us waiting
-    # forever: also look for the exit status PBS appends to the joblog. One
-    # small file read, while the job is queued usually a missing file.
+    # can't be created, the shell can't start, it's cancelled while queued)
+    # would leave us waiting forever: also ask the backend whether it ended
+    # (PBS: the exit status appended to the joblog, one small file read;
+    # Slurm: sacct).
     joblog_wait_check = min(joblog_check_interval, 15)
     last_joblog_check = time.monotonic()
 
@@ -675,13 +672,10 @@ def monitor_job_single_thread(
     spinner = SimpleSpinner(quiet=quiet)
     try:
         while True:
-            if (
-                joblog_file
-                and time.monotonic() - last_joblog_check >= joblog_wait_check
-            ):
+            if time.monotonic() - last_joblog_check >= joblog_wait_check:
                 last_joblog_check = time.monotonic()
-                pbs_exit = read_exit_from_joblog_file(joblog_file)
-                if pbs_exit is not None and not (
+                end = backend.job_end(job_id, joblog_file)
+                if end is not None and not (
                     job_started_file.exists() or final_exit_code_file.exists()
                 ):
                     # The job ended without writing status files here (it
@@ -689,15 +683,22 @@ def monitor_job_single_thread(
                     spinner.clear()
                     if not quiet:
                         emoji, text = _exit_text(
-                            pbs_exit, job_end_reason(job_id, pbs_exit, run_file)
+                            end.exit_status,
+                            job_end_reason(
+                                job_id, end.exit_status, run_file, end.ended_by
+                            ),
                         )
-                        message = f"{emoji} {text}"
+                        # The job log, unless the backend asks its scheduler
+                        reads_log = (
+                            type(backend).job_end is backends.SchedulerBackend.job_end
+                        )
+                        where = f"its log, {joblog_file}" if reads_log else backend.name
                         print_status(
-                            f"{message} (from its log, {joblog_file}; "
+                            f"{emoji} {text} (from {where}; "
                             f"no status files in {status_dir})",
                             final=True,
                         )
-                    return pbs_exit
+                    return end.exit_status
 
             # Show spinner frame
             spinner.show_next_frame()
@@ -761,7 +762,7 @@ def monitor_job_single_thread(
         print_status("📡 Streaming job output", final=True)
 
     # 7. Stream job output (also watches joblog for PBS-killed / walltime jobs)
-    exit_status = stream_job_output_with_status_files(
+    end = stream_job_output_with_status_files(
         job_id,
         out_file,
         err_file,
@@ -771,16 +772,15 @@ def monitor_job_single_thread(
         walltime_sec=walltime_sec,
         joblog_check_interval=joblog_check_interval,
         run_file=run_file,
+        backend=backend,
     )
+    exit_status = end.exit_status
+    ended_by = job_end_reason(job_id, exit_status, run_file, end.ended_by)
 
     # 8. Completion message
     if not quiet:
         completion_msg = _format_completion_message(
-            job_id,
-            exit_status,
-            status_dir,
-            key,
-            job_end_reason(job_id, exit_status, run_file),
+            job_id, exit_status, status_dir, key, ended_by
         )
         print_status(completion_msg, final=True)
 
@@ -830,6 +830,7 @@ def stream_job_output_with_status_files(
     walltime_sec=None,
     joblog_check_interval=60,
     run_file=None,
+    backend=None,
 ):
     """
     Stream job output files until job completion using status files for detection.
@@ -840,26 +841,30 @@ def stream_job_output_with_status_files(
         err_file: Path to stderr file
         final_exit_code_file: Path to status file containing exit code
         quiet: If True, suppress output streaming (for terse/quiet modes)
-        joblog_file: Optional path to the PBS .log file.  When provided, the
-            loop also watches for PBS writing its resource-usage block (which
-            contains an ``Exit Status:`` line).  This catches jobs killed by
-            PBS (e.g. walltime exceeded) before our in-job cleanup code runs
-            and writes final_exit_code_file.
+        joblog_file: Optional path to the scheduler's log of the job.  The
+            loop also asks ``backend`` whether the job ended
+            (:meth:`~qxub.backends.SchedulerBackend.job_end`; PBS: an
+            ``Exit Status:`` line in this log; Slurm: sacct).  This catches
+            jobs the scheduler killed (e.g. walltime exceeded) before our
+            in-job cleanup code runs and writes final_exit_code_file.
         walltime_sec: Expected walltime in seconds (optional, already offset-
-            adjusted by caller).  When set, joblog checks are deferred until
-            this many seconds have elapsed.  When not set, joblog checks start
-            immediately but are still rate-limited to catch unexpected PBS kills.
-        joblog_check_interval: Seconds between joblog reads once eligible
+            adjusted by caller).  When set, those checks are deferred until
+            this many seconds have elapsed.  When not set, they start
+            immediately but are still rate-limited to catch unexpected kills.
+        joblog_check_interval: Seconds between those checks once eligible
             (default 60).  Increase on busy NFS systems to reduce load.
         run_file: Optional path to the job's run file.  Read every few
             seconds: a job stopped by ``qxub cancel`` records its exit there
             (with ``ended_by=cancelled``) but no final_exit_code file, and
             would otherwise be noticed only by the next joblog check.
+        backend: The job's backend (default: the one its ID suggests).
 
     Returns:
-        int: Job exit status
+        JobEnd: the job's exit status, and why it ended if that's known
     """
     import os
+
+    backend = backend or backends.backend_for_job(job_id)
 
     # Keep track of file positions to avoid re-reading
     out_pos = 0
@@ -953,8 +958,7 @@ def stream_job_output_with_status_files(
                     pass
 
             # Get final exit status from status file
-            exit_status = read_exit_status_from_file(final_exit_code_file)
-            return exit_status
+            return backends.JobEnd(read_exit_status_from_file(final_exit_code_file))
 
         # Cancelled with `qxub cancel`: the job recorded its exit in the run
         # file only. A small file read every few seconds.
@@ -971,46 +975,31 @@ def stream_job_output_with_status_files(
             ):
                 drain()
                 logger.debug("Job %s ended (%s)", job_id, record["ended_by"])
-                return code
+                return backends.JobEnd(code, record["ended_by"])
 
-        # Check PBS job log for exit status (walltime-kill / PBS-kill path).
-        # PBS writes an Exit Status line to the .log file even when it kills
-        # a job before our cleanup code can write final_exit_code_file.
-        # We rate-limit to joblog_check_interval and defer until walltime
-        # has elapsed (when known) to minimise NFS pressure.
-        if joblog_file:
-            now = time.time()
-            elapsed = now - monitoring_start
-            past_walltime = walltime_sec is None or elapsed >= walltime_sec
-            due_for_check = last_joblog_check is None or (
-                now - last_joblog_check >= joblog_check_interval
-            )
-            if past_walltime and due_for_check:
-                last_joblog_check = now
-                pbs_exit = read_exit_from_joblog_file(joblog_file)
-                if pbs_exit is not None:
-                    # Flush whatever partial output the job managed to write
-                    if not quiet and os.path.exists(out_file):
-                        try:
-                            with open(out_file, "r", encoding="utf-8") as f:
-                                f.seek(out_pos)
-                                for line in f:
-                                    print(line.rstrip(), file=sys.stdout, flush=True)
-                        except (OSError, IOError):
-                            pass
-                    if not quiet and os.path.exists(err_file):
-                        try:
-                            with open(err_file, "r", encoding="utf-8") as f:
-                                f.seek(err_pos)
-                                for line in f:
-                                    print(line.rstrip(), file=sys.stderr, flush=True)
-                        except (OSError, IOError):
-                            pass
-                    logger.debug(
-                        "Job %s terminated by PBS (exit %s), detected via job log",
-                        job_id,
-                        pbs_exit,
-                    )
-                    return pbs_exit
+        # Ask the backend whether the scheduler ended the job (walltime-kill
+        # path). PBS writes an Exit Status line to the .log file even when it
+        # kills a job before our cleanup code can write final_exit_code_file;
+        # Slurm's sacct says. We rate-limit to joblog_check_interval and
+        # defer until walltime has elapsed (when known) to minimise NFS and
+        # scheduler load.
+        now = time.time()
+        elapsed = now - monitoring_start
+        past_walltime = walltime_sec is None or elapsed >= walltime_sec
+        due_for_check = last_joblog_check is None or (
+            now - last_joblog_check >= joblog_check_interval
+        )
+        if past_walltime and due_for_check:
+            last_joblog_check = now
+            end = backend.job_end(job_id, joblog_file)
+            if end is not None:
+                drain()  # whatever partial output the job managed to write
+                logger.debug(
+                    "Job %s ended by its scheduler (exit %s, %s)",
+                    job_id,
+                    end.exit_status,
+                    end.ended_by,
+                )
+                return end
 
         time.sleep(0.2)  # Check every 200ms for good output responsiveness
