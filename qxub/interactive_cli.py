@@ -7,6 +7,7 @@ tmux integration for session persistence.
 """
 
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -221,6 +222,9 @@ def _get_container_prompt(container_name: str) -> str:
     Default: "\\[\\033[1;35m\\]📦 {container}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "
     """
     default_prompt = "\\[\\033[1;35m\\]📦 {container}\\[\\033[0m\\] \\[\\033[1;34m\\]\\W\\[\\033[0m\\] \\$ "
+    # The name comes from the image's path; PS1 is expanded by the shell
+    # (and decoded for backslash escapes), so keep only plain characters.
+    container_name = re.sub(r"[^A-Za-z0-9._+-]", "_", container_name)
     try:
         config_mgr = _get_config_manager()
         custom_prompt = config_mgr.get_config_value(
@@ -366,7 +370,18 @@ def _build_interactive_script(
     3. Runs pre-commands
     4. Drops into interactive shell
     5. Runs post-commands on exit (best effort)
+
+    Every value other than the pre/post commands and the command to run is
+    shell-quoted: a directory name or config value must never run as code.
     """
+    q = shlex.quote
+    # These were expanded by the session's shell when they were pasted in
+    # unquoted; expand ~ and $VARS here instead (never command substitution)
+    if conda_env:
+        conda_env = os.path.expanduser(conda_env)
+    if record_dir:
+        record_dir = os.path.expanduser(os.path.expandvars(record_dir))
+
     # Determine context type for display
     if conda_env and modules:
         context_type = "conda+modules"
@@ -398,7 +413,7 @@ def _build_interactive_script(
                 "",
                 "# Set up status tracking for qxub history",
                 f"QXUB_STATUS_DIR={shlex.quote(str(default_status_dir()))}",
-                f'QXUB_SESSION_DIR="$QXUB_STATUS_DIR/session_{session_id}"',
+                f'QXUB_SESSION_DIR="$QXUB_STATUS_DIR"/{q("session_" + session_id)}',
                 'mkdir -p "$QXUB_SESSION_DIR"',
                 "",
                 "# Write job ID and start time",
@@ -438,8 +453,8 @@ def _build_interactive_script(
     lines.extend(
         [
             f'echo "🖥️  Interactive session starting on $(hostname)"',
-            f'echo "📁 Working directory: {working_dir}"',
-            f'echo "{context_display}"',
+            f'echo "📁 Working directory: "{q(working_dir)}',
+            f"echo {q(context_display)}",
             "",
         ]
     )
@@ -447,7 +462,7 @@ def _build_interactive_script(
     # Change to working directory
     lines.extend(
         [
-            f'cd "{working_dir}" || {{ echo "❌ Cannot cd to {working_dir}"; exit 1; }}',
+            f'cd -- {q(working_dir)} || {{ echo "❌ Cannot cd to "{q(working_dir)}; exit 1; }}',
             "",
         ]
     )
@@ -500,9 +515,9 @@ def _build_interactive_script(
         for mod in modules:
             lines.extend(
                 [
-                    f'echo "📦 Loading module: {mod}"',
-                    f"if ! module load {mod}; then",
-                    f'    echo "❌ ERROR: Failed to load module: {mod}"',
+                    f'echo "📦 Loading module: "{q(mod)}',
+                    f"if ! module load {q(mod)}; then",
+                    f'    echo "❌ ERROR: Failed to load module: "{q(mod)}',
                     '    rm -f "$QXUB_ENV_BEFORE"',
                     "    exit 1",
                     "fi",
@@ -510,7 +525,7 @@ def _build_interactive_script(
             )
         lines.extend(
             [
-                f'echo "✅ Loaded modules: {module_list_str}"',
+                f'echo "✅ Loaded modules: "{q(module_list_str)}',
                 "",
                 "# Check for environment changes that might conflict with conda",
                 "QXUB_ENV_AFTER=$(mktemp)",
@@ -575,11 +590,11 @@ def _build_interactive_script(
                 "fi",
                 "",
                 'eval "$(conda shell.bash hook)"',
-                f"if ! conda activate {conda_env}; then",
-                f'    echo "❌ ERROR: Failed to activate conda environment: {conda_env}"',
+                f"if ! conda activate {q(conda_env)}; then",
+                f'    echo "❌ ERROR: Failed to activate conda environment: "{q(conda_env)}',
                 "    exit 1",
                 "fi",
-                f'echo "✅ Activated conda environment: {conda_env}"',
+                f'echo "✅ Activated conda environment: "{q(conda_env)}',
                 "",
             ]
         )
@@ -598,7 +613,7 @@ def _build_interactive_script(
                 "    fi",
                 "fi",
                 "",
-                f'echo "📦 Using container: {container}"',
+                f'echo "📦 Using container: "{q(container)}',
                 "",
             ]
         )
@@ -642,7 +657,7 @@ def _build_interactive_script(
         # Container mode: run singularity shell as a child so the EXIT trap fires
         # Extract container basename for prompt
         container_name = container.split("/")[-1].replace(".sif", "")
-        bind_opts = f"--bind {bind} " if bind else ""
+        bind_opts = f"--bind {q(bind)} " if bind else ""
 
         # Get prompt from config or use default
         container_prompt = _get_container_prompt(container_name)
@@ -651,14 +666,14 @@ def _build_interactive_script(
         # SINGULARITYENV_* variables are passed through to the container
         lines.extend(
             [
-                f'echo "🚀 Entering container: {container}"',
+                f'echo "🚀 Entering container: "{q(container)}',
                 'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                 'echo ""',
                 "",
                 "# Set custom prompt for container shell",
-                f'export SINGULARITYENV_PS1="{container_prompt}"',
+                f"export SINGULARITYENV_PS1={q(container_prompt)}",
                 "",
-                f'singularity shell {bind_opts}"{container}"',
+                f"singularity shell {bind_opts}{q(container)}",
                 "exit $?",
             ]
         )
@@ -669,39 +684,39 @@ def _build_interactive_script(
         lines.extend(
             [
                 "# Start interactive shell with environment",
-                f'echo "🚀 Starting interactive shell ({shell})"',
+                f'echo "🚀 Starting interactive shell ("{q(shell)}")"',
                 'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                 'echo ""',
                 "",
                 "# Create a temporary rcfile that sources bashrc and activates environment",
                 "QXUB_RCFILE=$(mktemp /tmp/qxub_rc.XXXXXX)",
-                "cat > \"$QXUB_RCFILE\" << 'RCEOF'",
-                "# Source standard bashrc first",
-                "[ -f ~/.bashrc ] && source ~/.bashrc",
             ]
         )
+        rc_lines = [
+            "# Source standard bashrc first",
+            "[ -f ~/.bashrc ] && source ~/.bashrc",
+        ]
 
         # Add environment-specific activation to rcfile
         # Order: modules first, then conda (same as main script)
         if modules:
             for mod in modules:
-                lines.append(f"module load {mod} 2>/dev/null")
+                rc_lines.append(f"module load {q(mod)} 2>/dev/null")
 
         if conda_env:
-            lines.extend(
+            rc_lines.extend(
                 [
                     "# Ensure conda is available and activate the environment",
                     'eval "$(conda shell.bash hook)" 2>/dev/null',
-                    f"conda activate {conda_env}",
+                    f"conda activate {q(conda_env)}",
                 ]
             )
 
-        lines.extend(
-            [
-                "RCEOF",
-                "",
-            ]
-        )
+        # printf with quoted lines rather than a heredoc, which a value
+        # containing the terminator line could end early
+        lines.append("printf '%s\\n' \\")
+        lines.extend(f"    {q(line)} \\" for line in rc_lines)
+        lines.extend(['    > "$QXUB_RCFILE"', ""])
 
         if run_cmd:
             # Run the specified command instead of dropping to shell
@@ -724,7 +739,7 @@ def _build_interactive_script(
             # - With --record: save transcript and timing for playback
             lines.extend(
                 [
-                    f'echo "🚀 Running: {run_cmd}"',
+                    f'echo "🚀 Running: "{q(run_cmd)}',
                     'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
                     'echo ""',
                     "",
@@ -737,11 +752,11 @@ def _build_interactive_script(
             if record:
                 # Record transcript and timing data
                 # Use specified directory or working directory
-                rec_dir = record_dir if record_dir else "$PWD"
+                rec_dir = q(record_dir) if record_dir else '"$PWD"'
                 lines.extend(
                     [
                         "# Generate transcript filename with timestamp",
-                        f'RECORD_DIR="{rec_dir}"',
+                        f"RECORD_DIR={rec_dir}",
                         'mkdir -p "$RECORD_DIR" 2>/dev/null',
                         'TRANSCRIPT_FILE="$RECORD_DIR/qxub-transcript-$(date +%Y%m%d-%H%M%S).txt"',
                         'TIMING_FILE="$RECORD_DIR/qxub-timing-$(date +%Y%m%d-%H%M%S).txt"',
@@ -755,7 +770,7 @@ def _build_interactive_script(
                         "# -q: quiet mode (no 'Script started' messages)",
                         "# -t: output timing to file for replay",
                         "# Note: no 'exec' so we can print summary after session ends",
-                        f'script -eqc "{run_cmd}" -t"$TIMING_FILE" "$TRANSCRIPT_FILE"',
+                        f'script -eqc {q(run_cmd)} -t"$TIMING_FILE" "$TRANSCRIPT_FILE"',
                         "SCRIPT_EXIT=$?",
                         "",
                         "# Print transcript location on exit",
@@ -771,7 +786,7 @@ def _build_interactive_script(
                     [
                         "# Use 'script' to create a pseudo-terminal for the command",
                         "# -e: return child's exit code, -q: quiet mode",
-                        f'script -eqc "{run_cmd}" /dev/null',
+                        f"script -eqc {q(run_cmd)} /dev/null",
                         "exit $?",
                     ]
                 )
