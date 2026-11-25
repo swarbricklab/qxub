@@ -121,6 +121,9 @@ class LocalBackend(SchedulerBackend):
                         "host": socket.gethostname(),
                         "job_log": str(job_log),
                         "submitted": datetime.now().isoformat(timespec="seconds"),
+                        # In the submitting platform's status directory,
+                        # which a cancel under another platform can't guess
+                        "run_file": spec.env.get("QXUB_RUN_FILE"),
                     }
                 )
             )
@@ -152,6 +155,13 @@ class LocalBackend(SchedulerBackend):
         return ["env", f"{JOB_ID_VARIABLE}={job_id}", "bash", spec.script]
 
     # -- queries ----------------------------------------------------------
+
+    def run_file(self, job_id: str) -> Optional[str]:
+        try:
+            meta = json.loads((jobs_dir() / job_id / "meta.json").read_text())
+        except (OSError, ValueError):
+            return None
+        return meta.get("run_file") or None
 
     def _read(self, job_id: str) -> Optional[Dict[str, Any]]:
         job_dir = jobs_dir() / job_id

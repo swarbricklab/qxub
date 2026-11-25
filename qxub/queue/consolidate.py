@@ -623,7 +623,11 @@ def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) ->
             code = runs.exit_code(record)
             status = "completed" if code == 0 else "failed"
             if job_id:
-                _insert_job(conn, job_id, record, status, code, usage or {}, stamp)
+                usage = {
+                    **(usage or {}),
+                    "ended_by": _ended_by(job_id, record, joblog, info),
+                }
+                _insert_job(conn, job_id, record, status, code, usage, stamp)
 
         conn.execute(
             "INSERT OR REPLACE INTO consolidated_runs VALUES (?, ?, ?, ?, ?)",
@@ -635,6 +639,25 @@ def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) ->
             result.added += 1
         changed = True
     return changed
+
+
+def _ended_by(job_id, record, joblog, info) -> Optional[str]:
+    """Why the job ended: as its run file says (``qxub cancel``, or qx
+    from the job log), the scheduler said, or its backend reads the job
+    log's exit status (PBS: -29 for walltime; the run file then holds 143)."""
+    if record.get("ended_by"):
+        return record["ended_by"]
+    if info is not None and info.ended_by:
+        return info.ended_by
+    from .. import backends  # pylint: disable=import-outside-toplevel
+
+    backend = backends.backend_for_job(job_id, record.get("backend") or None)
+    for code in ((joblog or {}).get("exit_status"), runs.exit_code(record)):
+        if code:
+            reason = backend.ended_by(code)
+            if reason:
+                return reason
+    return None
 
 
 def _backend_name(job_id: str) -> str:
@@ -677,28 +700,15 @@ def _insert_job(conn, job_id, record, status, code, usage, stamp) -> None:
 
 def _settle_run_file(path: Path, code: int, stamp: str) -> None:
     """Record an exit the job couldn't record itself. Atomic, like the job's."""
-    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        text = path.read_text(encoding="utf-8")
-        tmp.write_text(
-            text
-            + runs.format_fields(
-                {
-                    "state": "finished",
-                    "exit_code": code,
-                    "settled_by": "consolidate",
-                    "settled_at": stamp,
-                }
-            ),
-            encoding="utf-8",
-        )
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.debug("Could not settle %s: %s", path, exc)
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+    runs.update(
+        path,
+        {
+            "state": "finished",
+            "exit_code": code,
+            "settled_by": "consolidate",
+            "settled_at": stamp,
+        },
+    )
 
 
 def _publish(private: Path, snapshot: Path) -> None:

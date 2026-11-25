@@ -45,6 +45,17 @@ class JobState(str, Enum):
 ENDED_BY_WALLTIME = "walltime"  # killed for running past its walltime
 ENDED_BY_CANCEL = "cancelled"  # cancelled (qxub cancel, qdel, ...)
 
+_ENDED_BY_TEXT = {
+    ENDED_BY_WALLTIME: "stopped at its walltime limit",
+    ENDED_BY_CANCEL: "cancelled",
+}
+
+
+def describe_ended_by(ended_by: str) -> str:
+    """How a job ended, to follow "Job was" / "Job": ``stopped at its
+    walltime limit``, ``cancelled``."""
+    return _ENDED_BY_TEXT.get(ended_by, f"ended by {ended_by}")
+
 
 @dataclass
 class JobUsage:
@@ -247,6 +258,23 @@ class SchedulerBackend(ABC):
     def same_job(self, job_id: str) -> str:
         """A key under which different spellings of one job ID are equal."""
         return job_id
+
+    def run_file(self, job_id: str) -> Optional[str]:
+        """Where the job's run file is, if this backend recorded it.
+
+        Otherwise it's looked for in the current platform's status
+        directory, which may not be the one the job was submitted with.
+        """
+        return None
+
+    def ended_by(self, exit_status: Optional[int]) -> Optional[str]:
+        """Why the scheduler ended a job, if its exit status says
+        (``ENDED_BY_*``); ``None`` if it doesn't.
+
+        For an exit status read outside :meth:`job_info`, such as from the
+        job log (PBS: Exit_status -29 is a walltime kill, 271 a qdel).
+        """
+        return None
 
     def find_info(self, job_id: str) -> Optional[JobInfo]:
         """:meth:`job_info` for one job, also matching another spelling of

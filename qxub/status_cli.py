@@ -17,6 +17,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from . import backends
 from .core.scheduler import job_status_from_files
 from .queue import is_virtual_id, resolve_virtual_id
 from .resources import resource_tracker
@@ -202,6 +203,11 @@ def show(job_id):
     if job["exit_code"] is not None:
         exit_style = "green" if job["exit_code"] == 0 else "red"
         console.print(f"Exit Code: [{exit_style}]{job['exit_code']}[/{exit_style}]")
+
+    if job.get("ended_by"):
+        console.print(
+            f"Ended: [red]{backends.describe_ended_by(job['ended_by'])}[/red]"
+        )
 
     duration = _calculate_duration(job)
     if duration != "N/A":

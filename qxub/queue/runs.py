@@ -124,6 +124,27 @@ def read_run(path) -> Optional[Dict[str, str]]:
     return record
 
 
+def update(path, fields: Dict[str, Any]) -> bool:
+    """Add ``fields`` to an existing run file, as the job does: the whole
+    file is replaced through a rename, and the new values win.
+
+    For a reader recording what the job couldn't: an exit the job didn't
+    record, or why it ended. Returns False if the file is missing or
+    couldn't be written. Never raises.
+    """
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        text = path.read_text(encoding="utf-8")
+        tmp.write_text(text + format_fields(fields), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        logger.debug("Could not update %s: %s", path, exc)
+        discard(tmp)
+        return False
+
+
 def exit_code(record: Dict[str, str]) -> Optional[int]:
     try:
         return int(record.get("exit_code", ""))

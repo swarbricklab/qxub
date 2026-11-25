@@ -24,6 +24,7 @@ from .base import (
     SchedulerBackend,
     SchedulerQueryError,
     SubmitError,
+    describe_ended_by,
 )
 from .local import LocalBackend
 from .pbs import PbsBackend
@@ -128,6 +129,7 @@ __all__ = [
     "BACKENDS",
     "ENDED_BY_CANCEL",
     "ENDED_BY_WALLTIME",
+    "describe_ended_by",
     "JobInfo",
     "JobSpec",
     "JobState",

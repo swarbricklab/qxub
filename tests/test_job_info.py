@@ -103,14 +103,16 @@ def test_pbs_states(letter, state):
 
 
 def test_pbs_walltime_kill_is_told_apart():
-    """Killed at walltime: PBS's Exit_status -29, not a signal like qdel's."""
+    """Killed at walltime: PBS's Exit_status -29; qdel'd: 271 (#170 review)."""
     walltime = job_info_from_details(
         "1", parse_qstat_fx_output(FINISHED.format(code=-29))
     )
     qdel = job_info_from_details("1", parse_qstat_fx_output(FINISHED.format(code=271)))
 
     assert walltime.ended_by == ENDED_BY_WALLTIME
-    assert qdel.ended_by is None
+    assert qdel.ended_by == ENDED_BY_CANCEL
+    other = job_info_from_details("1", parse_qstat_fx_output(FINISHED.format(code=1)))
+    assert other.ended_by is None
 
 
 def test_usage_knows_when_nothing_was_used():

@@ -1,6 +1,7 @@
 # Core utilities package
 
 from .scheduler import (
+    cancel_job,
     get_default_status_dir,
     get_job_info,
     get_job_resource_data,
@@ -16,6 +17,7 @@ __all__ = [
     "monitor_job_single_thread",
     "print_status",
     "qdel",
+    "cancel_job",
     "get_job_info",
     "get_job_resource_data",
     "job_status_from_files",
