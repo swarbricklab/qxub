@@ -676,3 +676,62 @@ def test_staged_file_swapped_for_a_link_fails_closed(area, tmp_path, monkeypatch
     assert not result.published and "replaced by someone else" in result.errors[0]
     assert victim.stat().st_mode & 0o7777 == 0o600
     assert not snapshot.exists()
+
+
+def plant_rows(snapshot, *run_ids, at="2000-01-01T00:00:00"):
+    """Another group member publishes a snapshot naming these runs."""
+    snapshot.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(snapshot)
+    cons._create_schema(conn)
+    conn.executemany(
+        "INSERT OR REPLACE INTO consolidated_runs VALUES (?, NULL, 'mallory', 'completed', ?)",
+        [(r, at) for r in run_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_snapshot_rows_do_not_delete_or_skip_unfinished_runs(area):
+    """Security: rows in the shared snapshot are not this user's say-so."""
+    runs_dir, snapshot = area
+    path = write_run(runs_dir, "qx-a", state="running", native_job_id="1.gadi-pbs")
+    settings = path.with_suffix(".env")
+    settings.write_text("export cmd_b64=x\n")
+    plant_rows(snapshot, "qx-a")
+
+    result = run(area, lookup=lambda ids: {}, now=NOW + timedelta(days=20))
+
+    assert result.removed == 0 and path.exists() and settings.exists()
+    assert result.in_progress == 1
+
+    # Once it finishes, it is consolidated as usual.
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    result = run(area, lookup=lambda ids: {})
+    assert result.added == 1 and result.published
+    assert [r["job_id"] for r in rows(snapshot)] == ["1.gadi-pbs"]
+    assert path.exists(), "kept for the grace period after this round"
+
+
+def test_planted_row_for_a_finished_run_waits_for_its_own_grace(area):
+    runs_dir, snapshot = area
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=30))
+    plant_rows(snapshot, "qx-a")
+
+    first = run(area, lookup=lambda ids: {})
+    assert first.added == 1, "added by this user, whatever the snapshot says"
+    assert first.removed == 0 and path.exists()
+    assert runs.read_run(path)[cons.CONSOLIDATED_AT] == NOW.isoformat()
+
+    later = run(area, now=NOW + timedelta(days=cons.GRACE_DAYS + 1))
+    assert later.removed == 1 and not path.exists()
+
+
+def test_published_runs_are_marked_in_their_run_file(area):
+    runs_dir, snapshot = area
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+
+    run(area, lookup=lambda ids: {})
+
+    record = runs.read_run(path)
+    assert record[cons.CONSOLIDATED_AT] == NOW.isoformat()
+    assert record[cons.CONSOLIDATED_AS] == "finished"

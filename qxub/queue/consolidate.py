@@ -14,11 +14,14 @@ then, one process per round folds finished runs into ``qxub-stats.db``:
    their resource usage (from the joblog, or one batched query of the scheduler), and
    checks ``PRAGMA integrity_check``.
 3. It publishes the copy: written to a new file in the shared directory
-   through the descriptor that created it, then ``rename``d over the snapshot. The published file is never
-   written in place, so readers (``open_snapshot``, ``immutable=1``) never
+   through the descriptor that created it, then ``rename``d over the
+   snapshot. The published file is never written in place, so readers (``open_snapshot``, ``immutable=1``) never
    see a journal and can't roll one back from another node.
-4. It deletes run files that the published snapshot holds, once they are
-   older than ``GRACE_DAYS``. Unfinished runs are never deleted.
+4. It marks the run files it published (``consolidated_at``), and deletes
+   run files marked more than ``GRACE_DAYS`` ago that the snapshot holds.
+   Unfinished runs are never deleted. The snapshot can be replaced by
+   anyone in the group, so its rows alone never skip or delete a run file:
+   only the mark this user wrote in their own run file does.
 
 Each user consolidates their own run files into the shared snapshot. A
 round that doesn't get the lease skips; a round that dies leaves its run
@@ -74,6 +77,9 @@ ABANDON_DAYS = 30
 BATCH_SIZE = 2000
 
 ATTEMPT_MARKER = ".consolidate.attempted"
+# Written into a run file once a round of this user's has published it.
+CONSOLIDATED_AT = "consolidated_at"
+CONSOLIDATED_AS = "consolidated_as"
 LAST_LOG = ".consolidate.last.log"
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -481,6 +487,8 @@ def consolidate(
     result = Result(snapshot=snapshot)
     _touch(runs_dir / ATTEMPT_MARKER)
     consolidated: Dict[str, str] = {}
+    # Run files added this round, to mark once they are published.
+    added: Dict[Path, str] = {}
 
     def add(conn) -> bool:
         done = {
@@ -490,7 +498,15 @@ def consolidate(
             )
         }
         changed = _add_runs(
-            conn, runs_dir, done, now, lookup, batch_size, result, dry_run
+            conn,
+            runs_dir,
+            done,
+            now,
+            lookup,
+            batch_size,
+            result,
+            dry_run,
+            added,
         )
         consolidated.update(
             (r[0], r[1])
@@ -501,6 +517,9 @@ def consolidate(
         return changed
 
     if _round(snapshot, now, result, add, dry_run) and not dry_run:
+        stamp = now.isoformat(timespec="seconds")
+        for path, status in (added if result.published else {}).items():
+            runs.update(path, {CONSOLIDATED_AT: stamp, CONSOLIDATED_AS: status})
         try:
             result.removed = _remove_consolidated(
                 runs_dir, consolidated, now - timedelta(days=grace_days)
@@ -606,15 +625,24 @@ def _copy_snapshot(snapshot: Path, private: Path) -> None:
         os.close(fd)
 
 
-def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) -> bool:
-    """Add finished runs to the private copy. True if anything was added."""
+def _add_runs(
+    conn, runs_dir, done, now, lookup, batch_size, result, dry_run, added
+) -> bool:
+    """Add finished runs to the private copy. True if anything was added.
+
+    Records in ``added`` the run files it added (path -> status). A run is
+    skipped as already published only if the snapshot holds it *and* its
+    own file carries this user's mark: anyone in the group can put rows in
+    the snapshot. (Runs published before run files were marked are added
+    once more, which replaces their rows with the same data.)
+    """
     pending = []
     for path in _run_files(runs_dir):
         run_id = path.name[: -len(runs.SUFFIX)]
-        if run_id in done:
-            continue
         record = runs.read_run(path)
         if record is None:
+            continue
+        if run_id in done and record.get(CONSOLIDATED_AT):
             continue
         pending.append((run_id, path, record))
         if len(pending) >= batch_size:
@@ -683,6 +711,7 @@ def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) ->
             "INSERT OR REPLACE INTO consolidated_runs VALUES (?, ?, ?, ?, ?)",
             (run_id, job_id, record.get("user"), status, stamp),
         )
+        added[path] = "abandoned" if status == "abandoned" else "finished"
         if status == "abandoned":
             result.abandoned += 1
         else:
@@ -807,15 +836,27 @@ def _same_file(path: Path, known: os.stat_result) -> bool:
 
 
 def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -> int:
-    """Remove this user's run files that the snapshot has held since ``cutoff``.
+    """Remove this user's run files consolidated before ``cutoff``.
+
+    Only a run file that this user's own round marked as published before
+    ``cutoff``, that says it finished (or was given up on), and that the
+    snapshot still holds. The snapshot alone is never enough: anyone in
+    the group can replace it.
 
     Walks the run files that exist, not the snapshot, so the cost stays
     proportional to what is on disk.
     """
     removed = 0
     for path in _run_files(runs_dir):
-        at = _parse_time(consolidated.get(path.name[: -len(runs.SUFFIX)]))
+        if path.name[: -len(runs.SUFFIX)] not in consolidated:
+            continue
+        record = runs.read_run(path) or {}
+        at = _parse_time(record.get(CONSOLIDATED_AT))
         if not at or at > cutoff:
+            continue
+        if record.get("state") != "finished" and (
+            record.get(CONSOLIDATED_AS) != "abandoned"
+        ):
             continue
         try:
             path.unlink()
