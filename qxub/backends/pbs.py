@@ -33,6 +33,7 @@ from ..resources.spec import (
     parse_size,
 )
 from .base import (
+    ENDED_BY_CANCEL,
     ENDED_BY_WALLTIME,
     JobInfo,
     JobSpec,
@@ -371,10 +372,14 @@ _STATES = {
 }
 # Exit_status PBS sets when it kills a job at its walltime (Gadi)
 EXIT_WALLTIME = -29
+# 256 + SIGTERM: what qdel leaves on a running job (Gadi). A `qsig -s TERM`
+# leaves it too, but that's rare enough to call a cancel.
+EXIT_CANCELLED = 271
+_ENDED_BY = {EXIT_WALLTIME: ENDED_BY_WALLTIME, EXIT_CANCELLED: ENDED_BY_CANCEL}
 
 
 def _ended_by(exit_status) -> Optional[str]:
-    return ENDED_BY_WALLTIME if exit_status == EXIT_WALLTIME else None
+    return _ENDED_BY.get(exit_status)
 
 
 def _int(value) -> Optional[int]:

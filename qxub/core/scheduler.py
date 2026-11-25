@@ -134,7 +134,7 @@ def cancel_job(job_id, backend=None):
     from ..queue import runs
 
     backend = backend or backends.backend_for_job(job_id)
-    path = run_file_for_job(job_id)
+    path = backend.run_file(job_id) or run_file_for_job(job_id)
     record = runs.read_run(path) if path else None
     marked = bool(
         record
@@ -854,7 +854,7 @@ def stream_job_output_with_status_files(
         run_file: Optional path to the job's run file.  Read every few
             seconds: a job stopped by ``qxub cancel`` records its exit there
             (with ``ended_by=cancelled``) but no final_exit_code file, and
-            would otherwise be waited on until its walltime had passed.
+            would otherwise be noticed only by the next joblog check.
 
     Returns:
         int: Job exit status

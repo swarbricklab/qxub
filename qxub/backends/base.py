@@ -259,12 +259,20 @@ class SchedulerBackend(ABC):
         """A key under which different spellings of one job ID are equal."""
         return job_id
 
+    def run_file(self, job_id: str) -> Optional[str]:
+        """Where the job's run file is, if this backend recorded it.
+
+        Otherwise it's looked for in the current platform's status
+        directory, which may not be the one the job was submitted with.
+        """
+        return None
+
     def ended_by(self, exit_status: Optional[int]) -> Optional[str]:
         """Why the scheduler ended a job, if its exit status says
         (``ENDED_BY_*``); ``None`` if it doesn't.
 
         For an exit status read outside :meth:`job_info`, such as from the
-        job log (PBS: Exit_status -29 is a walltime kill).
+        job log (PBS: Exit_status -29 is a walltime kill, 271 a qdel).
         """
         return None
 

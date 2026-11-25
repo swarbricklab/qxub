@@ -30,7 +30,8 @@ __all__ = ["area"]  # the fixture, used by name below
 
 def test_backends_read_the_reason_from_an_exit_status():
     assert PbsBackend().ended_by(-29) == ENDED_BY_WALLTIME
-    assert PbsBackend().ended_by(271) is None
+    assert PbsBackend().ended_by(271) == ENDED_BY_CANCEL  # qdel (#170 review)
+    assert PbsBackend().ended_by(143) is None
     assert LocalBackend().ended_by(-29) is None
     assert describe_ended_by(ENDED_BY_WALLTIME) == "stopped at its walltime limit"
 
@@ -107,7 +108,7 @@ def test_walltime_from_the_joblog_is_added_to_the_run_file(tmp_path):
 
 def test_qx_stops_when_its_job_is_cancelled(sandbox):
     """Before, a job stopped by `qxub cancel` wrote no final_exit_code
-    file, so qx waited until the joblog check after its walltime."""
+    file, so qx noticed only at its next joblog check (about 50 s on Gadi)."""
     sandbox.env["QXUB_PLATFORM_FILE"] = str(LOCAL_PLATFORM)
     qx = subprocess.Popen(
         [sys.executable, "-c", _CLI_SHIM, "exec", "--", "echo begun; sleep 60"],
@@ -181,3 +182,22 @@ def test_status_show_says_why(sandbox):
     out = sandbox.run("status", "show", job_id).stdout
 
     assert "Exit Code: 3" in out and "Ended: stopped at its walltime limit" in out, out
+
+
+def test_local_job_cancelled_under_another_platform_is_marked(sandbox):
+    """#170 review: the run file is in the submitting platform's status
+    directory, which a cancel under Gadi wouldn't look in."""
+    sandbox.env["QXUB_PLATFORM_FILE"] = str(LOCAL_PLATFORM)
+    job_id = sandbox.run("exec", "--terse", "--", "sleep 30").stdout.strip()
+    status = sandbox.home / ".local" / "state" / "qxub" / "status"
+    deadline = time.time() + 10
+    while time.time() < deadline and not list(status.glob("job_started_*")):
+        time.sleep(0.2)
+    del sandbox.env["QXUB_PLATFORM_FILE"]
+    sandbox.use_gadi_platform()
+    sandbox.env["PROJECT"] = "a56"
+
+    assert sandbox.run("cancel", "id", "-f", job_id).returncode == 0
+
+    (path,) = (status / "runs").glob("*.run")
+    assert runs.read_run(path).get("ended_by") == ENDED_BY_CANCEL
