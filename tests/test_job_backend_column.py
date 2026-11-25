@@ -48,7 +48,9 @@ def test_version_2_database_gets_the_column_and_a_backfill(tmp_path):
     connection.connect(path).close()
 
     conn = sqlite3.connect(path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert (
+        conn.execute("PRAGMA user_version").fetchone()[0] == connection.SCHEMA_VERSION
+    )
     assert dict(conn.execute("SELECT entry_id, backend FROM queue")) == {
         "qx-1": "pbs",
         "qx-2": "local",

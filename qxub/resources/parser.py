@@ -300,7 +300,7 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
             result["project"] = project_match.group(1)
 
         # Exit Status
-        exit_status_match = re.search(r"Exit Status:\s*(\d+)", resource_text)
+        exit_status_match = re.search(r"Exit Status:\s*(-?\d+)", resource_text)
         if exit_status_match:
             result["exit_status"] = int(exit_status_match.group(1))
 

@@ -139,7 +139,10 @@ def create_job_resources_schema(conn) -> None:
             job_name TEXT,
 
             -- The scheduler backend: pbs, local, ...
-            backend TEXT
+            backend TEXT,
+
+            -- Why the scheduler ended the job (walltime, cancelled), if known
+            ended_by TEXT
         )
         """
     )
@@ -171,6 +174,7 @@ def create_job_resources_schema(conn) -> None:
         ("joblog_path", "TEXT"),
         ("job_name", "TEXT"),
         ("backend", "TEXT"),
+        ("ended_by", "TEXT"),
     ):
         if column not in columns:
             conn.execute(f"ALTER TABLE job_resources ADD COLUMN {column} {column_type}")
@@ -778,6 +782,7 @@ class ResourceTracker:
                     code,
                     record.get("started_at") or None,
                     record.get("finished_at") or None,
+                    record.get("ended_by") or None,
                 )
             )
 
@@ -786,16 +791,34 @@ class ResourceTracker:
         now = datetime.now().isoformat()
         try:
             with self._connect() as conn:
-                for entry_id, job_id, status, code, started, finished in updates:
+                for (
+                    entry_id,
+                    job_id,
+                    status,
+                    code,
+                    started,
+                    finished,
+                    ended_by,
+                ) in updates:
                     conn.execute(
                         """UPDATE queue
                            SET status=?, exit_code=COALESCE(?, exit_code),
                                started_at=COALESCE(started_at, ?),
                                completed_at=COALESCE(?, completed_at),
                                pbs_job_id=COALESCE(pbs_job_id, ?),
+                               ended_by=COALESCE(?, ended_by),
                                last_status_update=?
                            WHERE entry_id=?""",
-                        (status, code, started, finished, job_id, now, entry_id),
+                        (
+                            status,
+                            code,
+                            started,
+                            finished,
+                            job_id,
+                            ended_by,
+                            now,
+                            entry_id,
+                        ),
                     )
                     if not job_id:
                         continue
@@ -804,9 +827,10 @@ class ResourceTracker:
                            SET status=?, exit_code=COALESCE(?, exit_code),
                                started_at=COALESCE(started_at, ?),
                                completed_at=COALESCE(?, completed_at),
+                               ended_by=COALESCE(?, ended_by),
                                last_status_update=?
                            WHERE job_id=?""",
-                        (status, code, started, finished, now, job_id),
+                        (status, code, started, finished, ended_by, now, job_id),
                     )
                     conn.execute(
                         """UPDATE project_jobs
@@ -865,7 +889,8 @@ class ResourceTracker:
                         """
                         SELECT pbs_job_id AS job_id, status, command,
                                submitted_at, started_at, completed_at,
-                               last_status_update, exit_code, joblog_path
+                               last_status_update, exit_code, joblog_path,
+                               ended_by
                         FROM queue WHERE pbs_job_id=?
                         """,
                         (job_id,),
@@ -877,7 +902,8 @@ class ResourceTracker:
                     row = conn.execute(
                         """
                         SELECT job_id, status, command, submitted_at, started_at,
-                               completed_at, last_status_update, exit_code, joblog_path
+                               completed_at, last_status_update, exit_code, joblog_path,
+                               ended_by
                         FROM job_resources WHERE job_id=?
                         """,
                         (job_id,),

@@ -277,6 +277,9 @@ class PbsBackend(SchedulerBackend):
         """``12345`` and ``12345.gadi-pbs`` are the same job."""
         return job_id.split(".", 1)[0]
 
+    def ended_by(self, exit_status: Optional[int]) -> Optional[str]:
+        return _ended_by(exit_status)
+
 
 # -- parsers -------------------------------------------------------------------
 
@@ -370,6 +373,10 @@ _STATES = {
 EXIT_WALLTIME = -29
 
 
+def _ended_by(exit_status) -> Optional[str]:
+    return ENDED_BY_WALLTIME if exit_status == EXIT_WALLTIME else None
+
+
 def _int(value) -> Optional[int]:
     try:
         return int(value)
@@ -413,7 +420,7 @@ def job_info_from_details(job_id: str, details: Dict[str, Any]) -> JobInfo:
         job_id=job_id,
         state=state,
         exit_status=exit_status,
-        ended_by=ENDED_BY_WALLTIME if exit_status == EXIT_WALLTIME else None,
+        ended_by=_ended_by(exit_status),
         name=metadata.get("Job_Name"),
         queue=execution.get("queue"),
         host=host,

@@ -20,6 +20,7 @@ import click
 
 from . import backends
 from .backends import SchedulerQueryError
+from .core.scheduler import cancel_job
 from .resources import ResourceTracker
 
 
@@ -189,7 +190,7 @@ def cancel_by_id(job_ids, dry_run, force, quiet, wait, timeout):
 
         # The job's own backend: the one recorded at submission if known
         backend = backends.backend_for_job(job_id, tracker.recorded_backend(job_id))
-        ok, reason = backend.cancel(job_id)
+        ok, reason = cancel_job(job_id, backend)
         if ok:
             success_count += 1
             for db_id in _db_job_ids(tracker, backend, job_id):

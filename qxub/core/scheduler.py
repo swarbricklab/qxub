@@ -7,6 +7,7 @@ In simple cases, the need to create a jobscript can be eliminated entirely.
 import logging
 import sys
 import time
+from pathlib import Path
 
 import click
 
@@ -108,6 +109,44 @@ def same_job(job_id: str) -> str:
 QsubError = SubmitError
 
 
+def run_file_for_job(job_id, status_dir=None):
+    """The run file of a running job, found from its scheduler ID; ``None``
+    if there is none (the job hasn't started, or older qxub ran it)."""
+    from ..queue import runs
+    from ..queue.db import is_virtual_id
+
+    status_dir = status_dir or get_default_status_dir()
+    key = status_file_key(job_id, status_dir)
+    if key == job_id and not is_virtual_id(job_id):
+        return None
+    path = runs.run_file_in(Path(status_dir) / "runs", key)
+    return path if path.exists() else None
+
+
+def cancel_job(job_id, backend=None):
+    """Cancel a job through its backend (``backend``, or the one its ID
+    suggests). Returns ``(ok, reason)``, as :meth:`SchedulerBackend.cancel`.
+
+    A running job's run file records ``ended_by=cancelled`` first, so the
+    exit the job records when it's stopped says why. The job keeps the
+    line when it adds its own; it's taken back if the cancel fails.
+    """
+    from ..queue import runs
+
+    backend = backend or backends.backend_for_job(job_id)
+    path = run_file_for_job(job_id)
+    record = runs.read_run(path) if path else None
+    marked = bool(
+        record
+        and record.get("state") == "running"
+        and runs.update(path, {"ended_by": backends.ENDED_BY_CANCEL})
+    )
+    ok, reason = backend.cancel(job_id)
+    if marked and not ok:
+        runs.update(path, {"ended_by": ""})
+    return ok, reason
+
+
 def qdel(job_id, quiet=False):
     """Cancel a job through the platform's scheduler backend.
 
@@ -119,7 +158,7 @@ def qdel(job_id, quiet=False):
         bool: True if the scheduler accepted the cancellation
     """
     logger.debug("Deleting job %s", job_id)
-    ok, reason = backends.backend_for_job(job_id).cancel(job_id)
+    ok, reason = cancel_job(job_id)
     if ok:
         if not quiet:
             click.echo(f"🗑️  Job {job_id} deleted successfully")
@@ -357,7 +396,42 @@ def get_job_resource_data(job_id):
     return backend.find_details(backend.job_details([job_id]), job_id)
 
 
-def _format_completion_message(job_id, exit_status, status_dir, key=None):
+def job_end_reason(job_id, exit_status, run_file=None):
+    """Why a job ended (``ENDED_BY_*``), or ``None`` if it isn't known.
+
+    The run file says if ``qxub cancel`` stopped it; otherwise the job's
+    backend may tell from the exit status (PBS: -29 from the job log is a
+    walltime kill). A reason found that way is added to a finished run
+    file, so ``status`` and the statistics see it too.
+    """
+    from ..queue import runs
+
+    record = runs.read_run(run_file) if run_file else None
+    if record and record.get("ended_by"):
+        return record["ended_by"]
+    if exit_status in (None, 0):
+        return None
+    ended_by = backends.backend_for_job(job_id).ended_by(exit_status)
+    if ended_by and record and record.get("state") == "finished":
+        runs.update(run_file, {"ended_by": ended_by})
+    return ended_by
+
+
+def _exit_text(exit_status, ended_by=None):
+    """``(emoji, text)`` for how a job ended."""
+    if exit_status == 0 and not ended_by:
+        return "✅", "Job completed successfully"
+    if ended_by == backends.ENDED_BY_CANCEL:
+        return "🛑", f"Job was cancelled (exit code {exit_status})"
+    if ended_by:
+        what = backends.describe_ended_by(ended_by)
+        return "❌", f"Job was {what} (exit code {exit_status})"
+    return "❌", f"Job failed with exit code {exit_status}"
+
+
+def _format_completion_message(
+    job_id, exit_status, status_dir, key=None, ended_by=None
+):
     """
     Format a completion message with appropriate emoji and hook status information.
 
@@ -367,19 +441,14 @@ def _format_completion_message(job_id, exit_status, status_dir, key=None):
         status_dir: Path to the status directory containing hook exit codes
         key: The name the job's status files use (its run ID); defaults
             to :func:`status_file_key`
+        ended_by: Why the job ended, if known (:func:`job_end_reason`)
 
     Returns:
         str: Formatted completion message
     """
     import pathlib
 
-    # Choose emoji based on exit status
-    if exit_status == 0:
-        emoji = "✅"
-        status_text = "Job completed successfully"
-    else:
-        emoji = "❌"
-        status_text = f"Job failed with exit code {exit_status}"
+    emoji, status_text = _exit_text(exit_status, ended_by)
 
     # Base message
     message = f"{emoji} {status_text}"
@@ -590,6 +659,7 @@ def monitor_job_single_thread(
     # Status files to monitor
     job_started_file = status_dir / f"job_started_{key}"
     final_exit_code_file = status_dir / f"final_exit_code_{key}"
+    run_file = status_dir / "runs" / f"{key}.run"
 
     # Track job state
     job_started_notified = False
@@ -618,10 +688,10 @@ def monitor_job_single_thread(
                     # may have written them elsewhere, or none at all).
                     spinner.clear()
                     if not quiet:
-                        if pbs_exit == 0:
-                            message = "✅ Job completed successfully"
-                        else:
-                            message = f"❌ Job failed with exit code {pbs_exit}"
+                        emoji, text = _exit_text(
+                            pbs_exit, job_end_reason(job_id, pbs_exit, run_file)
+                        )
+                        message = f"{emoji} {text}"
                         print_status(
                             f"{message} (from its log, {joblog_file}; "
                             f"no status files in {status_dir})",
@@ -649,7 +719,11 @@ def monitor_job_single_thread(
                 # Completion message
                 if not quiet:
                     completion_msg = _format_completion_message(
-                        job_id, exit_status, status_dir, key
+                        job_id,
+                        exit_status,
+                        status_dir,
+                        key,
+                        job_end_reason(job_id, exit_status, run_file),
                     )
                     print_status(completion_msg, final=True)
 
@@ -696,12 +770,17 @@ def monitor_job_single_thread(
         joblog_file=joblog_path,
         walltime_sec=walltime_sec,
         joblog_check_interval=joblog_check_interval,
+        run_file=run_file,
     )
 
     # 8. Completion message
     if not quiet:
         completion_msg = _format_completion_message(
-            job_id, exit_status, status_dir, key
+            job_id,
+            exit_status,
+            status_dir,
+            key,
+            job_end_reason(job_id, exit_status, run_file),
         )
         print_status(completion_msg, final=True)
 
@@ -737,6 +816,10 @@ def read_exit_status_from_file(exit_code_file):
         return 1  # Default to failure
 
 
+# How often qx reads a running job's run file for a cancellation (seconds)
+RUN_FILE_CHECK_SEC = 2
+
+
 def stream_job_output_with_status_files(
     job_id,
     out_file,
@@ -746,6 +829,7 @@ def stream_job_output_with_status_files(
     joblog_file=None,
     walltime_sec=None,
     joblog_check_interval=60,
+    run_file=None,
 ):
     """
     Stream job output files until job completion using status files for detection.
@@ -767,6 +851,10 @@ def stream_job_output_with_status_files(
             immediately but are still rate-limited to catch unexpected PBS kills.
         joblog_check_interval: Seconds between joblog reads once eligible
             (default 60).  Increase on busy NFS systems to reduce load.
+        run_file: Optional path to the job's run file.  Read every few
+            seconds: a job stopped by ``qxub cancel`` records its exit there
+            (with ``ended_by=cancelled``) but no final_exit_code file, and
+            would otherwise be waited on until its walltime had passed.
 
     Returns:
         int: Job exit status
@@ -785,6 +873,23 @@ def stream_job_output_with_status_files(
     # Either way, cap checks at one per joblog_check_interval seconds.
     monitoring_start = time.time()
     last_joblog_check = None  # timestamp of last actual joblog open
+    last_run_file_check = monitoring_start
+
+    def drain():
+        """Print what the job wrote since the last read."""
+        if quiet:
+            return
+        for path, pos, stream in (
+            (out_file, out_pos, sys.stdout),
+            (err_file, err_pos, sys.stderr),
+        ):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    f.seek(pos)
+                    for line in f:
+                        print(line.rstrip(), file=stream, flush=True)
+            except (OSError, IOError):
+                pass
 
     # Monitor job completion via status file
     while True:
@@ -850,6 +955,23 @@ def stream_job_output_with_status_files(
             # Get final exit status from status file
             exit_status = read_exit_status_from_file(final_exit_code_file)
             return exit_status
+
+        # Cancelled with `qxub cancel`: the job recorded its exit in the run
+        # file only. A small file read every few seconds.
+        if run_file and time.time() - last_run_file_check >= RUN_FILE_CHECK_SEC:
+            last_run_file_check = time.time()
+            from ..queue import runs
+
+            record = runs.read_run(run_file)
+            code = runs.exit_code(record) if record else None
+            if (
+                code is not None
+                and record.get("state") == "finished"
+                and record.get("ended_by")
+            ):
+                drain()
+                logger.debug("Job %s ended (%s)", job_id, record["ended_by"])
+                return code
 
         # Check PBS job log for exit status (walltime-kill / PBS-kill path).
         # PBS writes an Exit Status line to the .log file even when it kills

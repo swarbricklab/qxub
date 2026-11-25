@@ -174,6 +174,7 @@ def create_queue_schema(conn) -> None:
             completed_at     TEXT,
             last_status_update TEXT,
             exit_code        INTEGER,
+            ended_by         TEXT,  -- why the scheduler ended it: walltime, cancelled
 
             -- Identity / paths
             username         TEXT,
@@ -289,6 +290,7 @@ _QUEUE_NEW_COLUMNS = [
     ("queue_wait_sec", "INTEGER"),
     ("execution_sec", "INTEGER"),
     ("backend", "TEXT"),
+    ("ended_by", "TEXT"),
 ]
 
 
