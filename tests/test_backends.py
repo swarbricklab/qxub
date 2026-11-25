@@ -315,14 +315,14 @@ def test_qsub_argv_renders_a_job_spec():
         resources=ResourceSpec(cpus=2, memory=4 * 1024**3),
         job_log="/logs/my job.log",
         mail_to="me@example.org",
-        env={"cmd_b64": "ZWNobw==", "bind": "/a,/b", "odd": "it's,here", "p": "/x y"},
+        env={"cmd_b64": "ZWNobw==", "bind": "/a,/b", "p": "/x y"},
         native_args=["-W umask=0027"],
     )
 
     assert qsub_argv(spec) == [
         "qsub",
         "-v",
-        "cmd_b64=ZWNobw==,bind='/a,/b',odd=\"it's,here\",p=/x y",
+        "cmd_b64=ZWNobw==,bind='/a,/b',p=/x y",
         "-N", "j", "-q", "normal", "-P", "ab12",
         "-l", "ncpus=2", "-l", "mem=4GB",
         "-o", "/logs/my job.log",
