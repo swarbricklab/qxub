@@ -55,6 +55,9 @@ STATS_DB_NAME = "qxub-stats.db"
 # write access to it, which the config directory beside it shouldn't grant.
 STATS_DIR_NAME = "stats"
 SNAPSHOT_VERSION = 1
+# The published snapshot's mode: the group reads it, only its publisher
+# writes it (others replace it by rename). Never copied from the old one.
+SNAPSHOT_MODE = 0o640
 
 # A round that holds the lease longer than this is presumed dead.
 LEASE_STALE_SECONDS = 3 * 3600
@@ -762,34 +765,45 @@ def _publish(private: Path, snapshot: Path) -> None:
     """Put the finished ``private`` copy in place of ``snapshot``.
 
     The copy is written to a new file in the shared directory, created
-    exclusively (so never through a link), and synced through the
-    descriptor that created it; then renamed over the snapshot.
+    exclusively (so never through a link), and given ``SNAPSHOT_MODE`` and
+    synced through the descriptor that created it; then renamed over the
+    snapshot. The mode is qxub's own, never the old snapshot's: anyone in
+    the group may own that. If the staged name no longer refers to the
+    file this process created, nothing is published.
     """
-    try:
-        mode = os.lstat(snapshot).st_mode
-        mode = stat.S_IMODE(mode) if stat.S_ISREG(mode) else 0o640
-    except OSError:
-        mode = 0o640
     staged = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
     fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+    try:
+        mine = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        raise
     renamed = False
     try:
         with open(private, "rb") as src, os.fdopen(fd, "wb", closefd=False) as dst:
             shutil.copyfileobj(src, dst)
-        try:
-            os.fchmod(fd, mode | stat.S_IRGRP)
-        except OSError:
-            pass
+        os.fchmod(fd, SNAPSHOT_MODE)
         os.fsync(fd)
+        if not _same_file(staged, mine):
+            raise OSError(f"{staged} was replaced by someone else; not publishing")
         os.replace(staged, snapshot)
         renamed = True
     finally:
         os.close(fd)
-        if not renamed:
+        if not renamed and _same_file(staged, mine):
             try:
                 staged.unlink()
             except OSError:
                 pass
+
+
+def _same_file(path: Path, known: os.stat_result) -> bool:
+    """True if ``path`` itself (not a link's target) is the file ``known``."""
+    try:
+        there = os.lstat(path)
+    except OSError:
+        return False
+    return (there.st_dev, there.st_ino) == (known.st_dev, known.st_ino)
 
 
 def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -> int:

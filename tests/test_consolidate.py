@@ -637,3 +637,42 @@ def test_lease_owner_file_is_not_written_through_a_link(tmp_path):
 
     assert victim.read_text() == "keep\n"
     assert not held.still_held()
+
+
+def test_published_mode_is_fixed_not_copied_from_the_old_snapshot(area):
+    """Security: anyone in the group can own the snapshot and set its mode."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    run(area, lookup=lambda ids: {})
+    snapshot.chmod(0o6777)
+    finished(runs_dir, "qx-b", "2.gadi-pbs", ago=timedelta(days=3))
+
+    assert run(area, lookup=lambda ids: {}).published
+
+    assert snapshot.stat().st_mode & 0o7777 == cons.SNAPSHOT_MODE == 0o640
+
+
+def test_staged_file_swapped_for_a_link_fails_closed(area, tmp_path, monkeypatch):
+    """Security: a group member renames a link onto the staged name before
+    the mode change and rename; no other file's mode may change."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    victim = tmp_path / "victim.env"
+    victim.write_text("export SECRET=1\n")
+    victim.chmod(0o600)
+    real_fsync = os.fsync
+
+    def fsync_then_swap(fd):
+        real_fsync(fd)
+        for path in snapshot.parent.glob(".qxub-stats.db.*.tmp"):
+            aside = path.with_name("stolen")
+            os.rename(path, aside)
+            path.symlink_to(victim)
+
+    monkeypatch.setattr(cons.os, "fsync", fsync_then_swap)
+
+    result = run(area, lookup=lambda ids: {})
+
+    assert not result.published and "replaced by someone else" in result.errors[0]
+    assert victim.stat().st_mode & 0o7777 == 0o600
+    assert not snapshot.exists()
