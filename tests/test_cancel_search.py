@@ -108,47 +108,89 @@ def test_old_rows_the_scheduler_forgot_are_not_targeted(sandbox):
 
     result = sandbox.run("cancel", "status", "-s", "submitted", "-f")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "0 from the stats snapshot, 1 as unknown" in result.stdout
+    assert "0 from their joblog, 1 as unknown" in result.stdout
     assert status_of(sandbox, old) == "unknown"
     # Too recent to judge: qstat may simply not list it yet.
     assert status_of(sandbox, young) == "submitted"
     assert [c["argv"] for c in sandbox.pbs_calls("qdel")] == [[live]]
 
 
-def test_tidying_covers_every_status_and_uses_the_snapshot(sandbox):
+JOBLOG = """\
+output
+======================================================================================
+                  Resource Usage on 2026-10-01 00:00:00:
+   Job Id:             {job_id}
+   Project:            ab12
+   Exit Status:        {code}
+   Service Units:      0.50
+   NCPUs Requested:    1                      NCPUs Used: 1
+                                           CPU Time Used: 00:00:01
+   Memory Requested:   1.0GB                 Memory Used: 10.0MB
+   Walltime requested: 00:10:00            Walltime Used: 00:00:05
+   JobFS requested:    100.0MB                JobFS used: 0B
+======================================================================================
+"""
+
+
+def test_tidying_covers_every_status_and_uses_the_joblog(sandbox):
     finished = submit(sandbox, "ended_long_ago")
     lost = submit(sandbox, "lost_running")
     for job_id in (finished, lost):
         sandbox.finish_job(job_id)
     backdate(sandbox, finished, lost)
+    # The run file is long gone, but the job's own joblog says how it ended.
+    joblog = sandbox.root / "ended_long_ago.log"
+    joblog.write_text(JOBLOG.format(job_id=finished, code=3))
     with job_db(sandbox) as conn:
         conn.execute(
             "UPDATE job_resources SET status='running' WHERE job_id=?", (lost,)
         )
+        conn.execute(
+            "UPDATE job_resources SET joblog_path=? WHERE job_id=?",
+            (str(joblog), finished),
+        )
 
-    # The run file is long gone, but consolidation kept the outcome.
+    # Asking about 'submitted' jobs tidies the 'running' row too.
+    result = sandbox.run("cancel", "status", "-s", "submitted", "-f")
+    assert "1 from their joblog, 1 as unknown" in result.stdout
+    with job_db(sandbox) as conn:
+        row = conn.execute(
+            "SELECT status, exit_code FROM job_resources WHERE job_id=?",
+            (finished,),
+        ).fetchone()
+    assert row == ("failed", 3)
+    assert status_of(sandbox, lost) == "unknown"
+
+
+def test_planted_snapshot_rows_do_not_decide_how_jobs_ended(sandbox):
+    """Security: anyone in the group can replace the stats snapshot."""
+    gone = submit(sandbox, "killed_without_trap")
+    sandbox.finish_job(gone)
+    backdate(sandbox, gone)
     snapshot = sandbox.root / "stats" / "qxub-stats.db"
     snapshot.parent.mkdir()
     with sqlite3.connect(snapshot) as conn:
         create_job_resources_schema(conn)
         conn.execute(
             "INSERT INTO job_resources (job_id, timestamp, status, exit_code,"
-            " completed_at) VALUES (?, 'x', 'failed', 3, '2026-10-01T00:00:00')",
-            (finished,),
+            " completed_at) VALUES (?, 'x', 'completed', 0, '2026-10-01T00:00:00')",
+            (gone,),
         )
     sandbox.env["QXUB_STATS_DB"] = str(snapshot)
 
-    # Asking about 'submitted' jobs tidies the 'running' row too.
-    result = sandbox.run("cancel", "status", "-s", "submitted", "-f")
-    assert "1 from the stats snapshot, 1 as unknown" in result.stdout
+    result = sandbox.run("cancel", "filter", "--job-name", "nothing", "-f")
+    assert "0 from their joblog, 1 as unknown" in result.stdout
     with job_db(sandbox) as conn:
         row = conn.execute(
-            "SELECT status, exit_code, completed_at FROM job_resources"
-            " WHERE job_id=?",
-            (finished,),
+            "SELECT status, exit_code FROM job_resources WHERE job_id=?", (gone,)
         ).fetchone()
-    assert row == ("failed", 3, "2026-10-01T00:00:00")
-    assert status_of(sandbox, lost) == "unknown"
+        queue = conn.execute(
+            "SELECT status FROM queue WHERE pbs_job_id=?", (gone,)
+        ).fetchall()
+    assert row == ("unknown", None)
+    assert all(status != "completed" for (status,) in queue)
+    check = sandbox.run("status", "check", gone)
+    assert "completed" not in check.stdout.lower()
 
 
 def test_nothing_is_cancelled_if_the_scheduler_cant_be_asked(sandbox):
