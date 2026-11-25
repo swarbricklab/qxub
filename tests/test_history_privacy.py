@@ -159,3 +159,93 @@ def test_job_db_is_owner_only(tmp_path, monkeypatch, umask_022):
     monkeypatch.setattr(db, "_PRIVATE_CHECKED", set())
     db.get_db_path()
     assert stat.S_IMODE(path.stat().st_mode) & 0o777 == 0o600
+
+
+@pytest.fixture
+def fresh_dir_checks(monkeypatch):
+    from qxub.config import files
+
+    monkeypatch.setattr(files, "_PRIVATE_DIRS_CHECKED", set())
+
+
+def _mode(path):
+    return stat.S_IMODE(os.lstat(path).st_mode) & 0o777
+
+
+def test_existing_config_dir_is_tightened_once_with_notice(
+    tmp_path, monkeypatch, capsys, fresh_dir_checks
+):
+    from qxub.queue import db
+
+    home = tmp_path / "home"
+    config_dir = home / ".config" / "qxub"
+    config_dir.mkdir(parents=True)
+    os.chmod(config_dir, 0o775)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("QXUB_DB_PATH", raising=False)
+
+    db.get_db_path()
+    assert _mode(config_dir) == 0o700
+    err = capsys.readouterr().err
+    assert str(config_dir) in err and len(err.strip().splitlines()) == 1
+
+    # Checked once per process: no second notice, and a later loosening
+    # within the same process is left alone
+    os.chmod(config_dir, 0o755)
+    HistoryManager()
+    db.get_db_path()
+    assert capsys.readouterr().err == ""
+
+
+def test_history_and_user_config_writes_tighten_their_dir(
+    tmp_path, monkeypatch, capsys, fresh_dir_checks
+):
+    from qxub.config.files import write_private_file
+
+    config_dir = tmp_path / "qxub"
+    config_dir.mkdir()
+    os.chmod(config_dir, 0o755)
+    HistoryManager(config_dir=config_dir)
+    assert _mode(config_dir) == 0o700
+
+    xdg = tmp_path / "xdg" / "qxub"
+    xdg.mkdir(parents=True)
+    os.chmod(xdg, 0o750)
+    write_private_file(xdg / "config.yaml", "a: 1\n")
+    assert _mode(xdg) == 0o700
+    assert len(capsys.readouterr().err.strip().splitlines()) == 2
+
+
+def test_private_config_dir_leaves_alone_symlinks_and_tight_dirs(
+    tmp_path, capsys, fresh_dir_checks
+):
+    from qxub.config.files import ensure_private_config_dir
+
+    target = tmp_path / "target"
+    target.mkdir()
+    os.chmod(target, 0o755)
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    ensure_private_config_dir(link)
+    assert _mode(target) == 0o755
+
+    tight = tmp_path / "tight"
+    tight.mkdir(mode=0o700)
+    ensure_private_config_dir(tight)
+    assert _mode(tight) == 0o700
+
+    new = tmp_path / "new" / "qxub"
+    ensure_private_config_dir(new)
+    assert _mode(new) == 0o700
+    assert capsys.readouterr().err == ""
+
+
+def test_private_config_dir_skips_other_owner(tmp_path, monkeypatch, fresh_dir_checks):
+    from qxub.config.files import ensure_private_config_dir
+
+    d = tmp_path / "theirs"
+    d.mkdir()
+    os.chmod(d, 0o755)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(d).st_uid + 1)
+    ensure_private_config_dir(d)
+    assert _mode(d) == 0o755

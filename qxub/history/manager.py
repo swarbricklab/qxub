@@ -144,8 +144,11 @@ class HistoryManager:
         self._executions = RecordStore(self._history_dir / "executions")
         self._private = False
 
-        # Ensure config directory exists (owner-only if we create it)
-        self.config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # Ensure config directory exists and is owner-only
+        # pylint: disable-next=import-outside-toplevel
+        from ..config.files import ensure_private_config_dir
+
+        ensure_private_config_dir(self.config_dir)
 
     def _ensure_private(self) -> None:
         """Make the history directories owner-only, once per process.

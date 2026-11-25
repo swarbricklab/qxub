@@ -65,7 +65,10 @@ def get_db_path() -> Path:
         return Path(env_override)
 
     config_dir = Path.home() / ".config" / "qxub"
-    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # pylint: disable-next=import-outside-toplevel
+    from ..config.files import ensure_private_config_dir
+
+    ensure_private_config_dir(config_dir)
     db_path = config_dir / "qxub.db"
     if str(db_path) not in _PRIVATE_CHECKED:
         _PRIVATE_CHECKED.add(str(db_path))

@@ -8,6 +8,7 @@ use it at import time.
 import errno
 import os
 import stat
+import sys
 import tempfile
 from pathlib import Path
 from typing import List, Optional, TextIO, Tuple
@@ -113,6 +114,44 @@ def file_trust_problem(path: Path, require_owner: bool = True) -> Optional[str]:
     )
 
 
+# Config directories already checked by ensure_private_config_dir this process.
+_PRIVATE_DIRS_CHECKED: set = set()
+
+
+def ensure_private_config_dir(directory: Path) -> None:
+    """Create qxub's user config ``directory`` owner-only, or tighten it once.
+
+    It holds the job database, history and config that may contain tokens.
+    A missing directory is created 0700. An existing one that is ours and not
+    a symlink loses its group/other permissions (``chmod go-rwx``), with a
+    one-line notice on stderr when that changed anything. Checked once per
+    directory per process.
+    """
+    directory = Path(directory)
+    key = str(directory)
+    if key in _PRIVATE_DIRS_CHECKED:
+        return
+    _PRIVATE_DIRS_CHECKED.add(key)
+    if not os.path.lexists(directory):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return
+    try:
+        st = os.lstat(directory)
+        if (
+            not stat.S_ISDIR(st.st_mode)
+            or st.st_uid != os.getuid()
+            or not st.st_mode & 0o077
+        ):
+            return
+        os.chmod(directory, stat.S_IMODE(st.st_mode) & ~0o077)
+    except OSError:
+        return
+    sys.stderr.write(
+        f"qxub: removed group/other access from {directory} "
+        "(it holds your job history and config)\n"
+    )
+
+
 def write_private_file(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` readable by its owner only (0600).
 
@@ -122,6 +161,7 @@ def write_private_file(path: Path, text: str) -> None:
     directory is created owner-only. A symlinked ``path`` keeps its link and
     the target is replaced.
     """
+    ensure_private_config_dir(Path(path).parent)
     path = Path(os.path.realpath(path))
     if not path.parent.exists():
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
