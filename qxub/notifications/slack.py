@@ -18,8 +18,8 @@ import json
 import logging
 import os
 from typing import Any, Dict, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+from .webhook import NotificationError, check_webhook_url, post_json
 
 logger = logging.getLogger(__name__)
 
@@ -60,79 +60,46 @@ class SlackNotifier:
         elif self.bot_token and self.user_id:
             self._send_dm(context)
         else:
-            raise ValueError(
+            raise NotificationError(
                 "Slack not configured: set webhook_url or (bot_token + user_id)"
             )
 
     def _send_webhook(self, context: Dict[str, Any]) -> None:
         """Send via incoming webhook."""
-        payload = self._build_message(context)
-
-        data = json.dumps(payload).encode("utf-8")
-        request = Request(
-            self.webhook_url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-
-        try:
-            with urlopen(request, timeout=30) as response:
-                if response.status != 200:
-                    raise Exception(f"Slack webhook returned {response.status}")
-        except HTTPError as e:
-            raise Exception(f"Slack webhook failed: {e.code} {e.reason}")
-        except URLError as e:
-            raise Exception(f"Slack webhook connection failed: {e.reason}")
+        check_webhook_url(self.webhook_url, "notifications.slack.webhook_url")
+        post_json(self.webhook_url, self._build_message(context), "Slack webhook")
 
     def _send_dm(self, context: Dict[str, Any]) -> None:
         """Send DM via Bot API."""
-        # First, open a conversation with the user
-        conv_url = "https://slack.com/api/conversations.open"
-        conv_data = json.dumps({"users": self.user_id}).encode("utf-8")
-        conv_request = Request(
-            conv_url,
-            data=conv_data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.bot_token}",
-            },
-        )
+        headers = {"Authorization": f"Bearer {self.bot_token}"}
 
-        try:
-            with urlopen(conv_request, timeout=30) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                if not result.get("ok"):
-                    raise Exception(f"Failed to open DM: {result.get('error')}")
-                channel_id = result["channel"]["id"]
-        except HTTPError as e:
-            raise Exception(f"Slack API failed: {e.code} {e.reason}")
-        except URLError as e:
-            raise Exception(f"Slack API connection failed: {e.reason}")
+        # First, open a conversation with the user
+        result = self._api_call(
+            "https://slack.com/api/conversations.open",
+            {"users": self.user_id},
+            headers,
+        )
+        if not result.get("ok"):
+            raise NotificationError(f"Failed to open DM: {result.get('error')}")
+        channel_id = result["channel"]["id"]
 
         # Send the message
         payload = self._build_message(context)
         payload["channel"] = channel_id
-
-        msg_url = "https://slack.com/api/chat.postMessage"
-        msg_data = json.dumps(payload).encode("utf-8")
-        msg_request = Request(
-            msg_url,
-            data=msg_data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.bot_token}",
-            },
+        result = self._api_call(
+            "https://slack.com/api/chat.postMessage", payload, headers
         )
+        if not result.get("ok"):
+            raise NotificationError(f"Failed to send message: {result.get('error')}")
 
+    @staticmethod
+    def _api_call(url: str, payload: Dict[str, Any], headers) -> Dict[str, Any]:
+        """POST to the Slack API; errors never quote the bot token."""
+        body = post_json(url, payload, "Slack API", headers=headers)
         try:
-            with urlopen(msg_request, timeout=30) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                if not result.get("ok"):
-                    raise Exception(f"Failed to send message: {result.get('error')}")
-        except HTTPError as e:
-            raise Exception(f"Slack API failed: {e.code} {e.reason}")
-        except URLError as e:
-            raise Exception(f"Slack API connection failed: {e.reason}")
+            return json.loads(body.decode("utf-8"))
+        except ValueError:
+            raise NotificationError("Slack API returned an unreadable reply") from None
 
     def _build_message(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Build Slack message payload using Block Kit."""

@@ -11,6 +11,19 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 
+def safe_error(exc: BaseException) -> str:
+    """Text for a failed send that can't hold a webhook URL or token.
+
+    :class:`~qxub.notifications.webhook.NotificationError` messages are
+    written to be safe; any other exception is named by its class only.
+    """
+    from .webhook import NotificationError
+
+    if isinstance(exc, NotificationError):
+        return str(exc)
+    return f"unexpected error ({type(exc).__name__})"
+
+
 def send_all_notifications(context: Dict[str, Any], config_manager) -> List[str]:
     """Send notifications to all configured channels.
 
@@ -38,9 +51,10 @@ def send_all_notifications(context: Dict[str, Any], config_manager) -> List[str]
         try:
             send_slack(context, config_manager)
             channels_sent.append("slack")
-        except Exception as e:
-            logger.error("Slack notification failed: %s", e)
-            errors.append(f"Slack: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            reason = safe_error(e)
+            logger.error("Slack notification failed: %s", reason)
+            errors.append(f"Slack: {reason}")
 
     # Check Discord
     discord_webhook = config_manager.get_config_value(
@@ -50,9 +64,10 @@ def send_all_notifications(context: Dict[str, Any], config_manager) -> List[str]
         try:
             send_discord(context, config_manager)
             channels_sent.append("discord")
-        except Exception as e:
-            logger.error("Discord notification failed: %s", e)
-            errors.append(f"Discord: {e}")
+        except Exception as e:  # pylint: disable=broad-except
+            reason = safe_error(e)
+            logger.error("Discord notification failed: %s", reason)
+            errors.append(f"Discord: {reason}")
 
     if not channels_sent and errors:
         raise Exception(f"All notification channels failed: {'; '.join(errors)}")
