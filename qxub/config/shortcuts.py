@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import click
 
+from .files import file_trust_problem, xdg_config_dirs
+
 
 class ShortcutManager:
     """Manages command shortcuts with XDG config resolution."""
@@ -24,8 +26,25 @@ class ShortcutManager:
 
     def _get_system_shortcuts_file(self) -> Path:
         """Get system shortcuts file location using XDG Base Directory spec."""
-        xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg").split(":")
-        return Path(xdg_config_dirs[0]) / "qxub" / "shortcuts.json"
+        return xdg_config_dirs()[0] / "qxub" / "shortcuts.json"
+
+    def _system_shortcuts_trusted(self) -> bool:
+        """Whether the system shortcuts file exists and may be used.
+
+        A shortcut's ``pre``/``post``/``template`` run in the user's job, so a
+        file others can change is ignored.
+        """
+        if not self._system_shortcuts_file.exists():
+            return False
+        problem = file_trust_problem(self._system_shortcuts_file, require_owner=False)
+        if problem:
+            click.echo(
+                f"⚠️  Warning: Ignoring system shortcuts "
+                f"{self._system_shortcuts_file}: {problem}",
+                err=True,
+            )
+            return False
+        return True
 
     def _get_user_shortcuts_file(self) -> Path:
         """Get user shortcuts file location using XDG Base Directory spec."""
@@ -39,7 +58,7 @@ class ShortcutManager:
         shortcuts = {}
 
         # Load system shortcuts first (lower precedence)
-        if self._system_shortcuts_file.exists():
+        if self._system_shortcuts_trusted():
             try:
                 with open(self._system_shortcuts_file, "r", encoding="utf-8") as f:
                     system_shortcuts = json.load(f)
@@ -109,7 +128,7 @@ class ShortcutManager:
         shortcuts_with_origin = {}
 
         # Load system shortcuts first
-        if self._system_shortcuts_file.exists():
+        if self._system_shortcuts_trusted():
             try:
                 with open(self._system_shortcuts_file, "r", encoding="utf-8") as f:
                     system_shortcuts = json.load(f)

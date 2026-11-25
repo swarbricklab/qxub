@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 import click
 from omegaconf import DictConfig, OmegaConf
 
+from .files import file_trust_problem, xdg_config_dirs
+
 # pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements
 # pylint: disable=no-else-continue,duplicate-code
 
@@ -37,10 +39,8 @@ class ConfigManager:
         self._load_configs()
 
     def _get_xdg_config_dirs(self) -> List[Path]:
-        """Get XDG config directories in precedence order."""
-        xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
-        dirs = [Path(d) / "qxub" for d in xdg_config_dirs.split(":")]
-        return dirs
+        """Get XDG config directories in precedence order (absolute only)."""
+        return [d / "qxub" for d in xdg_config_dirs()]
 
     def _get_user_config_dir(self) -> Path:
         """Get user config directory following XDG spec."""
@@ -144,6 +144,15 @@ class ConfigManager:
         for config_dir in self._get_xdg_config_dirs():
             config_file = config_dir / "config.yaml"
             if config_file.exists():
+                # Anyone who can change a shared file could steer every
+                # user's jobs, so a writable one is not used.
+                problem = file_trust_problem(config_file, require_owner=False)
+                if problem:
+                    click.echo(
+                        f"Warning: Ignoring system config {config_file}: {problem}",
+                        err=True,
+                    )
+                    continue
                 try:
                     return OmegaConf.load(config_file)
                 except Exception as e:  # pylint: disable=broad-exception-caught
