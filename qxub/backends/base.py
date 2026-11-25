@@ -145,6 +145,14 @@ class SchedulerBackend(ABC):
         The caller runs it in the foreground, or inside tmux.
         """
 
+    def available(self) -> bool:
+        """Whether this machine can ask this scheduler about jobs.
+
+        Jobs of a backend other than the current platform's are listed
+        (``backends.live_jobs``) only if it is available.
+        """
+        return True
+
     def same_job(self, job_id: str) -> str:
         """A key under which different spellings of one job ID are equal."""
         return job_id

@@ -93,9 +93,12 @@ def dispatch(
     from .. import backends
     from ..queue import create_queue_entry, runs, update_queue_entry
     from ..queue.consolidate import maybe_start_in_background
+    from ..remote import handshake
     from ..resources.tracker import resource_tracker
 
     backend = backend or backends.get_backend()
+    # Run by a local qxub over SSH: tell it once the job is submitted
+    announce = handshake.requested()
     cpus = spec.resources.cpus
 
     virtual_id = None
@@ -126,6 +129,8 @@ def dispatch(
             except Exception:  # pylint: disable=broad-except
                 pass
         raise
+    if announce:
+        handshake.announce(job_id, backend.name)
 
     if virtual_id:
         try:
@@ -368,7 +373,14 @@ def submit_job(
             "err": processed_params.get("err"),
         },
     )
-    job_vars.update(runs.job_env(run_id, run_path, backend.job_id_variable))
+    job_vars.update(
+        runs.job_env(
+            run_id,
+            run_path,
+            backend.job_id_variable,
+            processed_params.get("name"),
+        )
+    )
     spec = runs.attach_settings(job_spec(processed_params, template, job_vars), run_id)
     submission_command = shlex.join(backend.submit_command(spec))
     logger.info("Programmatic submission command: %s", submission_command)

@@ -203,7 +203,10 @@ def attach_settings(spec, run_id: str, write: bool = True):
 
 
 def job_env(
-    run_id: str, path: Optional[Path], job_id_variable: str = ""
+    run_id: str,
+    path: Optional[Path],
+    job_id_variable: str = "",
+    job_name: Optional[str] = None,
 ) -> Dict[str, str]:
     """Job variables that tell the job its run ID and where to record status.
 
@@ -221,4 +224,7 @@ def job_env(
     if job_id_variable:
         # Which variable holds the scheduler's ID for the job (PBS_JOBID)
         env["QXUB_JOB_ID_VAR"] = job_id_variable
+    if job_name:
+        # The job's own name, whatever the scheduler calls it (PBS_JOBNAME)
+        env["QXUB_JOB_NAME"] = job_name
     return env

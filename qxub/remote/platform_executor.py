@@ -16,11 +16,13 @@ import sys
 import time
 from typing import Any, Dict, List
 
+from . import handshake
+
 logger = logging.getLogger(__name__)
 
-# PBS job IDs look like "12345678.gadi-pbs" or just "12345678". If we ever see
-# one in the remote stdout we know the submission succeeded and any retry
-# would risk a duplicate submission.
+# A remote qxub announces each submission (see handshake.py). Older ones
+# don't, so a PBS job ID ("12345678.gadi-pbs") in the remote stdout also
+# means the submission succeeded and a retry would risk a duplicate.
 _PBS_JOB_ID_RE = re.compile(r"\b(\d{4,})\.[A-Za-z][\w-]*\b")
 
 # SSH transport-level failure: the ssh client itself returns 255 for things
@@ -73,6 +75,23 @@ def _env_float(name: str, default: float) -> float:
     except ValueError:
         logger.warning("Invalid value for %s=%r, using default %s", name, raw, default)
         return default
+
+
+def _split_markers(text: str):
+    """``(text without announcements, the announcement lines)``."""
+    shown, markers = [], []
+    for line in text.splitlines(keepends=True):
+        (markers if handshake.is_marker(line) else shown).append(line)
+    return "".join(shown), "".join(markers)
+
+
+def _submitted_job_id(captured: str):
+    """The job the remote qxub submitted, if it got that far."""
+    announced = handshake.find(captured)
+    if announced:
+        return announced[0]
+    match = _PBS_JOB_ID_RE.search(captured or "")
+    return match.group(0) if match else None
 
 
 class RemoteExecutionError(Exception):
@@ -229,8 +248,10 @@ class PlatformRemoteExecutor:
                         if result.stdout:
                             print(result.stdout, end="")
                             captured_stdout = result.stdout
-                        if result.stderr:
-                            print(result.stderr, end="", file=sys.stderr)
+                        shown, markers = _split_markers(result.stderr or "")
+                        captured_stdout += markers
+                        if shown:
+                            print(shown, end="", file=sys.stderr)
                         exit_code = result.returncode
                     except subprocess.TimeoutExpired:
                         hung = True
@@ -245,9 +266,7 @@ class PlatformRemoteExecutor:
 
             last_exit = exit_code
 
-            # Did the remote get far enough to submit a PBS job?
-            job_id_match = _PBS_JOB_ID_RE.search(captured_stdout or "")
-            submitted_job_id = job_id_match.group(0) if job_id_match else None
+            submitted_job_id = _submitted_job_id(captured_stdout)
 
             # Success path: exit 0 and not hung.
             if not hung and exit_code == 0:
@@ -268,10 +287,10 @@ class PlatformRemoteExecutor:
                     f"⚠️  SSH connection to {self.hostname} dropped "
                     f"(exit {exit_code})"
                     + (f" after {idle_timeout}s of silence" if hung else "")
-                    + f", but PBS job {submitted_job_id} was already "
+                    + f", but job {submitted_job_id} was already "
                     f"submitted. NOT retrying to avoid duplicate "
-                    f"submission. Check job status with: "
-                    f"`ssh {self.hostname} qstat {submitted_job_id}`",
+                    f"submission. Check its status on {self.hostname} with: "
+                    f"`qxub status check {submitted_job_id}`",
                     file=sys.stderr,
                 )
                 return exit_code
@@ -300,7 +319,7 @@ class PlatformRemoteExecutor:
             )
             print(
                 f"⚠️  Remote command on {self.hostname} {reason}. "
-                f"No PBS job id seen in output, so retrying is safe. "
+                f"No submission was reported, so retrying. "
                 f"Retrying ({attempt}/{max_retries}) in {delay:.1f}s.",
                 file=sys.stderr,
             )
@@ -394,6 +413,10 @@ class PlatformRemoteExecutor:
         # Set platform environment variable for remote qxub
         commands.append(f"export QXUB_PLATFORM={self.platform_name}")
 
+        # Ask it to announce each submission, so a dropped connection isn't
+        # retried into a duplicate job
+        commands.append(f"export {handshake.ENV}=1")
+
         # Force unbuffered Python output for real-time streaming over SSH
         commands.append("export PYTHONUNBUFFERED=1")
 
@@ -434,8 +457,9 @@ class PlatformRemoteExecutor:
         Returns:
             Tuple of (exit_code, hung, captured_stdout) where ``hung`` is True
             if the watchdog killed the process due to no output, and
-            ``captured_stdout`` is the full remote stdout (used by the caller
-            to detect whether a PBS job id was emitted before any failure).
+            ``captured_stdout`` is the full remote stdout plus any
+            submission announcements from stderr (used by the caller to
+            detect whether a job was submitted before any failure).
         """
         process = None
         hung = False
@@ -470,7 +494,10 @@ class PlatformRemoteExecutor:
                         elif stream == process.stderr:
                             line = process.stderr.readline()
                             if line:
-                                print(line, end="", file=sys.stderr)
+                                if handshake.is_marker(line):
+                                    stdout_buf.append(line)
+                                else:
+                                    print(line, end="", file=sys.stderr)
                                 last_output = time.monotonic()
                 else:
                     # Windows fallback - less efficient but functional
@@ -511,8 +538,10 @@ class PlatformRemoteExecutor:
             if stdout:
                 print(stdout, end="")
                 stdout_buf.append(stdout)
-            if stderr:
-                print(stderr, end="", file=sys.stderr)
+            shown, markers = _split_markers(stderr or "")
+            stdout_buf.append(markers)
+            if shown:
+                print(shown, end="", file=sys.stderr)
 
             exit_code = process.returncode if process.returncode is not None else 124
             return exit_code, hung, "".join(stdout_buf)

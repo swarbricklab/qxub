@@ -10,7 +10,7 @@ definition decides which scheduler qxub talks to::
 """
 
 import logging
-from typing import Dict, Optional, Type
+from typing import Dict, List, Optional, Tuple, Type
 
 from ..resources.spec import ResourceSpec
 from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
@@ -89,6 +89,30 @@ def backend_for_job(
     return current
 
 
+def live_jobs(
+    user: Optional[str] = None, full_names: bool = False
+) -> List[Tuple[SchedulerBackend, LiveJob]]:
+    """Queued and running jobs of every backend this machine can ask.
+
+    The current platform's backend first: if it can't be asked,
+    :class:`SchedulerQueryError` is raised. Then each other backend that is
+    :meth:`~SchedulerBackend.available` here (local jobs under the Gadi
+    platform, PBS jobs under the local one); one that fails is skipped.
+    """
+    current = get_backend()
+    found = [(current, job) for job in current.list_jobs(user, full_names)]
+    for cls in dict.fromkeys(BACKENDS.values()):
+        if isinstance(current, cls):
+            continue
+        other = cls()
+        try:
+            if other.available():
+                found += [(other, job) for job in other.list_jobs(user, full_names)]
+        except SchedulerQueryError as exc:
+            logger.debug("Skipping %s jobs: %s", other.name, exc)
+    return found
+
+
 __all__ = [
     "BACKENDS",
     "JobSpec",
@@ -102,4 +126,5 @@ __all__ = [
     "backend_for_job",
     "backend_for_type",
     "get_backend",
+    "live_jobs",
 ]

@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import replace
 from datetime import datetime
@@ -170,6 +171,9 @@ class PbsBackend(SchedulerBackend):
 
     name = "pbs"
     job_id_variable = "PBS_JOBID"
+
+    def available(self) -> bool:
+        return shutil.which("qstat") is not None
 
     def list_jobs(
         self, user: Optional[str] = None, full_names: bool = False

@@ -17,6 +17,7 @@ Resource requests are not enforced. A platform with ``type: local`` selects
 this backend (see ``docs/platforms/local/local.yaml``).
 """
 
+import getpass
 import json
 import logging
 import os
@@ -163,9 +164,14 @@ class LocalBackend(SchedulerBackend):
         # exit status; its PID can't be checked from here.
         return {**meta, "pid": pid, "exit_status": exit_status, "here": here}
 
+    def available(self) -> bool:
+        return jobs_dir().is_dir()
+
     def list_jobs(
         self, user: Optional[str] = None, full_names: bool = False
     ) -> List[LiveJob]:
+        if user and user != (os.environ.get("USER") or getpass.getuser()):
+            return []  # local jobs are only ever your own
         jobs = []
         try:
             entries = sorted(jobs_dir().iterdir())
