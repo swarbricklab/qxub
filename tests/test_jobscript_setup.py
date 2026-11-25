@@ -242,6 +242,48 @@ def test_user_vars_reach_the_main_command_with_post(job, tmp_path):
     assert (tmp_path / "logs" / "job.out").read_text() == "FOO=1\n"
 
 
+# `qxub exec -- ARGS` joins ARGS into one string the notification job evals
+# (job.sh: eval "$cmd"). This fake does the same, then records what
+# `qxub notify send` would get, one argument per line.
+FAKE_QXUB = r"""#!/bin/bash
+if [ "$1" = exec ]; then
+    while [ "$1" != -- ]; do shift; done
+    shift
+    cmd="$*"
+    eval "$cmd"
+else
+    printf '%s\n' "$@" > "$FAKE_QXUB_ARGS"
+fi
+"""
+
+
+def test_notification_arguments_are_never_run_as_code(job, tmp_path):
+    fake = tmp_path / "bin" / "qxub"
+    fake.write_text(FAKE_QXUB)
+    fake.chmod(0o755)
+    outdir = str(tmp_path / "o u t;touch pwned1;$(touch pwned2)`touch pwned3`'\"*&")
+    recorded = tmp_path / "notify-args"
+
+    result = job(
+        "default",
+        command="true",
+        qxub_notify="true",
+        qxub_notify_outdir=outdir,
+        QXUB_JOB_NAME="my-job",
+        FAKE_QXUB_ARGS=str(recorded),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert recorded.read_text().splitlines() == [
+        "notify", "send",
+        "--job-id", "123.gadi-pbs",
+        "--exit-code", "0",
+        "--job-name", "my-job",
+        "--output-dir", outdir,
+    ]  # fmt: skip
+    assert not list(tmp_path.glob("pwned*"))
+
+
 @pytest.mark.parametrize("template", TEMPLATES)
 def test_out_and_err_start_empty_on_a_rerun(job, tmp_path, template):
     logs = tmp_path / "logs"
