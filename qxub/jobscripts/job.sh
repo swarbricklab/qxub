@@ -320,7 +320,8 @@ if [ -n "$user_vars" ]; then
     IFS=';' read -ra VARS <<< "$user_vars"
     for var_def in "${VARS[@]}"; do
         if [ -n "$var_def" ]; then
-            echo "   export $var_def"
+            # The name only: values may be secrets, and the log is shared
+            echo "   export ${var_def%%=*}"
             export "$var_def"
         fi
     done

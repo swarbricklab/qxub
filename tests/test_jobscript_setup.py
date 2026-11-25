@@ -242,6 +242,20 @@ def test_user_vars_reach_the_main_command_with_post(job, tmp_path):
     assert (tmp_path / "logs" / "job.out").read_text() == "FOO=1\n"
 
 
+def test_user_var_values_stay_out_of_the_joblog(job, tmp_path):
+    """The joblog is often group-readable; --var values may be secrets."""
+    result = job(
+        "default",
+        command='echo "$TOKEN"',
+        user_vars_b64=_b64("TOKEN=MARKER-s3cret"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "export TOKEN" in result.stdout
+    assert "MARKER-s3cret" not in result.stdout + result.stderr
+    assert (tmp_path / "logs" / "job.out").read_text() == "MARKER-s3cret\n"
+
+
 # `qxub exec -- ARGS` joins ARGS into one string the notification job evals
 # (job.sh: eval "$cmd"). This fake does the same, then records what
 # `qxub notify send` would get, one argument per line.
