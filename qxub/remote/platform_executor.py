@@ -32,6 +32,13 @@ _PBS_JOB_ID_RE = re.compile(r"\b(\d{4,})\.[A-Za-z][\w-]*\b")
 # we already saw a PBS job id in stdout, in which case the job was submitted.
 _SSH_TRANSPORT_EXIT = 255
 
+# What a configured ssh destination may look like: an optional ``user@`` and
+# a host name, alias or address. Nothing ssh could read as an option (a
+# leading dash), and no whitespace or control characters.
+_SSH_DESTINATION_RE = re.compile(
+    r"\A(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9_\[][A-Za-z0-9._:%\[\]-]*\Z"
+)
+
 
 # Defaults for SSH robustness and retry behaviour. All can be overridden via
 # environment variables so CI runners can tune behaviour without code changes.
@@ -132,6 +139,13 @@ class PlatformRemoteExecutor:
         if not self.hostname:
             raise RemoteExecutionError(
                 f"Platform '{platform_name}' remote config missing required 'host' field"
+            )
+        if not isinstance(self.hostname, str) or not _SSH_DESTINATION_RE.match(
+            self.hostname
+        ):
+            raise RemoteExecutionError(
+                f"Platform '{platform_name}' remote host {self.hostname!r} is not "
+                "a valid ssh destination (expected [user@]host)"
             )
 
         if not self.working_dir:
@@ -373,8 +387,9 @@ class PlatformRemoteExecutor:
             ]
         )
 
-        # Add hostname (SSH will look up all settings in ~/.ssh/config)
-        ssh_cmd.append(self.hostname)
+        # Add hostname (SSH will look up all settings in ~/.ssh/config).
+        # "--" ends ssh's options, so it can never be read as one.
+        ssh_cmd.extend(["--", self.hostname])
 
         # Build remote command with environment setup
         wrapped_command = self._wrap_remote_command(remote_command)
