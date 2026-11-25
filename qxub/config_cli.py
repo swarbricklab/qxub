@@ -697,7 +697,7 @@ def delete(alias_name: str):
                 user_config = OmegaConf.load(user_config_file)
                 if "aliases" in user_config and alias_name in user_config.aliases:
                     del user_config.aliases[alias_name]
-                    OmegaConf.save(user_config, user_config_file)
+                    config_manager.save_user_config(user_config)
                     config_manager.reload_configs()
                     click.echo(f"✅ Deleted alias '{alias_name}'")
                 else:

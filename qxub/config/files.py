@@ -1,5 +1,5 @@
 """
-Where qxub's config files live and whether to trust them.
+Where qxub's config files live, whether to trust them, and writing them safely.
 
 Kept free of heavy imports: both the config manager and the shortcut manager
 use it at import time.
@@ -7,6 +7,7 @@ use it at import time.
 
 import os
 import stat
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 
@@ -51,3 +52,31 @@ def file_trust_problem(path: Path, require_owner: bool = True) -> Optional[str]:
     return trust_problem(path.parent, require_owner) or trust_problem(
         path, require_owner
     )
+
+
+def write_private_file(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` readable by its owner only (0600).
+
+    The file is written to a temporary file next to it and renamed into
+    place, so readers never see a partial file, a failure leaves the old one
+    intact, and an existing looser file is replaced by a 0600 one. A missing
+    directory is created owner-only. A symlinked ``path`` keeps its link and
+    the target is replaced.
+    """
+    path = Path(os.path.realpath(path))
+    if not path.parent.exists():
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

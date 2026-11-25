@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 import click
 from omegaconf import DictConfig, OmegaConf
 
-from .files import file_trust_problem, xdg_config_dirs
+from .files import file_trust_problem, write_private_file, xdg_config_dirs
 
 # pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements
 # pylint: disable=no-else-continue,duplicate-code
@@ -352,9 +352,6 @@ class ConfigManager:
         """Set a configuration value in user config file."""
         user_config_file = self._get_user_config_dir() / "config.yaml"
 
-        # Create directory if it doesn't exist
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
-
         # Load existing user config or create new
         if user_config_file.exists():
             user_config = OmegaConf.load(user_config_file)
@@ -371,10 +368,20 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(user_config, user_config_file)
+        self.save_user_config(user_config)
 
         # Reload configs to pick up changes
         self.reload_configs()
+
+    def save_user_config(self, user_config: DictConfig) -> Path:
+        """Write the user config file, readable by the user only.
+
+        It can hold notification tokens and webhook URLs. Interpolations
+        such as ``${oc.env:TOKEN}`` are kept as written, not resolved.
+        """
+        user_config_file = self._get_user_config_dir() / "config.yaml"
+        write_private_file(user_config_file, OmegaConf.to_yaml(user_config))
+        return user_config_file
 
     def set_system_config_value(self, key_path: str, value: Any):
         """Set a configuration value in system config file."""
@@ -548,9 +555,6 @@ class ConfigManager:
                 f"User config file already exists: {user_config_file}"
             )
 
-        # Create directory
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
-
         # Create template config. Site-specific values (project, storage
         # volumes, bind paths) are left for the user to fill in; the platform
         # definition supplies scratch paths and the default project.
@@ -613,22 +617,16 @@ class ConfigManager:
         }
 
         config = OmegaConf.create(template)
-        OmegaConf.save(config, user_config_file)
-        return user_config_file
+        return self.save_user_config(config)
 
     def save_alias(self, alias_name: str, alias_definition: Dict[str, Any]):
         """Save an alias to the user configuration."""
         user_config_file = self._get_user_config_dir() / "config.yaml"
 
-        # Ensure user config directory exists
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Load existing user config or create new
+        # Load existing user config or create new. A file that can't be
+        # read is left alone rather than replaced by one holding the alias.
         if user_config_file.exists():
-            try:
-                user_config = OmegaConf.load(user_config_file)
-            except Exception:
-                user_config = OmegaConf.create({})
+            user_config = OmegaConf.load(user_config_file)
         else:
             user_config = OmegaConf.create({})
 
@@ -639,9 +637,8 @@ class ConfigManager:
         # Add the new alias
         user_config.aliases[alias_name] = alias_definition
 
-        # Save back to file
-        with open(user_config_file, "w", encoding="utf-8") as f:
-            OmegaConf.save(user_config, f, resolve=True)
+        # Save back to file, leaving the user's other values unresolved
+        self.save_user_config(user_config)
 
         # Reload configs to pick up the new alias
         self._load_configs()

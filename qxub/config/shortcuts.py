@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import click
 
-from .files import file_trust_problem, xdg_config_dirs
+from .files import file_trust_problem, write_private_file, xdg_config_dirs
 
 
 class ShortcutManager:
@@ -164,6 +164,16 @@ class ShortcutManager:
         self._ensure_cache_loaded()
         return self._shortcuts_cache.get(name) if self._shortcuts_cache else None
 
+    def _save_user_shortcuts(self, user_shortcuts: Dict[str, Any]) -> None:
+        """Write the user shortcuts file, readable by the user only.
+
+        Shortcuts can carry ``vars`` with tokens or passwords.
+        """
+        write_private_file(
+            self._user_shortcuts_file,
+            json.dumps(user_shortcuts, indent=2, sort_keys=True),
+        )
+
     def add_shortcut(self, name: str, definition: Dict[str, Any]) -> None:
         """
         Add or update a shortcut in user config.
@@ -172,9 +182,6 @@ class ShortcutManager:
             name: Shortcut name (command to match)
             definition: Shortcut settings (env, resources, etc.)
         """
-        # Ensure user config directory exists
-        self._user_shortcuts_file.parent.mkdir(parents=True, exist_ok=True)
-
         # Load existing user shortcuts
         user_shortcuts = {}
         if self._user_shortcuts_file.exists():
@@ -189,8 +196,7 @@ class ShortcutManager:
         user_shortcuts[name] = definition
 
         # Save back to file
-        with open(self._user_shortcuts_file, "w", encoding="utf-8") as f:
-            json.dump(user_shortcuts, f, indent=2, sort_keys=True)
+        self._save_user_shortcuts(user_shortcuts)
 
         # Invalidate cache
         self._shortcuts_cache = None
@@ -255,8 +261,7 @@ class ShortcutManager:
         del user_shortcuts[name]
 
         # Save back to file
-        with open(self._user_shortcuts_file, "w", encoding="utf-8") as f:
-            json.dump(user_shortcuts, f, indent=2, sort_keys=True)
+        self._save_user_shortcuts(user_shortcuts)
 
         # Invalidate cache
         self._shortcuts_cache = None

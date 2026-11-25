@@ -1,5 +1,6 @@
 """Config loading must not trust files that other people can plant or change."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -101,3 +102,99 @@ def test_group_writable_system_shortcuts_are_ignored(home):
     shortcuts.chmod(0o666)
     assert ShortcutManager().find_shortcut(["ls"]) is None
     assert ShortcutManager().list_shortcuts_with_origin() == {}
+
+
+# -- user files hold secrets ---------------------------------------------------
+
+
+def _mode(path):
+    return path.stat().st_mode & 0o777
+
+
+@pytest.fixture
+def loose_umask():
+    old = os.umask(0o022)
+    yield
+    os.umask(old)
+
+
+def test_user_config_is_written_owner_only(home, loose_umask):
+    cm = ConfigManager()
+    cm.set_user_config_value("notifications.slack.bot_token", "xoxb-secret")
+    config = home / "home" / ".config" / "qxub" / "config.yaml"
+    assert _mode(config) == 0o600
+    assert _mode(config.parent) == 0o700
+
+
+def test_existing_loose_user_config_is_tightened(home, loose_umask):
+    config_dir = home / "home" / ".config" / "qxub"
+    config_dir.mkdir()
+    config = config_dir / "config.yaml"
+    config.write_text("defaults:\n  queue: normal\n")
+    config.chmod(0o644)
+
+    ConfigManager().set_user_config_value("defaults.name", "x")
+    assert _mode(config) == 0o600
+    assert not list(config_dir.glob(".config.yaml.*")), "no temp file left"
+
+
+def test_user_config_template_is_owner_only(home, loose_umask):
+    path = ConfigManager().create_user_config_template()
+    assert _mode(path) == 0o600
+
+
+def test_saving_an_alias_keeps_interpolations(home, loose_umask, monkeypatch):
+    monkeypatch.setenv("QXUB_TEST_TOKEN", "s3cret")
+    config_dir = home / "home" / ".config" / "qxub"
+    config_dir.mkdir()
+    config = config_dir / "config.yaml"
+    config.write_text(
+        "notifications:\n  slack:\n    bot_token: ${oc.env:QXUB_TEST_TOKEN}\n"
+    )
+
+    cm = ConfigManager()
+    cm.save_alias("quick", {"queue": "express"})
+
+    text = config.read_text()
+    assert "${oc.env:QXUB_TEST_TOKEN}" in text
+    assert "s3cret" not in text
+    assert _mode(config) == 0o600
+    assert cm.get_alias("quick") == {"queue": "express"}
+
+
+def test_saving_an_alias_does_not_clobber_an_unreadable_config(home):
+    config_dir = home / "home" / ".config" / "qxub"
+    config_dir.mkdir()
+    config = config_dir / "config.yaml"
+    config.write_text("defaults: [unclosed\n")
+
+    cm = ConfigManager()
+    with pytest.raises(Exception):
+        cm.save_alias("quick", {"queue": "express"})
+    assert config.read_text() == "defaults: [unclosed\n"
+
+
+def test_user_shortcuts_are_written_owner_only(home, loose_umask):
+    sm = ShortcutManager()
+    sm.add_shortcut("deploy", {"vars": ["TOKEN=s3cret"]})
+    path = home / "home" / ".config" / "qxub" / "shortcuts.json"
+    assert _mode(path) == 0o600
+    path.chmod(0o644)
+    sm.add_shortcut("other", {"env": "base"})
+    assert _mode(path) == 0o600
+    path.chmod(0o644)
+    assert sm.remove_shortcut("other")
+    assert _mode(path) == 0o600
+
+
+def test_a_symlinked_user_config_keeps_its_link(home, loose_umask):
+    config_dir = home / "home" / ".config" / "qxub"
+    config_dir.mkdir()
+    target = home / "dotfiles.yaml"
+    target.write_text("defaults:\n  queue: normal\n")
+    (config_dir / "config.yaml").symlink_to(target)
+
+    ConfigManager().set_user_config_value("defaults.name", "x")
+    assert (config_dir / "config.yaml").is_symlink()
+    assert "name: x" in target.read_text()
+    assert _mode(target) == 0o600
