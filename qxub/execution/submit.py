@@ -381,8 +381,18 @@ def submit_job(
             processed_params.get("name"),
         )
     )
-    spec = runs.attach_settings(job_spec(processed_params, template, job_vars), run_id)
-    submission_command = shlex.join(backend.submit_command(spec))
+    spec = None
+    try:
+        spec = runs.attach_settings(
+            job_spec(processed_params, template, job_vars), run_id
+        )
+        submission_command = shlex.join(backend.submit_command(spec))
+    except backends.SubmitError:
+        # The settings can't be passed safely: the job is never submitted
+        runs.discard(run_path)
+        if spec is not None:
+            runs.discard(spec.env_file)
+        raise
     logger.info("Programmatic submission command: %s", submission_command)
 
     # Raises SubmitError (also known as QsubError) if the job is refused

@@ -9,9 +9,10 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
 from conftest import REPO_ROOT, job_variables, parse_settings
 
-from qxub.backends import JobSpec
+from qxub.backends import JobSpec, SubmitError
 from qxub.backends.pbs import qsub_argv
 from qxub.queue import runs
 
@@ -45,6 +46,72 @@ def test_qsub_gets_only_the_settings_path():
     # Without a file, the variables go on the command line as before.
     spec = JobSpec(script="s", name="n", env={"a": "1,2"})
     assert qsub_argv(spec)[:3] == ["qsub", "-v", "a='1,2'"]
+
+
+def parse_pbs_v(value: str) -> dict:
+    """A ``qsub -v`` list as PBS reads it: a quote anywhere opens a region
+    that runs to the matching quote (the quotes are dropped), commas outside
+    one separate items, and a backslash escapes the next character."""
+    items, current, quote, chars = [], "", None, iter(value)
+    for char in chars:
+        if quote:
+            if char == quote:
+                quote = None
+            else:
+                current += char
+        elif char in "'\"":
+            quote = char
+        elif char == "\\":
+            current += next(chars, "")
+        elif char == ",":
+            items.append(current)
+            current = ""
+        else:
+            current += char
+    items.append(current)
+    return dict(item.partition("=")[::2] for item in items)
+
+
+HOSTILE = [
+    "plain",
+    "/a,/b",
+    "/o'brien",
+    'say "hi"',
+    "x,QXUB_JOB_FILE=/tmp/evil",
+    "x',QXUB_JOB_FILE=/tmp/evil,'",
+    'x",QXUB_JOB_FILE=/tmp/evil,"',
+    "/w/a,b'c\"d,cmd_b64=ZXZpbA==",
+    "/w/a'b\"c",
+    "ends with \\",
+    "back\\,slash",
+    "new\nline,x=1",
+    "",
+]
+
+
+def test_qsub_v_values_round_trip_or_are_refused():
+    for value in HOSTILE:
+        env = {"cwd": value, "out": "/o", "QXUB_RUN_ID": "qx-1"}
+        try:
+            argv = qsub_argv(JobSpec(script="s", name="n", env=env))
+        except SubmitError:
+            continue
+        assert parse_pbs_v(argv[argv.index("-v") + 1]) == env, value
+    # The settings file's path gets the same care
+    for value in filter(None, HOSTILE):
+        try:
+            argv = qsub_argv(JobSpec(script="s", name="n", env={}, env_file=value))
+        except SubmitError:
+            continue
+        assert parse_pbs_v(argv[argv.index("-v") + 1]) == {"QXUB_JOB_FILE": value}
+
+
+def test_qsub_v_refuses_what_it_cannot_carry():
+    for value in ("a'b\"c", "a\\b", "a\nb"):
+        with pytest.raises(SubmitError, match="job variable cwd"):
+            qsub_argv(JobSpec(script="s", name="n", env={"cwd": value}))
+    with pytest.raises(SubmitError, match="not a variable name"):
+        qsub_argv(JobSpec(script="s", name="n", env={"a,b": "1"}))
 
 
 def test_unwritable_runs_dir_falls_back_to_qsub_v(monkeypatch, tmp_path):

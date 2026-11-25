@@ -65,17 +65,44 @@ def _current_user() -> str:
     return os.environ.get("USER") or getpass.getuser()
 
 
-def qsub_var(value: Any) -> str:
+# A job variable's name, as qsub -v and bash accept it.
+QSUB_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def qsub_var(value: Any, name: str = "") -> str:
     """A value for one ``qsub -v`` item.
 
-    ``qsub -v`` splits its list on commas, so a value containing one is
-    wrapped in quotes that reach PBS (``bind='/a,/b'``).
+    ``qsub -v`` splits its list on commas, and a quote anywhere in a value
+    starts a quoted region that runs to the next matching quote. So a value
+    containing a comma or a quote is wrapped in the other kind of quote
+    (``bind='/a,/b'``, ``cwd="/o'brien"``). A value that can't be passed
+    exactly (both kinds of quote, a backslash, a newline or another control
+    character) raises :class:`SubmitError` rather than reaching the job as
+    something else, such as extra variables.
     """
     value = str(value)
-    if "," not in value:
+    label = f"job variable {name}" if name else "a job variable"
+    if "\\" in value or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise SubmitError(
+            f"cannot pass {label} to qsub -v: its value has a backslash or a "
+            "control character, which qsub -v can't carry"
+        )
+    if not any(c in value for c in ",'\""):
         return value
+    if "'" in value and '"' in value:
+        raise SubmitError(
+            f"cannot pass {label} to qsub -v: its value has both kinds of "
+            "quote, which qsub -v can't carry"
+        )
     quote = '"' if "'" in value else "'"
     return f"{quote}{value}{quote}"
+
+
+def qsub_var_item(name: str, value: Any) -> str:
+    """One ``NAME=value`` item of a ``qsub -v`` list (see :func:`qsub_var`)."""
+    if not QSUB_VAR_NAME_RE.match(str(name)):
+        raise SubmitError(f"cannot pass {name!r} to qsub -v: not a variable name")
+    return f"{name}={qsub_var(value, name)}"
 
 
 # PBS ``-l`` names for the neutral ResourceSpec fields, in the order qxub
@@ -158,9 +185,9 @@ def qsub_argv(spec: JobSpec) -> List[str]:
     """The ``qsub`` command line for ``spec``."""
     argv = ["qsub"]
     if spec.env_file:
-        argv += ["-v", f"QXUB_JOB_FILE={qsub_var(spec.env_file)}"]
+        argv += ["-v", qsub_var_item("QXUB_JOB_FILE", spec.env_file)]
     elif spec.env:
-        argv += ["-v", ",".join(f"{k}={qsub_var(v)}" for k, v in spec.env.items())]
+        argv += ["-v", ",".join(qsub_var_item(k, v) for k, v in spec.env.items())]
     argv += ["-N", spec.name]
     if spec.queue:
         argv += ["-q", spec.queue]

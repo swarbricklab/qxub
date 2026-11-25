@@ -276,10 +276,19 @@ def execute_unified(
     job_vars.update(
         runs.job_env(run_id, run_path, backend.job_id_variable, ctx_obj.get("name"))
     )
-    spec = runs.attach_settings(
-        job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]
-    )
-    submission_command = shlex.join(backend.submit_command(spec))
+    spec = None
+    try:
+        spec = runs.attach_settings(
+            job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]
+        )
+        submission_command = shlex.join(backend.submit_command(spec))
+    except SubmitError as exc:
+        # The settings can't be passed safely: refuse the job, visibly
+        runs.discard(run_path)
+        if spec is not None and not ctx_obj["dry"]:
+            runs.discard(spec.env_file)
+        click.echo(f"❌ {exc}", err=True)
+        sys.exit(exc.exit_code)
     logger.info("Submission command: %s", submission_command)
 
     # Progress message: Job command constructed (skip for terse mode)
