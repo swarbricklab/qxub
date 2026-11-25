@@ -17,7 +17,7 @@ The following branch protection rules should be configured via GitHub repository
     - `format-check` (Code Formatting)
     - `pylint` (Pylint)
 - **Require branches to be up to date before merging**: ✅ Enabled
-- **Require conversation resolution before merging**: ✅ Enabled
+- **Require conversation resolution before merging**: ❌ Disabled
 - **Restrict pushes from users who can push to matching branches**: ✅ Enabled
 - **Do not allow bypassing the above settings**: ❌ Disabled (admins may merge
   their own PRs without a second approval)
