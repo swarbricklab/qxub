@@ -1467,21 +1467,8 @@ def interactive_cli(
         click.echo(f"   Tmux:    {tmux_session}")
     click.echo("")
 
-    # Write the initialization script to a temporary file
-    # This will be sourced when the interactive job starts
-    import tempfile
-
-    script_dir = Path(tempfile.gettempdir()) / "qxub_interactive"
-    script_dir.mkdir(parents=True, exist_ok=True)
-
-    # Use a unique filename based on timestamp
-    import time
-
-    script_file = script_dir / f"init_{int(time.time())}_{os.getpid()}.sh"
-
-    with open(script_file, "w") as f:
-        f.write(script)
-    script_file.chmod(0o755)
+    # Write the initialization script, which the session runs
+    script_dir, script_file = _write_session_script(script)
 
     # The command that starts the session running our script (qsub -I)
     qsub_cmd = backend.interactive_command(
@@ -1506,6 +1493,7 @@ def interactive_cli(
         session_exists = result.returncode == 0
 
         if session_exists:
+            _remove_session_script(script_dir)
             # Session already exists - refuse to continue automatically
             # This avoids accidentally interrupting an active R/Python session
             # or other running process with send-keys
@@ -1527,9 +1515,12 @@ def interactive_cli(
             click.echo(
                 f"🆕 Creating tmux session '{tmux_session}' and starting PBS job..."
             )
+            # qxi is replaced by tmux, so the tmux command removes the
+            # script once the session is over
+            tmux_cmd = f"{qsub_cmd_str}; rm -rf -- {shlex.quote(str(script_dir))}"
             os.execvp(
                 "tmux",
-                ["tmux", "new-session", "-s", tmux_session, qsub_cmd_str],
+                ["tmux", "new-session", "-s", tmux_session, tmux_cmd],
             )
     else:
         # No tmux - use subprocess.run() so we can process session completion
@@ -1539,10 +1530,7 @@ def interactive_cli(
             qsub_exit_code = result.returncode
         except Exception as e:
             # Clean up script file on error
-            try:
-                script_file.unlink()
-            except Exception:
-                pass
+            _remove_session_script(script_dir)
             click.echo(f"❌ Error starting interactive session: {e}")
             sys.exit(1)
 
@@ -1576,12 +1564,44 @@ def interactive_cli(
             pass  # Don't fail if post-processing fails
 
         # Clean up script file
-        try:
-            script_file.unlink()
-        except Exception:
-            pass
+        _remove_session_script(script_dir)
 
         sys.exit(_qxi_exit_code(qsub_exit_code, session_info))
+
+
+def _write_session_script(script: str) -> tuple[Path, Path]:
+    """Write the session script; returns ``(directory, script path)``.
+
+    The directory is new, private to this user (``mkdtemp``: mode 0700, a
+    random name, created atomically) and in the temp directory as before, so
+    the compute node can still read it. Another user cannot pre-create it,
+    swap the script or plant a symlink in it. The script is created
+    exclusively, without following symlinks, owner-only.
+    """
+    import tempfile
+
+    script_dir = Path(tempfile.mkdtemp(prefix="qxub_interactive_"))
+    script_file = script_dir / "init.sh"
+    try:
+        fd = os.open(
+            script_file,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o700,
+        )
+        with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), 0o700)
+            f.write(script)
+    except BaseException:
+        _remove_session_script(script_dir)
+        raise
+    return script_dir, script_file
+
+
+def _remove_session_script(script_dir: Path) -> None:
+    """Remove the session script's private directory."""
+    import shutil
+
+    shutil.rmtree(script_dir, ignore_errors=True)
 
 
 def _qxi_exit_code(qsub_exit_code: int, session_info: dict | None) -> int:
