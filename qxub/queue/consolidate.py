@@ -370,9 +370,9 @@ def query_jobs(job_ids: Iterable[str]) -> Dict[str, Any]:
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:
-    from ..resources.tracker import (
+    from ..resources.tracker import (  # pylint: disable=import-outside-toplevel
         create_job_resources_schema,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     create_job_resources_schema(conn)
     conn.execute(
@@ -442,9 +442,9 @@ def _joblog_data(record: Dict[str, str], job_id: Optional[str]):
     path = record.get("joblog")
     if not path or not job_id or not os.path.exists(path):
         return None
-    from ..resources.parser import (
+    from ..resources.parser import (  # pylint: disable=import-outside-toplevel
         parse_joblog_resources,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     data = parse_joblog_resources(path)
     if data and data.get("job_id") == job_id:
@@ -851,6 +851,7 @@ def _publish(private: Path, snapshot: Path) -> None:
     try:
         with open(private, "rb") as src, os.fdopen(fd, "wb", closefd=False) as dst:
             shutil.copyfileobj(src, dst)
+        _give_to_dir_group(fd, mine, snapshot.parent)
         os.fchmod(fd, SNAPSHOT_MODE)
         os.fsync(fd)
         if not _same_file(staged, mine):
@@ -864,6 +865,36 @@ def _publish(private: Path, snapshot: Path) -> None:
                 staged.unlink()
             except OSError:
                 pass
+
+
+# Whether _give_to_dir_group has warned that it can't set the group.
+_GROUP_WARNED = False
+
+
+def _give_to_dir_group(fd: int, mine: os.stat_result, directory: Path) -> None:
+    """Give the staged snapshot ``fd`` the group of ``directory``.
+
+    ``SNAPSHOT_MODE`` lets the group read it, which is only the team's group
+    if the directory is setgid; without that the file has the user's own
+    group. If the user isn't in the directory's group (``EPERM``), the file
+    keeps its group and a warning is logged once.
+    """
+    global _GROUP_WARNED  # pylint: disable=global-statement
+    gid = os.stat(directory).st_gid
+    if mine.st_gid == gid:
+        return
+    try:
+        os.fchown(fd, -1, gid)
+    except PermissionError as exc:
+        if not _GROUP_WARNED:
+            _GROUP_WARNED = True
+            logger.warning(
+                "Cannot give the statistics snapshot the group of %s (gid %d): "
+                "%s; others in that group may not be able to read it",
+                directory,
+                gid,
+                exc,
+            )
 
 
 def _same_file(path: Path, known: os.stat_result) -> bool:

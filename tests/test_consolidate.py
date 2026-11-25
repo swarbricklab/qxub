@@ -5,6 +5,7 @@ See ``docs/dev/sqlite-robustness.md`` and ``qxub/queue/consolidate.py``.
 
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
 import textwrap
@@ -819,3 +820,63 @@ def test_runs_are_marked_before_the_lease_is_released(area, monkeypatch):
     monkeypatch.setattr(runs, "update", update)
     run(area, lookup=lambda ids: {})
     assert held == [True]
+
+
+def test_published_snapshot_gets_the_directory_group(area, monkeypatch):
+    """Without a setgid directory the snapshot would have the user's own
+    group, which SNAPSHOT_MODE's group-read then doesn't reach the team."""
+    runs_dir, snapshot = area
+    snapshot.parent.mkdir(exist_ok=True)
+    dir_gid = snapshot.parent.stat().st_gid
+    other_gid = dir_gid + 1
+    real_fstat = os.fstat
+    calls = []
+
+    def fstat_other_group(fd):
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            st = os.stat_result(st[:5] + (other_gid,) + st[6:])
+        return st
+
+    monkeypatch.setattr(cons.os, "fstat", fstat_other_group)
+    monkeypatch.setattr(cons.os, "fchown", lambda fd, u, g: calls.append((u, g)))
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    assert run(area, lookup=lambda ids: {}).published
+    assert calls == [(-1, dir_gid)]
+
+
+def test_snapshot_group_it_cannot_set_is_warned_about_once(area, monkeypatch, caplog):
+    runs_dir, snapshot = area
+    real_fstat = os.fstat
+
+    def fstat_other_group(fd):
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            st = os.stat_result(st[:5] + (st.st_gid + 1,) + st[6:])
+        return st
+
+    def fchown_eperm(fd, uid, gid):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(cons.os, "fstat", fstat_other_group)
+    monkeypatch.setattr(cons.os, "fchown", fchown_eperm)
+    monkeypatch.setattr(cons, "_GROUP_WARNED", False)
+    for i in range(2):
+        finished(runs_dir, f"qx-{i}", f"{i}.gadi-pbs", ago=timedelta(days=3))
+        assert run(area, lookup=lambda ids: {}).published
+    warnings = [r for r in caplog.records if "group of" in r.getMessage()]
+    assert len(warnings) == 1
+    assert snapshot.stat().st_mode & 0o777 == cons.SNAPSHOT_MODE
+
+
+def test_snapshot_group_is_set_for_real_to_one_of_the_users_groups(area):
+    runs_dir, snapshot = area
+    groups = [g for g in os.getgroups() if g != os.getegid()]
+    if not groups:
+        pytest.skip("the user is in only one group")
+    snapshot.parent.mkdir(exist_ok=True)
+    os.chown(snapshot.parent, -1, groups[0])
+    snapshot.parent.chmod(0o755)  # not setgid: new files get the user's group
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    assert run(area, lookup=lambda ids: {}).published
+    assert snapshot.stat().st_gid == groups[0]
