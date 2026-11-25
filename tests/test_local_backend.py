@@ -87,11 +87,13 @@ def test_cancel_stops_a_local_job(local, monkeypatch):
     cancel = local.run("cancel", "id", "-f", job_id)
     assert cancel.returncode == 0, cancel.stdout + cancel.stderr
 
-    details = _wait_for(
-        lambda: backend.is_finished(backend.job_details([job_id]).get(job_id))
-        and backend.job_details([job_id])[job_id]
+    info = _wait_for(
+        lambda: (
+            backend.find_info(job_id) if backend.find_info(job_id).is_finished else None
+        )
     )
-    assert details["exit_status"] == 143  # the job script's TERM trap
+    assert info.exit_status == 143  # the job script's TERM trap
+    assert info.ended_by == "cancelled"
     assert job_id not in [j.job_id for j in backend.list_jobs()]
     assert _status(local, job_id) == "failed"
 
@@ -144,17 +146,15 @@ def test_a_job_on_another_host_is_not_judged_by_its_pid(tmp_path, monkeypatch):
     (job / "pid").write_text("999999\n")  # not running here
     backend = LocalBackend()
 
-    details = backend.job_details(["local-elsewhere"])["local-elsewhere"]
-    assert details["exit_status"] is None and not backend.is_finished(details)
-    assert details["metadata"]["host"] == "some-other-host"
+    info = backend.find_info("local-elsewhere")
+    assert info.exit_status is None and not info.is_finished
+    assert info.host == "some-other-host"
     assert [j.job_id for j in backend.list_jobs()] == ["local-elsewhere"]
     ok, reason = backend.cancel("local-elsewhere")
     assert not ok and "some-other-host" in reason
 
     (job / "exit_status").write_text("0\n")  # it finished over there
-    assert backend.is_finished(
-        backend.job_details(["local-elsewhere"])["local-elsewhere"]
-    )
+    assert backend.find_info("local-elsewhere").is_finished
 
     # On its own host, a missing process still means it was killed
     meta = json.loads((job / "meta.json").read_text())

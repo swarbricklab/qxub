@@ -32,7 +32,17 @@ from ..resources.spec import (
     parse_duration,
     parse_size,
 )
-from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
+from .base import (
+    ENDED_BY_WALLTIME,
+    JobInfo,
+    JobSpec,
+    JobState,
+    JobUsage,
+    LiveJob,
+    SchedulerBackend,
+    SchedulerQueryError,
+    SubmitError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,8 +229,11 @@ class PbsBackend(SchedulerBackend):
                     found[job_id] = data
         return found
 
-    def is_finished(self, details: Optional[Dict[str, Any]]) -> bool:
-        return ((details or {}).get("metadata") or {}).get("job_state") == "F"
+    def job_info(self, job_ids: Iterable[str]) -> Dict[str, JobInfo]:
+        return {
+            job_id: job_info_from_details(job_id, details)
+            for job_id, details in self.job_details(job_ids).items()
+        }
 
     def cancel(self, job_id: str) -> Tuple[bool, str]:
         try:
@@ -337,6 +350,94 @@ def parse_qstat_full_listing(output: str, user: Optional[str] = None) -> List[Li
             )
         )
     return jobs
+
+
+# PBS job_state letters
+_STATES = {
+    "Q": JobState.QUEUED,
+    "W": JobState.QUEUED,  # waiting for its start time
+    "T": JobState.QUEUED,  # being moved
+    "R": JobState.RUNNING,
+    "B": JobState.RUNNING,  # array job with subjobs started
+    "E": JobState.RUNNING,  # exiting
+    "H": JobState.HELD,
+    "S": JobState.HELD,  # suspended
+    "U": JobState.HELD,  # suspended: workstation busy
+    "F": JobState.FINISHED,
+    "X": JobState.FINISHED,  # finished subjob
+}
+# Exit_status PBS sets when it kills a job at its walltime (Gadi)
+EXIT_WALLTIME = -29
+
+
+def _int(value) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bytes(value) -> Optional[int]:
+    try:
+        return int(size_to_bytes(value)) if value else None
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def _seconds(value) -> Optional[int]:
+    try:
+        return int(time_to_seconds(value)) if value else None
+    except Exception:  # pylint: disable=broad-except
+        return None
+
+
+def job_info_from_details(job_id: str, details: Dict[str, Any]) -> JobInfo:
+    """A :class:`JobInfo` from ``parse_qstat_fx_output`` output."""
+    requested = details.get("resources_requested") or {}
+    used = details.get("resources_used") or {}
+    timing = details.get("timing") or {}
+    metadata = details.get("metadata") or {}
+    execution = details.get("execution") or {}
+    try:
+        cpu_percent = float(used["cpupercent"])
+    except (KeyError, TypeError, ValueError):
+        cpu_percent = None
+    exit_status = details.get("exit_status")
+    state = _STATES.get(metadata.get("job_state", ""), JobState.UNKNOWN)
+    host = (execution.get("exec_host") or "").split("/")[0].split("+")[0] or None
+
+    def when(key):
+        return parse_timestamp(timing.get(key)) if timing.get(key) else None
+
+    return JobInfo(
+        job_id=job_id,
+        state=state,
+        exit_status=exit_status,
+        ended_by=ENDED_BY_WALLTIME if exit_status == EXIT_WALLTIME else None,
+        name=metadata.get("Job_Name"),
+        queue=execution.get("queue"),
+        host=host,
+        submitted=when("qtime"),
+        started=when("stime"),
+        # obittime: when PBS recorded the end; older servers only have mtime
+        finished=(
+            (when("obittime") or when("mtime")) if state is JobState.FINISHED else None
+        ),
+        usage=JobUsage(
+            cpus_requested=_int(requested.get("ncpus")),
+            cpus_used=_int(used.get("ncpus")),
+            cpu_time=_seconds(used.get("cput")),
+            cpu_percent=cpu_percent,
+            memory_requested=_bytes(requested.get("mem")),
+            memory_used=_bytes(used.get("mem")),
+            walltime_requested=_seconds(requested.get("walltime")),
+            walltime_used=_seconds(used.get("walltime")),
+            disk_requested=_bytes(requested.get("jobfs")),
+            disk_used=_bytes(used.get("jobfs")),
+            gpus_requested=_int(requested.get("ngpus")),
+        ),
+        native=details,
+    )
 
 
 def parse_qstat_fx_output(qstat_output):

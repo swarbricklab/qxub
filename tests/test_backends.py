@@ -15,7 +15,9 @@ from click.testing import CliRunner
 
 from qxub import backends, cancel_cli
 from qxub.backends import (
+    JobInfo,
     JobSpec,
+    JobState,
     LiveJob,
     ResourceSpec,
     SchedulerBackend,
@@ -49,8 +51,16 @@ class FakeBackend(SchedulerBackend):
         self.calls.append(("job_details", job_ids))
         return {j: self.details[j] for j in job_ids if j in self.details}
 
-    def is_finished(self, details):
-        return bool(details) and details.get("done", False)
+    def job_info(self, job_ids):
+        return {
+            job_id: JobInfo(
+                job_id,
+                JobState.FINISHED if details.get("done") else JobState.RUNNING,
+                exit_status=details.get("exit_status"),
+                native=details,
+            )
+            for job_id, details in self.job_details(job_ids).items()
+        }
 
     def cancel(self, job_id):
         self.calls.append(("cancel", job_id))
@@ -176,16 +186,17 @@ def test_job_details_asks_in_batches_and_skips_unknown_jobs(fake_pbs):
     for job_id in ids[:-1]:
         fake_pbs.set_qstat(job_id, FX.format(id=job_id))
 
-    found = PbsBackend().job_details(ids)
+    found = PbsBackend().job_info(ids)
 
     assert sorted(found) == sorted(ids[:-1])
     assert [len(c["argv"]) - 1 for c in fake_pbs.pbs_calls("qstat")] == [100, 50]
-    assert PbsBackend().is_finished(found["0.gadi-pbs"])
+    assert found["0.gadi-pbs"].is_finished and found["0.gadi-pbs"].exit_status == 0
 
 
 def test_job_resource_data_matches_a_short_job_id(fake_pbs):
     fake_pbs.set_qstat("123", FX.format(id="123.gadi-pbs"))
     assert scheduler.get_job_resource_data("123")["exit_status"] == 0
+    assert scheduler.get_job_info("123").job_id == "123.gadi-pbs"
 
 
 def test_cancel_reports_why_it_failed(fake_pbs, monkeypatch):
@@ -253,8 +264,10 @@ def test_cancel_wait_gives_up_if_the_scheduler_cannot_be_asked(fake_backend):
 def test_consolidation_and_resource_lookups_use_the_backend(fake_backend):
     fake_backend.details = {"fake-1": {"exit_status": 3, "done": True}}
 
-    assert cons.query_qstat(["fake-1", "fake-2"]) == fake_backend.details
-    assert cons._qstat_finished(fake_backend.details["fake-1"])
+    (info,) = cons.query_jobs(["fake-1", "fake-2"]).values()
+    assert info.is_finished and info.exit_status == 3
+    assert scheduler.get_job_info("fake-1") == info
+    assert scheduler.get_job_info("fake-2") is None
     assert scheduler.get_job_resource_data("fake-1") == {"exit_status": 3, "done": True}
     assert scheduler.get_job_resource_data("fake-2") is None
     assert scheduler.qdel("fake-9", quiet=True) is False

@@ -13,7 +13,18 @@ import logging
 from typing import Dict, List, Optional, Tuple, Type
 
 from ..resources.spec import ResourceSpec
-from .base import JobSpec, LiveJob, SchedulerBackend, SchedulerQueryError, SubmitError
+from .base import (
+    ENDED_BY_CANCEL,
+    ENDED_BY_WALLTIME,
+    JobInfo,
+    JobSpec,
+    JobState,
+    JobUsage,
+    LiveJob,
+    SchedulerBackend,
+    SchedulerQueryError,
+    SubmitError,
+)
 from .local import LocalBackend
 from .pbs import PbsBackend
 
@@ -115,7 +126,12 @@ def live_jobs(
 
 __all__ = [
     "BACKENDS",
+    "ENDED_BY_CANCEL",
+    "ENDED_BY_WALLTIME",
+    "JobInfo",
     "JobSpec",
+    "JobState",
+    "JobUsage",
     "LiveJob",
     "LocalBackend",
     "PbsBackend",

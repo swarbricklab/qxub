@@ -10,7 +10,9 @@ A job to submit, or an interactive session to start, is described by a
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
+from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 from ..resources.spec import ResourceSpec
@@ -27,6 +29,94 @@ class LiveJob(NamedTuple):
     queue: str
     state: str
     name: str
+
+
+class JobState(str, Enum):
+    """Where a job is, in terms every scheduler can map to."""
+
+    QUEUED = "queued"  # waiting to start (PBS Q, W, T)
+    RUNNING = "running"  # started, including ending (PBS R, B, E)
+    HELD = "held"  # won't start until released (PBS H, S, U)
+    FINISHED = "finished"  # ended, however it ended (PBS F, X)
+    UNKNOWN = "unknown"
+
+
+#: :attr:`JobInfo.ended_by` values, when the scheduler can tell.
+ENDED_BY_WALLTIME = "walltime"  # killed for running past its walltime
+ENDED_BY_CANCEL = "cancelled"  # cancelled (qxub cancel, qdel, ...)
+
+
+@dataclass
+class JobUsage:
+    """What a job asked for and used. Sizes in bytes, times in seconds.
+
+    Anything the scheduler doesn't report is ``None``.
+    """
+
+    cpus_requested: Optional[int] = None
+    cpus_used: Optional[int] = None
+    #: CPU time summed over the job's CPUs.
+    cpu_time: Optional[int] = None
+    #: The scheduler's own CPU percentage (PBS cpupercent: 100 per busy CPU).
+    cpu_percent: Optional[float] = None
+    memory_requested: Optional[int] = None
+    memory_used: Optional[int] = None
+    walltime_requested: Optional[int] = None
+    walltime_used: Optional[int] = None
+    #: Node-local disk (PBS jobfs).
+    disk_requested: Optional[int] = None
+    disk_used: Optional[int] = None
+    gpus_requested: Optional[int] = None
+
+    def has_used(self) -> bool:
+        """Whether any usage (not only requests) was reported."""
+        return any(
+            getattr(self, f.name) is not None
+            for f in fields(self)
+            if f.name.endswith("_used") or f.name in ("cpu_time", "cpu_percent")
+        )
+
+
+@dataclass
+class JobInfo:
+    """What a scheduler knows about one job, in scheduler-neutral terms.
+
+    ``exit_status`` is the scheduler's own value (PBS: negative if PBS
+    ended the job, 256 + N if it was killed by signal N). ``ended_by`` says
+    why the scheduler ended it, when it can tell (``ENDED_BY_*``).
+    ``native`` is the scheduler's own record (PBS: ``parse_qstat_fx_output``).
+    """
+
+    job_id: str
+    state: JobState
+    exit_status: Optional[int] = None
+    ended_by: Optional[str] = None
+    name: Optional[str] = None
+    queue: Optional[str] = None
+    host: Optional[str] = None
+    submitted: Optional[datetime] = None
+    started: Optional[datetime] = None
+    finished: Optional[datetime] = None
+    usage: JobUsage = field(default_factory=JobUsage)
+    native: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.state is JobState.FINISHED
+
+    @property
+    def queue_wait(self) -> Optional[int]:
+        """Seconds from submission to start."""
+        if self.submitted and self.started:
+            return int((self.started - self.submitted).total_seconds())
+        return None
+
+    @property
+    def run_time(self) -> Optional[int]:
+        """Seconds from start to end."""
+        if self.started and self.finished:
+            return int((self.finished - self.started).total_seconds())
+        return None
 
 
 class SchedulerQueryError(Exception):
@@ -95,21 +185,22 @@ class SchedulerBackend(ABC):
         """
 
     @abstractmethod
-    def job_details(self, job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-        """Everything the scheduler knows about each job, by job ID.
+    def job_info(self, job_ids: Iterable[str]) -> Dict[str, JobInfo]:
+        """What the scheduler knows about each job, by job ID.
 
         Includes finished jobs while the scheduler remembers them. Jobs it
-        doesn't know are left out. Never raises.
-
-        The value has the shape ``parse_qstat_fx_output`` returns
-        (``exit_status``, ``resources_requested``, ``resources_used``,
-        ``timing``, ``execution``, ``metadata``, ``efficiency``). It is still
-        PBS-flavoured; a neutral ``JobUsage`` is later work.
+        doesn't know are left out. Never raises. Use this rather than
+        :meth:`job_details` unless you need the scheduler's own record.
         """
 
     @abstractmethod
-    def is_finished(self, details: Optional[Dict[str, Any]]) -> bool:
-        """Whether ``details`` (from :meth:`job_details`) is a finished job."""
+    def job_details(self, job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        """The scheduler's own record of each job, by job ID.
+
+        Like :meth:`job_info`, but in the scheduler's own layout (PBS:
+        ``parse_qstat_fx_output``, which ``qxub history`` stores). Each
+        :class:`JobInfo` carries it as ``native``.
+        """
 
     @abstractmethod
     def cancel(self, job_id: str) -> Tuple[bool, str]:
@@ -157,9 +248,12 @@ class SchedulerBackend(ABC):
         """A key under which different spellings of one job ID are equal."""
         return job_id
 
-    def find_details(
-        self, details: Dict[str, Dict[str, Any]], job_id: str
-    ) -> Optional[Dict[str, Any]]:
+    def find_info(self, job_id: str) -> Optional[JobInfo]:
+        """:meth:`job_info` for one job, also matching another spelling of
+        its ID (PBS: ``123`` for ``123.gadi-pbs``)."""
+        return self.find_details(self.job_info([job_id]), job_id)
+
+    def find_details(self, details: Dict[str, Any], job_id: str) -> Optional[Any]:
         """``details[job_id]``, also matching another spelling of the ID."""
         if job_id in details:
             return details[job_id]

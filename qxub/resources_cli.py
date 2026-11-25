@@ -452,77 +452,77 @@ def export(output_path, limit):
 @click.argument("job_id")
 def show(job_id):
     """Show detailed resource information for a specific job."""
-    from .core.scheduler import get_job_resource_data
+    from .core.scheduler import get_job_info
+    from .resources import bytes_to_human
+    from .resources.spec import format_duration
+
+    def size(value):
+        return bytes_to_human(value) if value is not None else "?"
+
+    def duration(value):
+        return format_duration(value) if value is not None else "?"
+
+    def percent(used, requested):
+        if used is None or not requested:
+            return "?"
+        return f"{used / requested * 100:.1f}%"
 
     try:
-        # Get fresh data from PBS
-        resource_data = get_job_resource_data(job_id)
+        info = get_job_info(job_id)
 
-        if not resource_data:
+        if not info:
             console.print(f"❌ No resource data found for job {job_id}", style="red")
             return
 
-        # Display comprehensive resource information
         console.print(f"📊 [bold]Resource Details for Job {job_id}[/bold]\n")
 
-        # Basic info
-        console.print(f"Exit Status: {resource_data.get('exit_status', '?')}")
-        console.print(f"Queue: {resource_data.get('execution', {}).get('queue', '?')}")
+        ended = f" ({info.ended_by})" if info.ended_by else ""
+        console.print(f"State: {info.state.value}{ended}")
         console.print(
-            f"Host: {resource_data.get('execution', {}).get('exec_host', '?')}"
+            "Exit Status: "
+            + ("?" if info.exit_status is None else str(info.exit_status))
         )
+        console.print(f"Queue: {info.queue or '?'}")
+        console.print(f"Host: {info.host or '?'}")
 
-        # Resource comparison table
+        usage = info.usage
         table = Table(title="Resource Usage Comparison")
         table.add_column("Resource", style="cyan")
         table.add_column("Requested", style="blue")
         table.add_column("Used", style="green")
         table.add_column("Efficiency", style="magenta")
-
-        efficiency = resource_data.get("efficiency", {})
-        requested = resource_data.get("resources_requested", {})
-        used = resource_data.get("resources_used", {})
-
-        # Memory
         table.add_row(
             "Memory",
-            efficiency.get("memory_requested_human", requested.get("mem", "?")),
-            efficiency.get("memory_used_human", used.get("mem", "?")),
-            f"{efficiency.get('memory_efficiency', '?')}%",
+            size(usage.memory_requested),
+            size(usage.memory_used),
+            percent(usage.memory_used, usage.memory_requested),
         )
-
-        # Time
         table.add_row(
             "Walltime",
-            requested.get("walltime", "?"),
-            used.get("walltime", "?"),
-            f"{efficiency.get('time_efficiency', '?')}%",
+            duration(usage.walltime_requested),
+            duration(usage.walltime_used),
+            percent(usage.walltime_used, usage.walltime_requested),
         )
-
-        # CPU
+        cpus = usage.cpus_used or usage.cpus_requested
         table.add_row(
             "CPU",
-            f"{requested.get('ncpus', '?')} cores",
-            f"{used.get('cpupercent', '?')}%",
-            f"{efficiency.get('cpu_efficiency', '?')}%",
+            f"{usage.cpus_requested or '?'} cores",
+            f"{duration(usage.cpu_time)} CPU time",
+            percent(usage.cpu_time, (usage.walltime_used or 0) * (cpus or 0)),
         )
-
-        # Jobfs
         table.add_row(
             "Job Filesystem",
-            efficiency.get("jobfs_requested_human", requested.get("jobfs", "?")),
-            efficiency.get("jobfs_used_human", used.get("jobfs", "?")),
-            f"{efficiency.get('jobfs_efficiency', '?')}%",
+            size(usage.disk_requested),
+            size(usage.disk_used),
+            percent(usage.disk_used, usage.disk_requested),
         )
-
         console.print(table)
 
-        # Timing details
-        timing = resource_data.get("timing", {})
-        if timing.get("queue_wait_seconds") is not None:
-            console.print(f"\n⏱️  [bold]Timing:[/bold]")
-            console.print(f"Queue wait: {timing.get('queue_wait_seconds', 0)} seconds")
-            console.print(f"Execution: {timing.get('execution_seconds', 0)} seconds")
+        if info.queue_wait is not None:
+            console.print("\n⏱️  [bold]Timing:[/bold]")
+            console.print(f"Queue wait: {info.queue_wait} seconds")
+            if info.run_time is not None:
+                console.print(f"Execution: {info.run_time} seconds")
 
     except Exception as e:
         console.print(f"❌ Error retrieving resource data: {e}", style="red")

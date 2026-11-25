@@ -127,7 +127,7 @@ def test_consolidation_asks_the_backend_the_run_file_recorded(tmp_path, monkeypa
     cons.consolidate(
         runs_dir,
         tmp_path / "stats.db",
-        qstat=lambda ids: asked.append(dict(ids)) or {},
+        lookup=lambda ids: asked.append(dict(ids)) or {},
         now=cons.datetime(2026, 11, 20, 12),
     )
     assert asked == [{"12345": "local"}]
@@ -139,8 +139,8 @@ def test_consolidation_asks_the_backend_the_run_file_recorded(tmp_path, monkeypa
         "backend_for_job",
         lambda job_id, name=None: chosen.append((job_id, name)) or real(job_id, name),
     )
-    monkeypatch.setattr(LocalBackend, "job_details", lambda self, ids: {})
-    cons.query_qstat({"12345": "local"})
+    monkeypatch.setattr(LocalBackend, "job_info", lambda self, ids: {})
+    cons.query_jobs({"12345": "local"})
     assert chosen == [("12345", "local")]
 
 

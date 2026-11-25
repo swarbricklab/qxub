@@ -9,7 +9,8 @@ directory, so every platform finds it):
 - ``meta.json``: name, queue, job log, submission time, and host: the PID
   is checked only there (with a shared home, other machines see the job
   as running until it records an exit status);
-- ``exit_status``: written when the job ends.
+- ``exit_status``: written when the job ends;
+- ``cancelled``: written by ``cancel``, so the job's end can be explained.
 
 When the job ends, its exit status is also appended to the job log as
 ``Exit Status: N``, the line ``qxub exec`` looks for in a PBS job log.
@@ -29,7 +30,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .base import JobSpec, LiveJob, SchedulerBackend, SubmitError
+from .base import (
+    ENDED_BY_CANCEL,
+    JobInfo,
+    JobSpec,
+    JobState,
+    LiveJob,
+    SchedulerBackend,
+    SubmitError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +166,23 @@ class LocalBackend(SchedulerBackend):
             )
         except (OSError, ValueError):
             exit_status = None
+        try:
+            ended = datetime.fromtimestamp((job_dir / "exit_status").stat().st_mtime)
+        except OSError:
+            ended = None
         here = meta.get("host") in (None, socket.gethostname())
         if exit_status is None and here and not _alive(pid):
             exit_status = -1  # ended without recording a status (killed)
         # On another host (a shared home), the job runs until it records an
         # exit status; its PID can't be checked from here.
-        return {**meta, "pid": pid, "exit_status": exit_status, "here": here}
+        return {
+            **meta,
+            "pid": pid,
+            "exit_status": exit_status,
+            "here": here,
+            "ended": ended,
+            "cancelled": (job_dir / "cancelled").exists(),
+        }
 
     def available(self) -> bool:
         return jobs_dir().is_dir()
@@ -184,28 +204,44 @@ class LocalBackend(SchedulerBackend):
         return jobs
 
     def job_details(self, job_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        return {job_id: info.native for job_id, info in self.job_info(job_ids).items()}
+
+    def job_info(self, job_ids: Iterable[str]) -> Dict[str, JobInfo]:
         found = {}
         for job_id in dict.fromkeys(job_ids):
             job = self._read(job_id)
             if not job:
                 continue
             finished = job["exit_status"] is not None
-            found[job_id] = {
-                "exit_status": job["exit_status"],
-                "metadata": {
-                    "job_state": "F" if finished else "R",
-                    "job_name": job["name"],
-                    "queue": job["queue"],
-                    "host": job.get("host"),
+            try:
+                submitted = datetime.fromisoformat(job["submitted"])
+            except (TypeError, ValueError):
+                submitted = None
+            found[job_id] = JobInfo(
+                job_id=job_id,
+                state=JobState.FINISHED if finished else JobState.RUNNING,
+                exit_status=job["exit_status"],
+                ended_by=ENDED_BY_CANCEL if finished and job["cancelled"] else None,
+                name=job["name"],
+                queue=job["queue"],
+                host=job.get("host"),
+                submitted=submitted,
+                started=submitted,  # it starts when it is submitted
+                finished=job["ended"] if finished else None,
+                native={
+                    "exit_status": job["exit_status"],
+                    "metadata": {
+                        "job_state": "F" if finished else "R",
+                        "job_name": job["name"],
+                        "queue": job["queue"],
+                        "host": job.get("host"),
+                    },
+                    "timing": {"submitted": job["submitted"]},
+                    "resources_requested": {},
+                    "resources_used": {},
                 },
-                "timing": {"submitted": job["submitted"]},
-                "resources_requested": {},
-                "resources_used": {},
-            }
+            )
         return found
-
-    def is_finished(self, details: Optional[Dict[str, Any]]) -> bool:
-        return ((details or {}).get("metadata") or {}).get("job_state") == "F"
 
     def looks_like_job_id(self, value: str) -> bool:
         return (value or "").startswith(JOB_ID_PREFIX)
@@ -223,12 +259,18 @@ class LocalBackend(SchedulerBackend):
                 f"job {job_id} runs on {job['host']}; cancel it there "
                 f"(this is {socket.gethostname()})"
             )
+        marker = jobs_dir() / job_id / "cancelled"
+        try:
+            marker.touch()  # before the signal: the job may end at once
+        except OSError:
+            pass  # the job still stops; its end just isn't explained
         try:
             # The job script's TERM trap records the exit (143)
             os.killpg(job["pid"], signal.SIGTERM)
-        except ProcessLookupError:
-            return False, f"job {job_id} has already finished"
         except OSError as exc:
+            marker.unlink(missing_ok=True)
+            if isinstance(exc, ProcessLookupError):
+                return False, f"job {job_id} has already finished"
             return False, f"cannot stop job {job_id}: {exc}"
         return True, ""
 
