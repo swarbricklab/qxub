@@ -166,6 +166,10 @@ def format_settings(env: Dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# What a job script runs to load its settings (qxub/jobscripts/job.sh).
+SOURCE_SETTINGS_LINE = '. "$QXUB_JOB_FILE"'
+
+
 def reads_settings_file(script) -> bool:
     """Whether the job script loads ``$QXUB_JOB_FILE``.
 
@@ -180,7 +184,26 @@ def reads_settings_file(script) -> bool:
     return bool(_SOURCES_SETTINGS_RE.search(text))
 
 
-def attach_settings(spec, run_id: str, write: bool = True):
+def allow_exposed_settings() -> bool:
+    """Whether the user lets a job script that doesn't read
+    ``$QXUB_JOB_FILE`` get its settings as visible job variables
+    (``QXUB_ALLOW_QSUB_V_SETTINGS=1`` or
+    ``defaults.allow_qsub_v_settings: true``)."""
+    env = os.environ.get("QXUB_ALLOW_QSUB_V_SETTINGS", "").strip().lower()
+    if env:
+        return env in ("1", "true", "yes", "on")
+    try:
+        from ..config import config_manager  # pylint: disable=import-outside-toplevel
+
+        value = config_manager.get_config_value("defaults.allow_qsub_v_settings")
+    except Exception:  # pylint: disable=broad-except
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
+def attach_settings(spec, run_id: str, write: bool = True, exposed_via: str = ""):
     """``spec`` with its variables in a settings file instead of on the
     scheduler's command line.
 
@@ -193,9 +216,16 @@ def attach_settings(spec, run_id: str, write: bool = True):
     it can't be written, :class:`~qxub.backends.SubmitError` is raised: the
     variables (the command, ``--var`` values, paths) are not moved onto the
     scheduler's command line, where other users may see them and where
-    ``qsub -v`` quoting is weaker. A job script that doesn't read
-    ``QXUB_JOB_FILE``, such as a ``--template`` written for older qxub,
-    still gets them on the command line, with a notice on stderr.
+    ``qsub -v`` quoting is weaker.
+
+    A job script that doesn't read ``QXUB_JOB_FILE``, such as a
+    ``--template`` written for older qxub, can only get its variables
+    directly. ``exposed_via`` is how the backend would pass them, if others
+    may see them there (the backend's ``exposed_variables_via``, e.g.
+    ``"qsub -v"``): then the job is refused with a ``SubmitError`` naming
+    the line to add to the script, unless :func:`allow_exposed_settings`,
+    in which case they are passed with a notice on stderr (not on a dry
+    run). Backends that pass them privately just pass them.
     """
     import sys  # pylint: disable=import-outside-toplevel
     from dataclasses import replace  # pylint: disable=import-outside-toplevel
@@ -205,13 +235,26 @@ def attach_settings(spec, run_id: str, write: bool = True):
     if not spec.env:
         return spec
     if not reads_settings_file(spec.script):
-        print(
-            f"⚠️  The job script {spec.script} doesn't read $QXUB_JOB_FILE, so "
-            "its settings (including the command and any --var values) go "
-            "to the scheduler as job variables (qsub -v), where other users "
-            "may see them. Add '. \"$QXUB_JOB_FILE\"' near its top to avoid this.",
-            file=sys.stderr,
-        )
+        if not exposed_via:
+            return spec
+        add_line = f"Add the line '{SOURCE_SETTINGS_LINE}' near its top"
+        if not allow_exposed_settings():
+            raise SubmitError(
+                f"The job script {spec.script} doesn't read $QXUB_JOB_FILE, so "
+                "its settings (including the command and any --var values) "
+                f"would go to the scheduler as job variables ({exposed_via}), "
+                f"where other users may see them. {add_line}. To submit it "
+                "this way anyway, set QXUB_ALLOW_QSUB_V_SETTINGS=1 or "
+                "'qxub config set defaults.allow_qsub_v_settings true'."
+            )
+        if write:
+            print(
+                f"⚠️  The job script {spec.script} doesn't read $QXUB_JOB_FILE, "
+                "so its settings (including the command and any --var values) "
+                f"go to the scheduler as job variables ({exposed_via}), where "
+                f"other users may see them. {add_line} to avoid this.",
+                file=sys.stderr,
+            )
         return spec
     path = settings_file(run_id)
     if write:

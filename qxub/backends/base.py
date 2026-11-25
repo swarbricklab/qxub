@@ -213,6 +213,11 @@ class SchedulerBackend(ABC):
     name: str = ""
     #: The environment variable that holds a running job's own ID.
     job_id_variable: str = ""
+    #: How the job's variables reach it when there is no settings file, if
+    #: other users may read them there (PBS: ``"qsub -v"``, shown by
+    #: ``qstat -f``). Empty when they go privately, e.g. in the submitting
+    #: process's environment.
+    exposed_variables_via: str = ""
 
     @abstractmethod
     def list_jobs(

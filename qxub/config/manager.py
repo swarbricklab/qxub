@@ -33,12 +33,14 @@ from .files import (
 # repository they cloned, or a shared area someone else can write. Unless the
 # user lists the project under security.trusted_projects, these keys are
 # dropped from them, because they decide where and how commands run (ssh
-# destination, remote bootstrap commands, platform files).
+# destination, remote bootstrap commands, platform files) or who may see
+# a job's settings.
 PROJECT_RESTRICTED_KEYS = (
     "platforms",
     "platform_search_paths",
     "defaults.platform",
     "default_platform",
+    "defaults.allow_qsub_v_settings",
 )
 # Likewise an untrusted project may add aliases, but not change one of the
 # same name from the system, user or --config file (its command, pre, post).

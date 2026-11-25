@@ -93,10 +93,11 @@ what it can do:
 - A `.qx` directory, or a file in it, that is owned by another user, is
   writable by group or others, or is a symbolic link is ignored with a
   warning.
-- `platforms`, `platform_search_paths`, `defaults.platform` and
-  `default_platform` are ignored in project files: they decide where and how
-  jobs run (ssh host, remote bootstrap commands, platform files). `security`
-  is never read from them.
+- `platforms`, `platform_search_paths`, `defaults.platform`,
+  `default_platform` and `defaults.allow_qsub_v_settings` are ignored in
+  project files: they decide where and how jobs run (ssh host, remote
+  bootstrap commands, platform files) or who may see a job's settings.
+  `security` is never read from them.
 - A project file may add new aliases (for example ones shared by a team), but
   an alias with the same name as one in your system, user or `--config` file
   is ignored with a warning, so a project can't change what your own alias

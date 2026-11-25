@@ -205,6 +205,7 @@ class PbsBackend(SchedulerBackend):
 
     name = "pbs"
     job_id_variable = "PBS_JOBID"
+    exposed_variables_via = "qsub -v"
 
     def available(self) -> bool:
         return shutil.which("qstat") is not None

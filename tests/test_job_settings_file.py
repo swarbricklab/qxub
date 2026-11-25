@@ -211,21 +211,93 @@ def test_missing_settings_file_fails_the_job_clearly(tmp_path):
     assert "Cannot read the job settings file" in result.stderr
 
 
-def test_custom_template_without_the_file_still_gets_qsub_v(sandbox):
-    """A --template written for older qxub never loads QXUB_JOB_FILE."""
+def _old_template(sandbox):
+    """A --template written for older qxub: it never loads QXUB_JOB_FILE."""
     template = sandbox.cwd / "old.pbs"
     template.write_text('#!/bin/bash\necho "$cmd_b64" | base64 -d | bash\n')
+    return template
+
+
+def test_custom_template_without_the_file_is_refused(sandbox):
+    """Its settings would go on qsub -v, where others may read them."""
+    template = _old_template(sandbox)
+    for dry in ([], ["--dry"]):
+        result = sandbox.run(
+            "exec", "--terse", *dry, "-P", "ab12", "--template", str(template),
+            "--var", "TOKEN=s3cret", "--", "echo", "a,b",
+        )  # fmt: skip
+        assert result.returncode != 0
+        assert "doesn't read $QXUB_JOB_FILE" in result.stderr
+        assert """Add the line '. "$QXUB_JOB_FILE"'""" in result.stderr
+        assert "QXUB_ALLOW_QSUB_V_SETTINGS=1" in result.stderr
+        assert "s3cret" not in result.stdout + result.stderr
+    assert sandbox.pbs_calls("qsub") == []
+
+
+@pytest.mark.parametrize(
+    "env, config",
+    [
+        ({"QXUB_ALLOW_QSUB_V_SETTINGS": "1"}, None),
+        ({}, "defaults:\n  allow_qsub_v_settings: true\n"),
+    ],
+)
+def test_custom_template_without_the_file_gets_qsub_v_if_allowed(sandbox, env, config):
+    template = _old_template(sandbox)
+    if config:
+        sandbox.write_config(config)
     result = sandbox.run(
         "exec", "--terse", "-P", "ab12", "--template", str(template),
         "--", "echo", "a,b",
+        env=env,
     )  # fmt: skip
     assert result.returncode == 0, result.stdout + result.stderr
 
     assert "doesn't read $QXUB_JOB_FILE" in result.stderr  # said, visibly
+    assert "(qsub -v)" in result.stderr
     (call,) = sandbox.pbs_calls("qsub")
     variables = job_variables(call["argv"])
     assert "QXUB_JOB_FILE" not in variables
     assert variables["cmd_b64"] and variables["QXUB_RUN_ID"]
+
+
+def test_allowed_custom_template_has_no_notice_on_a_dry_run(sandbox):
+    result = sandbox.run(
+        "exec", "--dry", "-P", "ab12", "--template", str(_old_template(sandbox)),
+        "--", "true",
+        env={"QXUB_ALLOW_QSUB_V_SETTINGS": "1"},
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QXUB_JOB_FILE" not in result.stderr
+
+
+def test_custom_template_without_the_file_is_not_refused_off_pbs(tmp_path):
+    """Slurm and local jobs get their variables in the submitting process's
+    environment, which other users can't read: no refusal, no notice."""
+    from qxub.backends.local import LocalBackend
+    from qxub.backends.slurm import SlurmBackend
+
+    script = tmp_path / "old.sh"
+    script.write_text('#!/bin/bash\necho "$cmd_b64"\n')
+    spec = JobSpec(script=str(script), name="n", env={"cmd_b64": "x"})
+    for backend in (SlurmBackend, LocalBackend):
+        assert backend.exposed_variables_via == ""
+        out = runs.attach_settings(spec, "qx-1", exposed_via="")
+        assert out is spec and out.env_file is None
+    from qxub.backends.pbs import PbsBackend
+
+    with pytest.raises(SubmitError, match=r"\(qsub -v\)"):
+        runs.attach_settings(spec, "qx-1", exposed_via=PbsBackend.exposed_variables_via)
+
+
+def test_custom_template_without_the_file_is_submitted_on_slurm(sandbox):
+    sandbox.use_slurm_platform()
+    result = sandbox.run(
+        "exec", "--terse", "--template", str(_old_template(sandbox)),
+        "--", "echo", "a,b",
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "QXUB_JOB_FILE" not in result.stderr
+    assert len(sandbox.slurm_calls("sbatch")) == 1
 
 
 def test_custom_template_that_reads_the_file_gets_it(sandbox):

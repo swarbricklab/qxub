@@ -384,7 +384,9 @@ def submit_job(
     spec = None
     try:
         spec = runs.attach_settings(
-            job_spec(processed_params, template, job_vars), run_id
+            job_spec(processed_params, template, job_vars),
+            run_id,
+            exposed_via=backend.exposed_variables_via,
         )
         submission_command = shlex.join(backend.submit_command(spec))
     except backends.SubmitError:

@@ -279,7 +279,10 @@ def execute_unified(
     spec = None
     try:
         spec = runs.attach_settings(
-            job_spec(ctx_obj, template, job_vars), run_id, write=not ctx_obj["dry"]
+            job_spec(ctx_obj, template, job_vars),
+            run_id,
+            write=not ctx_obj["dry"],
+            exposed_via=backend.exposed_variables_via,
         )
         submission_command = shlex.join(backend.submit_command(spec))
     except SubmitError as exc:
