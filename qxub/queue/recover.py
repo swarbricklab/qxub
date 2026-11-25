@@ -356,8 +356,9 @@ def _load_recovered(script: str, rebuilt: Path) -> None:
                 continue  # views, triggers: not needed to read job rows
             try:
                 conn.execute(text)
-            except sqlite3.ProgrammingError as exc:
-                # More than one statement where .recover writes one.
+            except (sqlite3.ProgrammingError, sqlite3.Warning) as exc:
+                # More than one statement where .recover writes one
+                # (sqlite3.Warning before Python 3.12, not a sqlite3.Error).
                 raise RuntimeError(
                     f"unexpected .recover output: {text[:80]!r}: {exc}"
                 ) from exc

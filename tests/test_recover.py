@@ -467,3 +467,29 @@ def test_only_the_exact_sequence_reset_is_skipped(tmp_path, injected):
     script = AUTOINCREMENT_RECOVERED.replace("DELETE FROM sqlite_sequence;", injected)
     with pytest.raises(RuntimeError, match="unexpected .recover output"):
         rec._load_recovered(script, tmp_path / "rebuilt.db")
+
+
+def test_several_statements_fail_closed_on_older_pythons(tmp_path, monkeypatch):
+    """Python 3.10/3.11 raise sqlite3.Warning (not a sqlite3.Error) for
+    more than one statement in one execute(): still a clean failure."""
+    connect = sqlite3.connect
+
+    class OldConnection:
+        def __init__(self, *args, **kwargs):
+            self._conn = connect(*args, **kwargs)
+
+        def execute(self, sql, *args):
+            if sql.count(";") > 1:
+                raise sqlite3.Warning("You can only execute one statement at a time.")
+            return self._conn.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(rec.sqlite3, "connect", OldConnection)
+    script = RECOVERED.replace(
+        "CREATE INDEX", "CREATE TABLE t(x); CREATE TABLE u(y);\nCREATE INDEX"
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected .recover output"):
+        rec._load_recovered(script, tmp_path / "rebuilt.db")
