@@ -20,7 +20,8 @@ from omegaconf import DictConfig, OmegaConf
 
 from .files import (
     file_trust_problem,
-    trust_problem,
+    open_trusted_dir,
+    open_trusted_file,
     write_private_file,
     xdg_config_dirs,
 )
@@ -265,41 +266,75 @@ class ConfigManager:
         """Load project, local, and test configurations.
 
         A .qx directory or file that someone other than the user (or root)
-        owns or can write is ignored, unless the user trusts the project.
+        owns or can write, or that is a symlink, is ignored, unless the user
+        trusts the project.
         """
         project_dir = self._get_project_config_dir()
         if not project_dir:
             return None, None, None
 
         trusted = self._is_trusted_project(project_dir.parent)
-        if not trusted:
-            problem = trust_problem(project_dir)
-            if problem:
-                click.echo(
-                    f"Warning: Ignoring project config in {project_dir}: "
-                    f"{problem}. If you trust this project, add its directory "
-                    f"to {TRUSTED_PROJECTS_KEY} in your user config.",
-                    err=True,
-                )
+        config_files = ["project.yaml", "local.yaml", "test.yaml"]
+        if trusted:
+            configs = [
+                self._load_config_file(project_dir / name, name)
+                for name in config_files
+            ]
+        else:
+            configs = self._load_untrusted_project_files(project_dir, config_files)
+            if configs is None:
                 return None, None, None
 
-        config_files = ["project.yaml", "local.yaml", "test.yaml"]
-        configs = []
+        return tuple(
+            (
+                self._restrict_project_layer(config, project_dir / name, trusted)
+                if config is not None
+                else None
+            )
+            for config, name in zip(configs, config_files)
+        )
 
-        for config_file in config_files:
-            config_path = project_dir / config_file
-            config = None
-            if config_path.exists():
-                problem = None if trusted else trust_problem(config_path)
+    def _load_untrusted_project_files(
+        self, project_dir: Path, names: List[str]
+    ) -> Optional[List[Optional[DictConfig]]]:
+        """Load ``names`` from ``project_dir`` if neither can be changed by others.
+
+        The directory and each file are opened without following symlinks,
+        checked through the open descriptors and read from them, so nothing
+        can be swapped in between the check and the read. None if the
+        directory itself is not to be trusted.
+        """
+        dir_fd, problem = open_trusted_dir(project_dir)
+        if problem:
+            click.echo(
+                f"Warning: Ignoring project config in {project_dir}: "
+                f"{problem}. If you trust this project, add its directory "
+                f"to {TRUSTED_PROJECTS_KEY} in your user config.",
+                err=True,
+            )
+            return None
+        configs = []
+        try:
+            for name in names:
+                config_path = project_dir / name
+                config = None
+                f, problem = open_trusted_file(dir_fd, name, config_path)
                 if problem:
                     click.echo(f"Warning: Ignoring {config_path}: {problem}", err=True)
-                else:
-                    config = self._load_config_file(config_path, config_file)
-            if config is not None:
-                config = self._restrict_project_layer(config, config_path, trusted)
-            configs.append(config)
-
-        return tuple(configs)
+                elif f is not None:
+                    with f:
+                        try:
+                            config = OmegaConf.load(f)
+                        except Exception as e:
+                            click.echo(
+                                f"Warning: Failed to load {name} config "
+                                f"{config_path}: {e}",
+                                err=True,
+                            )
+                configs.append(config)
+        finally:
+            os.close(dir_fd)
+        return configs
 
     def _load_config_file(
         self, config_path: Path, config_name: str

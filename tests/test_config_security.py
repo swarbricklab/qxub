@@ -300,6 +300,75 @@ def test_a_planted_qx_in_a_parent_directory_is_ignored(home):
         qx.chmod(0o755)
 
 
+def test_a_symlinked_qx_directory_is_ignored(home, capsys):
+    real = home / "elsewhere"
+    real.mkdir()
+    (real / "project.yaml").write_text("defaults:\n  queue: express\n")
+    (home / "work" / ".qx").symlink_to(real)
+
+    assert ConfigManager().get_defaults().get("queue") is None
+    assert "symbolic link" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", ["project.yaml", "local.yaml", "test.yaml"])
+def test_a_symlinked_project_file_is_ignored(home, capsys, name):
+    real = home / "elsewhere.yaml"
+    real.write_text("defaults:\n  queue: express\n")
+    _write_project(home / "work", "defaults:\n  name: kept\n", "project.yaml")
+    link = home / "work" / ".qx" / name
+    if link.exists():
+        link.unlink()
+    link.symlink_to(real)
+
+    defaults = ConfigManager().get_defaults()
+    assert defaults.get("queue") is None
+    if name != "project.yaml":
+        assert defaults["name"] == "kept"
+    assert f"{link}: {link} is a symbolic link" in capsys.readouterr().err
+
+
+def test_a_fifo_project_file_is_ignored_without_blocking(home, capsys):
+    _write_project(home / "work", "defaults:\n  name: kept\n")
+    os.mkfifo(home / "work" / ".qx" / "local.yaml", 0o600)
+
+    assert ConfigManager().get_defaults() == {"name": "kept"}
+    assert "not a regular file" in capsys.readouterr().err
+
+
+def test_project_files_are_read_from_the_checked_descriptor(home, monkeypatch):
+    # Whatever the path names after the check, the checked file is what's read
+    path = _write_project(home / "work", "defaults:\n  queue: express\n")
+    loaded = []
+    real_load = OmegaConf.load
+
+    def load(file_):
+        loaded.append(file_)
+        return real_load(file_)
+
+    monkeypatch.setattr(OmegaConf, "load", load)
+    assert ConfigManager().get_defaults()["queue"] == "express"
+    project_reads = [f for f in loaded if not isinstance(f, (str, Path))]
+    assert len(project_reads) == 1 and project_reads[0].name != str(path)
+    assert str(path) not in [str(f) for f in loaded]
+
+
+def test_a_trusted_project_may_use_symlinks(home):
+    real = home / "elsewhere"
+    real.mkdir()
+    (real / "project.yaml").write_text("defaults:\n  queue: express\n")
+    (home / "work" / ".qx").symlink_to(real)
+    _write_user_config(home, f"security:\n  trusted_projects: [{home / 'work'}]\n")
+
+    assert ConfigManager().get_defaults()["queue"] == "express"
+
+
+def test_an_empty_project_file_is_fine(home, capsys):
+    _write_project(home / "work", "")
+    _write_project(home / "work", "defaults:\n  queue: express\n", "local.yaml")
+    assert ConfigManager().get_defaults()["queue"] == "express"
+    assert "Warning" not in capsys.readouterr().err
+
+
 def test_exec_does_not_ssh_for_a_cloned_projects_platform(sandbox, tmp_path):
     bin_dir = tmp_path / "fake-ssh"
     bin_dir.mkdir()
