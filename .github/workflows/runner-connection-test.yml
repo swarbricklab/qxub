@@ -1,14 +1,18 @@
 name: Runner Connection Test
 
+# These jobs run on the self-hosted runner, which has SSH access to Gadi.
+# They run only on a push to main (a merged PR) or a manual dispatch, never on
+# pull_request, so PR authors cannot run their own steps on the runner. Keep
+# it that way, and limit the runner group to these workflows on
+# refs/heads/main.
 on:
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch:
   push:
     branches:
       - main
-      - dev
-  pull_request:
-    branches:
-      - main  # Full runner tests on every PR into main
+
+permissions:
+  contents: read
 
 jobs:
   test-runner-qxub:

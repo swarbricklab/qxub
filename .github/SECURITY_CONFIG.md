@@ -16,8 +16,6 @@ The following branch protection rules should be configured via GitHub repository
   - Required checks:
     - `format-check` (Code Formatting)
     - `pylint` (Pylint)
-    - `analyze` (CodeQL)
-    - `test-remote-execution-secure` (if available)
 - **Require branches to be up to date before merging**: ✅ Enabled
 - **Require conversation resolution before merging**: ✅ Enabled
 - **Restrict pushes from users who can push to matching branches**: ✅ Enabled
@@ -31,7 +29,6 @@ The following branch protection rules should be configured via GitHub repository
   - Required checks:
     - `format-check` (Code Formatting)
     - `pylint` (Pylint)
-    - `analyze` (CodeQL)
 
 ## Repository Security Settings
 
@@ -43,7 +40,7 @@ The following branch protection rules should be configured via GitHub repository
 - **Dependabot version updates**: ✅ Enabled (configured via `.github/dependabot.yml`)
 
 ### Code Security and Analysis
-- **Code scanning**: ✅ Enabled (CodeQL)
+- **Code scanning**: Not configured (there is no CodeQL workflow)
 - **Secret scanning**: ✅ Enabled
 - **Secret scanning push protection**: ✅ Enabled
 - **Token scanning**: ✅ Enabled
@@ -54,10 +51,24 @@ The following branch protection rules should be configured via GitHub repository
   - Allow actions created by GitHub: ✅ Enabled
   - Allow verified marketplace actions by verified creators: ✅ Enabled
   - Specified actions: Pin to specific SHA hashes
-- **Fork pull request workflows**: Require approval for first-time contributors
-- **Fork pull request workflows in private repositories**: Require approval for all outside contributors
+- **Fork pull request workflows**: Require approval for all outside contributors
+- **Self-hosted runner group**: Limit the group that holds the Gadi runner to
+  `runner-validation.yml` and `runner-connection-test.yml` on
+  `refs/heads/main`, and do not allow public repositories. This is an
+  organisation setting; the workflow files alone cannot enforce it.
+
+### Self-hosted runner
+The self-hosted runner has standing SSH access to Gadi. Workflows that use it
+(`runs-on: self-hosted`) must run only on `push` to `main` or
+`workflow_dispatch`, never on `pull_request` or `pull_request_target`,
+because a pull request supplies its own copy of the workflow file.
 
 ## Secrets Management
+
+No current workflow uses repository secrets other than `GITHUB_TOKEN`, or
+Workload Identity Federation. The self-hosted runner reaches Gadi with SSH
+keys configured on the runner host. The entries below describe an earlier
+design and are kept for reference.
 
 ### Repository Secrets (Legacy - Migrate to GCP Secret Manager)
 - `GADI_SSH_PRIVATE_KEY`: SSH private key for Gadi access
@@ -81,18 +92,17 @@ The following branch protection rules should be configured via GitHub repository
 ### Required Status Checks
 1. **Code Formatting** (`format-check`): Ensures consistent code style
 2. **Pylint** (`pylint`): Static code analysis for Python
-3. **CodeQL** (`analyze`): Security vulnerability scanning
-4. **Remote Execution Tests** (`test-remote-execution-secure`): Integration testing
 
 ### Security Alerts
 - **Dependabot alerts**: Monitor for vulnerable dependencies
-- **Code scanning alerts**: Monitor for security vulnerabilities
+- **Code scanning alerts**: Not available until code scanning is enabled
 - **Secret scanning alerts**: Monitor for exposed secrets
 
 ## Workflow Security
 
 ### Required Permissions
-All workflows must specify minimal required permissions:
+All workflows must declare an explicit `permissions:` block with the minimum
+they need:
 ```yaml
 permissions:
   contents: read  # Default minimum
@@ -116,6 +126,8 @@ All GitHub Actions must be pinned to specific SHA hashes:
 - [ ] Required status checks configured
 - [ ] Dependabot configured and enabled
 - [ ] CodeQL security scanning enabled
+- [ ] Self-hosted runner group limited to the runner workflows on `main`
+- [ ] Fork PR workflows require approval for all outside contributors
 - [ ] Secret scanning enabled with push protection
 - [ ] All workflows use minimal permissions
 - [ ] All actions pinned to SHA hashes

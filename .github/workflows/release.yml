@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # Get all history for tag checking
+          persist-credentials: false
 
       - name: Get version from setup.py
         id: get-version
@@ -67,18 +68,20 @@ jobs:
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-  release:
+  # Builds the wheel and release notes with a read-only token, so nothing in
+  # the build (pip, setuptools, build backends) can write to the repository.
+  build:
     needs: check-version
     if: needs.check-version.outputs.should-release == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # Release notes need history and tags (git describe HEAD~1)
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -95,15 +98,7 @@ jobs:
           python -m build --wheel
           ls -la dist/
 
-      - name: Create git tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ needs.check-version.outputs.version }}" -m "Release v${{ needs.check-version.outputs.version }}"
-          git push origin "v${{ needs.check-version.outputs.version }}"
-
       - name: Generate release notes
-        id: release-notes
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
 
@@ -132,21 +127,43 @@ jobs:
           EOF
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+      - name: Upload release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          tag_name: "v${{ needs.check-version.outputs.version }}"
-          name: "qxub ${{ needs.check-version.outputs.version }}"
-          body_path: release_notes.md
-          files: dist/*.whl
-          draft: false
-          prerelease: false
+          name: release
+          path: |
+            dist/*.whl
+            release_notes.md
+          if-no-files-found: error
+
+  # The only job with a write token. It runs no third-party code: it downloads
+  # the build output and creates the tag and release with the gh CLI.
+  release:
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+
+      - name: Create tag and GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" dist/*.whl \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "qxub ${VERSION}" \
+            --notes-file release_notes.md
 
       - name: Upload wheel to PyPI (optional)
         if: false  # Disabled by default - enable when ready for PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}

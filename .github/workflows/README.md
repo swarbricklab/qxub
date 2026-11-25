@@ -9,19 +9,23 @@ Feature/fix branches open PRs **directly against `main`** (see `.github/copilot-
 | CI tier | Workflows | Trigger | Runner |
 |---------|-----------|---------|--------|
 | **Lightweight** | `formatting.yml`, `pylint.yml` | Every push & PR | GitHub-hosted |
-| **Full** | `runner-connection-test.yml`, `runner-validation.yml` | Push to `dev`/`main`, PRs targeting `main` | Self-hosted |
+| **Full** | `runner-connection-test.yml`, `runner-validation.yml` | Push to `main`, or manual dispatch | Self-hosted |
 | **Release** | `release.yml` | Push to `main` (version bump) | GitHub-hosted |
 
-**Day-to-day**: PRs into `main` run formatting + pylint and the full self-hosted runner tests.
+**Day-to-day**: PRs into `main` run the GitHub-hosted checks only. The self-hosted runner tests run after merge.
 **Release**: merging into `main` creates a GitHub Release when the version is bumped.
-**Optional `dev` branch**: pushes to `dev` also run the runner tests; PRs into `dev` run only formatting + pylint.
+
+The self-hosted runner has SSH access to Gadi, so its workflows must never run on
+`pull_request`: a pull request supplies its own copy of the workflow file. To try
+the runner tests on a branch, a maintainer can run them with `workflow_dispatch`
+(this stops working once the runner group is limited to `refs/heads/main`).
 
 ## Active Workflows
 
 ### Code Quality (GitHub Runners)
 - **`formatting.yml`** - Black/isort code formatting validation
 - **`pylint.yml`** - Python linting checks
-- **`release.yml`** - Automated PyPI release on version tags
+- **`release.yml`** - GitHub Release on a version bump to `main`. The wheel is built in a read-only job; only the publish job can write.
 
 ### qxub Testing (Self-Hosted Runners)
 - **`runner-connection-test.yml`** - Progressive connection test (dry-run → live execution)
@@ -60,7 +64,7 @@ gh workflow run runner-validation.yml
 ```
 
 ### Automatic Trigger
-Both runner workflows automatically trigger on push to `feature/v3.3.0-remote-execution`.
+Both runner workflows run on push to `main`.
 
 ## Documentation
 
