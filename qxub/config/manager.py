@@ -99,6 +99,20 @@ def mask_secrets(value: Any) -> Any:
     return value
 
 
+# Modes for the .qx directory and files qxub creates, whatever the umask:
+# group- or world-writable project config is ignored as untrusted.
+PROJECT_DIR_MODE = 0o755
+PROJECT_FILE_MODE = 0o644
+
+
+def _save_project_file(conf: Any, path: Path) -> None:
+    """Save project config ``conf`` to ``path``; a new file is made 0644."""
+    existed = path.exists()
+    OmegaConf.save(conf, path)
+    if not existed:
+        os.chmod(path, PROJECT_FILE_MODE)
+
+
 class ConfigManager:
     """Manages qxub configuration loading, merging, and template resolution."""
 
@@ -678,7 +692,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(project_config, project_config_file)
+        _save_project_file(project_config, project_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -709,7 +723,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(local_config, local_config_file)
+        _save_project_file(local_config, local_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -740,7 +754,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(test_config, test_config_file)
+        _save_project_file(test_config, test_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -759,26 +773,29 @@ class ConfigManager:
         if qx_dir.exists():
             return False  # Already initialized
 
-        # Create .qx directory
+        # Create .qx directory. 0755 whatever the umask: a group-writable
+        # .qx would be ignored as untrusted.
         qx_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(qx_dir, PROJECT_DIR_MODE)
 
         # Create default project.yaml (git-tracked, team-shared settings)
         project_config_file = qx_dir / "project.yaml"
         project_defaults = {
             "qxub": {"defaults": {"walltime": "1:00:00", "queue": "auto"}}
         }
-        OmegaConf.save(project_defaults, project_config_file)
+        _save_project_file(OmegaConf.create(project_defaults), project_config_file)
 
         # Create default test.yaml (git-tracked, CI/testing settings)
         test_config_file = qx_dir / "test.yaml"
         test_defaults = {
             "qxub": {"defaults": {"walltime": "0:10:00", "queue": "copyq"}}
         }
-        OmegaConf.save(test_defaults, test_config_file)
+        _save_project_file(OmegaConf.create(test_defaults), test_config_file)
 
         # Create .gitignore for local.yaml (git-ignored, user-specific settings)
         gitignore_file = qx_dir / ".gitignore"
         gitignore_file.write_text("local.yaml\n")
+        os.chmod(gitignore_file, PROJECT_FILE_MODE)
 
         return True
 

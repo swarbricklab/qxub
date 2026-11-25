@@ -283,6 +283,30 @@ def test_writable_project_config_is_ignored(home, capsys, target):
         path.chmod(0o644)
 
 
+@pytest.fixture
+def group_umask():
+    old = os.umask(0o002)
+    yield
+    os.umask(old)
+
+
+def test_qx_created_by_qxub_is_trusted_under_umask_002(home, capsys, group_umask):
+    work = home / "work"
+    cm = ConfigManager()
+    assert cm.init_project_config(work)
+    qx = work / ".qx"
+    assert _mode(qx) == 0o755
+    for name in ("project.yaml", "test.yaml", ".gitignore"):
+        assert _mode(qx / name) == 0o644
+    cm.reload_configs()
+    cm.set_local_config_value("defaults.queue", "express")
+    assert _mode(qx / "local.yaml") == 0o644
+
+    cm = ConfigManager()
+    assert cm.get_defaults().get("queue") == "express"
+    assert "writable" not in capsys.readouterr().err
+
+
 def test_a_planted_qx_in_a_parent_directory_is_ignored(home):
     # As in /tmp: a world-writable (sticky) parent holding someone's .qx
     shared = home / "shared"
