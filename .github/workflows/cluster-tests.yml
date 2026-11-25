@@ -3,23 +3,62 @@ name: Cluster tests
 # qxub against real schedulers, each a one-node cluster in containers
 # (ci/README.md). Slower than the Tests workflow's fakes, which stay the
 # main suite.
+#
+# The images are built from ci/<scheduler>/ with each run's layers cached:
+# pushes to main publish them to ghcr.io/swarbricklab/qxub-test-<scheduler>
+# (:latest and :<commit>) along with their build cache, which later runs,
+# pull requests included, start from. So OpenPBS is compiled only when
+# ci/pbs/ changes.
 on: [push, pull_request]
+
+env:
+  REGISTRY: ghcr.io/swarbricklab
 
 jobs:
   cluster:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     permissions:
       contents: read
+      packages: write # pushes from main; read-only for pull requests from forks
     strategy:
       fail-fast: false
       matrix:
         scheduler: [slurm, pbs]
+    env:
+      IMAGE: qxub-test-${{ matrix.scheduler }}
+      PUBLISH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reuses the registry's build cache from main and this branch's own
+      # cache from earlier runs; rebuilds only what ci/<scheduler>/ changed.
+      - name: Build the ${{ matrix.scheduler }} image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ci/${{ matrix.scheduler }}
+          load: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE }}:buildcache
+            type=gha,scope=${{ matrix.scheduler }}
+          # main: the registry's cache, for everyone; elsewhere: this branch's
+          cache-to: ${{ env.PUBLISH == 'true' && format('type=registry,ref={0}/{1}:buildcache,mode=max', env.REGISTRY, env.IMAGE) || format('type=gha,scope={0},mode=max', matrix.scheduler) }}
+
       - name: Start the ${{ matrix.scheduler }} test cluster
-        run: docker compose -f ci/${{ matrix.scheduler }}/compose.yaml up -d --build --wait
+        run: docker compose -f ci/${{ matrix.scheduler }}/compose.yaml up -d --no-build --wait
 
       - name: Run the cluster tests
         run: >
@@ -32,3 +71,10 @@ jobs:
         run: >
           docker compose -f ci/${{ matrix.scheduler }}/compose.yaml
           exec -T ${{ matrix.scheduler }} /usr/local/bin/scheduler-logs
+
+      # Only images whose tests passed are published
+      - name: Publish the image
+        if: env.PUBLISH == 'true'
+        run: |
+          docker push "$REGISTRY/$IMAGE:latest"
+          docker push "$REGISTRY/$IMAGE:${{ github.sha }}"

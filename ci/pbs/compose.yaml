@@ -3,6 +3,9 @@
 #   docker compose -f ci/pbs/compose.yaml up -d --build --wait
 services:
   pbs:
+    # Built here with --build, or by the Cluster tests workflow; published
+    # as ghcr.io/swarbricklab/qxub-test-pbs
+    image: qxub-test-pbs
     build: .
     hostname: pbs
     # PBS's PostgreSQL wants more shared memory than Docker's default

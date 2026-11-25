@@ -5,6 +5,8 @@
 # `tester` user, who also runs qxub. Unlike Gadi's PBS, nothing appends an
 # `Exit Status:` line to the job log. See ci/README.md.
 FROM rockylinux:8
+LABEL org.opencontainers.image.source=https://github.com/swarbricklab/qxub
+LABEL org.opencontainers.image.description="qxub's one-node OpenPBS test cluster"
 
 ARG OPENPBS_VERSION=23.06.06
 

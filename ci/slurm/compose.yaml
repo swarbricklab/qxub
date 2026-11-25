@@ -15,6 +15,9 @@ services:
       retries: 60
 
   slurm:
+    # Built here with --build, or by the Cluster tests workflow; published
+    # as ghcr.io/swarbricklab/qxub-test-slurm
+    image: qxub-test-slurm
     build: .
     hostname: slurm
     depends_on:

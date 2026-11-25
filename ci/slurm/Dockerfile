@@ -6,6 +6,8 @@
 # `tester` user, who also runs qxub, so qxub's status files are on the same
 # filesystem as the jobs. See ci/README.md.
 FROM debian:trixie
+LABEL org.opencontainers.image.source=https://github.com/swarbricklab/qxub
+LABEL org.opencontainers.image.description="qxub's one-node Slurm test cluster"
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \

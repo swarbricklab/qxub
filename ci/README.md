@@ -14,7 +14,12 @@ compute node, and how qx learns that the scheduler stopped a job.
 | `pbs/` | OpenPBS 23.06, built from source (Rocky Linux 8) | Plain PBS, without Gadi's job-log epilogue (no `Exit Status:` line), like most PBS sites; job history is on, so `qstat -fx` knows finished jobs |
 
 The `Cluster tests` workflow (`.github/workflows/cluster-tests.yml`) runs
-both on every push and pull request.
+both on every push and pull request. It builds each image from its
+directory, reusing cached layers, so OpenPBS is compiled only when `ci/pbs/`
+changes. Pushes to `main` whose tests pass publish the images as
+`ghcr.io/swarbricklab/qxub-test-slurm` and `ghcr.io/swarbricklab/qxub-test-pbs`
+(tagged `latest` and with the commit), along with the build cache later runs
+start from.
 
 ## Running them yourself
 
@@ -33,7 +38,21 @@ docker compose -f ci/slurm/compose.yaml down
 ```
 
 For PBS, replace `slurm` with `pbs` throughout. Building the PBS image
-compiles OpenPBS, which takes several minutes the first time.
+compiles OpenPBS, which takes several minutes the first time. To use a
+published image instead (if the package is public, or after
+`docker login ghcr.io`), pull and tag it, then start without `--build`:
+
+```bash
+docker pull ghcr.io/swarbricklab/qxub-test-pbs:latest
+```
+
+```bash
+docker tag ghcr.io/swarbricklab/qxub-test-pbs:latest qxub-test-pbs
+```
+
+```bash
+docker compose -f ci/pbs/compose.yaml up -d --no-build --wait
+```
 
 The repository is mounted read-only at `/qxub`. `run-cluster-tests.sh` copies
 it to the `tester` user's home, installs it there in a virtual environment and
