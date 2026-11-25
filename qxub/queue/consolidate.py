@@ -8,10 +8,13 @@ then, one process per round folds finished runs into ``qxub-stats.db``:
    ``mkdir`` is atomic across Lustre clients even under ``localflock``. A
    lease older than ``LEASE_STALE_SECONDS`` is broken by renaming it away;
    only one rename wins.
-2. It copies the published snapshot to a private file, adds the new runs and
+2. It copies the published snapshot to a private file (in a new ``0700``
+   temporary directory, never in the shared directory, and only if the
+   snapshot is a regular file, not a link), adds the new runs and
    their resource usage (from the joblog, or one batched query of the scheduler), and
    checks ``PRAGMA integrity_check``.
-3. It publishes the copy with ``rename``. The published file is never
+3. It publishes the copy: written to a new file in the shared directory
+   through the descriptor that created it, then ``rename``d over the snapshot. The published file is never
    written in place, so readers (``open_snapshot``, ``immutable=1``) never
    see a journal and can't roll one back from another node.
 4. It deletes run files that the published snapshot holds, once they are
@@ -35,6 +38,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -68,6 +72,8 @@ BATCH_SIZE = 2000
 
 ATTEMPT_MARKER = ".consolidate.attempted"
 LAST_LOG = ".consolidate.last.log"
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 # -- paths -----------------------------------------------------------------------
@@ -162,10 +168,19 @@ class Lease:
         self.error: Optional[OSError] = None
 
     def _owner(self, directory: Path) -> Optional[str]:
+        # Others can write the shared directory: never follow a link here.
         try:
-            return (directory / "owner").read_text(encoding="utf-8")
+            fd = os.open(directory / "owner", os.O_RDONLY | _NOFOLLOW | os.O_NONBLOCK)
         except OSError:
             return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            return os.read(fd, 4096).decode("utf-8", "replace")
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
 
     def holder(self) -> Optional[Dict[str, str]]:
         """Who holds the lease, and since when; None if nobody does."""
@@ -199,12 +214,18 @@ class Lease:
                 return False
             self.held = True
             try:
-                (self.path / "owner").write_text(
-                    f"token={self.token}\nhost={socket.gethostname()}\n"
-                    f"pid={os.getpid()}\nuser={os.environ.get('USER', '')}\n"
-                    f"started={datetime.now().isoformat(timespec='seconds')}\n",
-                    encoding="utf-8",
+                # A new file only: O_EXCL never follows a link put in its place.
+                fd = os.open(
+                    self.path / "owner",
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
+                    0o644,
                 )
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(
+                        f"token={self.token}\nhost={socket.gethostname()}\n"
+                        f"pid={os.getpid()}\nuser={os.environ.get('USER', '')}\n"
+                        f"started={datetime.now().isoformat(timespec='seconds')}\n"
+                    )
             except OSError:
                 pass
             return True
@@ -513,11 +534,14 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
         )
         return False
 
-    private = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
+    # Work where only this user can see or rename anything: the shared
+    # directory is writable by the whole group and has no sticky bit.
+    workdir = None
     try:
         _remove_old_private_copies(snapshot)
-        if snapshot.exists():
-            shutil.copyfile(snapshot, private)
+        workdir = Path(tempfile.mkdtemp(prefix="qxub-consolidate-"))
+        private = workdir / STATS_DB_NAME
+        _copy_snapshot(snapshot, private)
         conn = sqlite3.connect(private, isolation_level=None)
         try:
             conn.execute("PRAGMA journal_mode=MEMORY")
@@ -549,11 +573,34 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
         logger.warning("Publishing %s failed: %s", snapshot, exc)
         return False
     finally:
-        try:
-            private.unlink()
-        except OSError:
-            pass
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
         lease.release()
+
+
+def _copy_snapshot(snapshot: Path, private: Path) -> None:
+    """Copy the published snapshot to ``private``, if there is one.
+
+    Others can replace the snapshot, so it is opened without following a
+    link and read only if that open file is a regular file: never the file
+    a link points to, nor a FIFO or device.
+    """
+    try:
+        fd = os.open(snapshot, os.O_RDONLY | _NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if os.path.islink(snapshot):
+            raise OSError(f"{snapshot} is a symbolic link; not reading it") from exc
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{snapshot} is not a regular file; not reading it")
+        out = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+        with os.fdopen(fd, "rb", closefd=False) as src, os.fdopen(out, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    finally:
+        os.close(fd)
 
 
 def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) -> bool:
@@ -712,16 +759,37 @@ def _settle_run_file(path: Path, code: int, stamp: str) -> None:
 
 
 def _publish(private: Path, snapshot: Path) -> None:
+    """Put the finished ``private`` copy in place of ``snapshot``.
+
+    The copy is written to a new file in the shared directory, created
+    exclusively (so never through a link), and synced through the
+    descriptor that created it; then renamed over the snapshot.
+    """
     try:
-        if snapshot.exists():
-            shutil.copymode(snapshot, private)
-        else:
-            os.chmod(private, private.stat().st_mode | stat.S_IRGRP)
+        mode = os.lstat(snapshot).st_mode
+        mode = stat.S_IMODE(mode) if stat.S_ISREG(mode) else 0o640
     except OSError:
-        pass
-    with open(private, "rb") as fh:
-        os.fsync(fh.fileno())
-    os.replace(private, snapshot)
+        mode = 0o640
+    staged = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+    renamed = False
+    try:
+        with open(private, "rb") as src, os.fdopen(fd, "wb", closefd=False) as dst:
+            shutil.copyfileobj(src, dst)
+        try:
+            os.fchmod(fd, mode | stat.S_IRGRP)
+        except OSError:
+            pass
+        os.fsync(fd)
+        os.replace(staged, snapshot)
+        renamed = True
+    finally:
+        os.close(fd)
+        if not renamed:
+            try:
+                staged.unlink()
+            except OSError:
+                pass
 
 
 def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -> int:
@@ -747,11 +815,11 @@ def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -
 
 
 def _remove_old_private_copies(snapshot: Path) -> None:
-    """Private copies left by rounds that died (only ours can be removed)."""
+    """Staged copies left by publishes that died (only ours can be removed)."""
     cutoff = time.time() - LEASE_STALE_SECONDS
     for path in snapshot.parent.glob(f".{snapshot.name}.*.tmp"):
         try:
-            if path.stat().st_mtime < cutoff:
+            if path.lstat().st_mtime < cutoff:
                 path.unlink()
         except OSError:
             pass

@@ -557,3 +557,83 @@ def test_qxub_db_consolidate_and_status(sandbox, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Jobs:       1 (0 with resource usage)" in result.stdout
     assert "Run files:  1" in result.stdout
+
+
+# -- the shared directory is writable by others ------------------------------------------
+
+
+def test_symlinked_snapshot_is_not_followed(area, tmp_path):
+    """Security: another group member replaces the snapshot with a link to
+    a file only this user can read; its bytes must not reach the shared
+    directory."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    secret = tmp_path / "id_rsa"
+    secret.write_text("PRIVATE KEY\n")
+    secret.chmod(0o600)
+    snapshot.parent.mkdir()
+    snapshot.symlink_to(secret)
+    seen = []
+
+    def look_while_the_round_runs(job_ids):
+        for path in snapshot.parent.iterdir():
+            if path.is_file() and not path.is_symlink():
+                seen.append(path.read_bytes())
+        return {}
+
+    result = run(area, lookup=look_while_the_round_runs)
+
+    assert not result.published and "symbolic link" in result.errors[0]
+    assert snapshot.is_symlink() and secret.read_text() == "PRIVATE KEY\n"
+    assert not any(b"PRIVATE KEY" in data for data in seen)
+    assert sorted(p.name for p in snapshot.parent.iterdir()) == ["qxub-stats.db"]
+
+
+def test_fifo_snapshot_is_rejected(area):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    snapshot.parent.mkdir()
+    os.mkfifo(snapshot)
+
+    result = run(area, lookup=lambda ids: {})
+
+    assert not result.published and "not a regular file" in result.errors[0]
+
+
+def test_working_copy_is_not_in_the_shared_directory(area):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    run(area, lookup=lambda ids: {})
+    finished(runs_dir, "qx-b", "2.gadi-pbs", ago=timedelta(days=3))
+    during = []
+
+    def look(job_ids):
+        during.extend(p.name for p in snapshot.parent.iterdir())
+        return {}
+
+    run(area, lookup=look)
+
+    assert sorted(during) == [".qxub-stats.db.lease", "qxub-stats.db"]
+    assert [r["job_id"] for r in rows(snapshot)] == ["1.gadi-pbs", "2.gadi-pbs"]
+
+
+def test_lease_owner_file_is_not_written_through_a_link(tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    lease = tmp_path / ".lease"
+
+    real_mkdir = Path.mkdir
+
+    def mkdir_and_plant(self, *args, **kwargs):
+        real_mkdir(self, *args, **kwargs)
+        if self == lease:
+            (lease / "owner").symlink_to(victim)
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(Path, "mkdir", mkdir_and_plant):
+        held = cons.Lease(lease)
+        assert held.acquire()
+
+    assert victim.read_text() == "keep\n"
+    assert not held.still_held()
