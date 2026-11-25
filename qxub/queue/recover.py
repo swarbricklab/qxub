@@ -281,6 +281,10 @@ _RECOVER_PRAGMAS = {
 }
 _RECOVER_FUNCTIONS = {"replace", "char", "unistr", "unhex"}
 _RECOVER_STATEMENTS = ("BEGIN", "COMMIT", "END", "PRAGMA", "CREATE", "INSERT")
+# .recover clears AUTOINCREMENT counters before re-inserting them. SQLite
+# keeps its own sqlite_sequence here (inserts into sqlite_* are skipped),
+# so this one exact statement is skipped, never run.
+_SEQUENCE_RESET = "DELETE FROM sqlite_sequence;"
 _SCHEMA_INSERT = re.compile(
     r"INSERT\s+(OR\s+\w+\s+)?INTO\s+[\"'`\[]?(main\s*\.\s*)?sqlite_", re.I
 )
@@ -344,6 +348,8 @@ def _load_recovered(script: str, rebuilt: Path) -> None:
             if not sqlite3.complete_statement(statement):
                 continue
             text, statement = statement.strip(), ""
+            if text == _SEQUENCE_RESET:
+                continue
             if not text.upper().startswith(_RECOVER_STATEMENTS):
                 raise RuntimeError(f"unexpected .recover output: {text[:80]!r}")
             if _SCHEMA_INSERT.match(text):

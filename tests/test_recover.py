@@ -431,3 +431,39 @@ def test_source_others_can_write_is_reported(tmp_path, monkeypatch):
     monkeypatch.setenv("QXUB_STATS_DB", str(tmp_path / "stats" / "qxub-stats.db"))
     out = CliRunner().invoke(db_cli, ["recover", str(source)])
     assert "Warning:" in out.output and "untrusted" in out.output
+
+
+AUTOINCREMENT_RECOVERED = """\
+.dbconfig defensive off
+BEGIN;
+PRAGMA writable_schema = on;
+PRAGMA foreign_keys = off;
+PRAGMA encoding = 'UTF-8';
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE job_resources(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT);
+INSERT OR IGNORE INTO 'job_resources'('id', 'job_id') VALUES (7, '1.gadi-pbs');
+DELETE FROM sqlite_sequence;
+INSERT OR IGNORE INTO 'sqlite_sequence'(_rowid_, 'name', 'seq') \
+VALUES (1, 'job_resources', 7);
+PRAGMA writable_schema = off;
+COMMIT;
+"""
+
+
+def test_recover_output_of_an_autoincrement_table_loads(tmp_path):
+    """What sqlite3 .recover writes for a DB with an AUTOINCREMENT table."""
+    rebuilt = tmp_path / "rebuilt.db"
+    rec._load_recovered(AUTOINCREMENT_RECOVERED, rebuilt)
+
+    columns, rows = rec._read_table(rebuilt)
+    assert columns == ["id", "job_id"] and rows == [(7, "1.gadi-pbs")]
+
+
+@pytest.mark.parametrize(
+    "injected",
+    ["DELETE FROM sqlite_sequence WHERE 1;", "DELETE FROM sqlite_sequence; SELECT 1;"],
+)
+def test_only_the_exact_sequence_reset_is_skipped(tmp_path, injected):
+    script = AUTOINCREMENT_RECOVERED.replace("DELETE FROM sqlite_sequence;", injected)
+    with pytest.raises(RuntimeError, match="unexpected .recover output"):
+        rec._load_recovered(script, tmp_path / "rebuilt.db")
