@@ -37,6 +37,57 @@ PROJECT_RESTRICTED_KEYS = ("platforms", "platform_search_paths", "defaults.platf
 # Never taken from a project, trusted or not: a project can't trust itself.
 PROJECT_FORBIDDEN_KEYS = ("security",)
 TRUSTED_PROJECTS_KEY = "security.trusted_projects"
+# Notification credentials and endpoints come only from the user's own
+# config (or the system config), never from a project's files.
+PROJECT_SECRET_KEYS = ("notifications",)
+# Keys whose values are credentials; shown masked by `qxub config get/list`
+SECRET_KEY_NAMES = frozenset(
+    {"bot_token", "webhook_url", "token", "password", "secret", "api_key"}
+)
+MASKED = "********"
+
+
+def _interpolated_paths(value: Any, path: str = "") -> List[str]:
+    """Dotted paths of values in a plain container that use ``${...}``."""
+    if isinstance(value, dict):
+        found = []
+        for key, item in value.items():
+            found += _interpolated_paths(item, f"{path}.{key}" if path else str(key))
+        return found
+    if isinstance(value, list):
+        return [path] if any(_interpolated_paths(item, "-") for item in value) else []
+    if isinstance(value, str) and "${" in value:
+        return [path]
+    return []
+
+
+def _drop_interpolations(value: Any) -> Any:
+    """``value`` without any entry that uses ``${...}``."""
+    if isinstance(value, dict):
+        return {
+            key: _drop_interpolations(item)
+            for key, item in value.items()
+            if not _interpolated_paths(item, "-") or isinstance(item, dict)
+        }
+    return value
+
+
+def mask_secrets(value: Any) -> Any:
+    """A copy of a plain container with credential values masked."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                MASKED
+                if str(key).rsplit(".", 1)[-1] in SECRET_KEY_NAMES
+                and item not in (None, "")
+                and not isinstance(item, (dict, list))
+                else mask_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [mask_secrets(item) for item in value]
+    return value
 
 
 class ConfigManager:
@@ -148,6 +199,33 @@ class ConfigManager:
                 f"{TRUSTED_PROJECTS_KEY} in your user config.",
                 err=True,
             )
+
+        secrets = [key for key in PROJECT_SECRET_KEYS if key in config]
+        for key in secrets:
+            del config[key]
+        if secrets:
+            click.echo(
+                f"Warning: Ignoring {', '.join(secrets)} in {config_path}: "
+                "set notification settings in your user config.",
+                err=True,
+            )
+
+        # ${...} would be resolved against the user's environment and their
+        # private config (oc.env, references to notifications.*), so an
+        # untrusted project's values are taken as plain data or not at all.
+        if not trusted:
+            plain = OmegaConf.to_container(config, resolve=False)
+            interpolated = _interpolated_paths(plain)
+            if interpolated:
+                click.echo(
+                    f"Warning: Ignoring {', '.join(interpolated)} in "
+                    f"{config_path}: ${{...}} interpolation is only allowed "
+                    "in your own config or a trusted project's. If you trust "
+                    f"this project, add its directory to {TRUSTED_PROJECTS_KEY} "
+                    "in your user config.",
+                    err=True,
+                )
+                config = OmegaConf.create(_drop_interpolations(plain))
         return config
 
     def _load_project_configs(

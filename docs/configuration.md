@@ -95,6 +95,13 @@ what it can do:
 - `platforms`, `platform_search_paths` and `defaults.platform` are ignored in
   project files: they decide where and how jobs run (ssh host, remote
   bootstrap commands, platform files). `security` is never read from them.
+- `${...}` interpolations (for example `${oc.env:VAR}`) in project files are
+  ignored with a warning, since they would expand your environment and your
+  private settings. Your own user config can still use them.
+- `notifications` is never read from project files; keep webhook URLs and
+  tokens in your user config, which qxub writes readable by you only.
+  `qxub config get` and `qxub config list` mask them unless given
+  `--show-secrets`.
 
 To let a project you trust set these, list its directory (or a parent) in your
 user config:
