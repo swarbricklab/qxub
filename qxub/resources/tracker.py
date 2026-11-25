@@ -189,9 +189,36 @@ def create_job_resources_schema(conn) -> None:
     )
 
 
+# The last line the local backend's runner appends to a job log.
+_LOCAL_EXIT_LINE_RE = re.compile(r"Exit Status: (-?\d+)")
+
+
+def _local_joblog_exit(job_id: str, text: str) -> Optional[int]:
+    """The exit status a local-backend job log ends with, if ``job_id`` is
+    a local job's.
+
+    That log has no job ID to check; the path comes from this user's own
+    DB row for the job. Only its final line counts: the job's own output,
+    earlier in the same file, may contain an ``Exit Status:`` line.
+    """
+    from ..backends.local import (  # pylint: disable=import-outside-toplevel
+        JOB_ID_PREFIX,
+    )
+
+    if not job_id.startswith(JOB_ID_PREFIX):
+        return None
+    lines = text.rstrip().splitlines()
+    found = _LOCAL_EXIT_LINE_RE.fullmatch(lines[-1].strip()) if lines else None
+    return int(found.group(1)) if found else None
+
+
 def _joblog_outcome(job_id: str, joblog_path: Optional[str]) -> Optional[tuple]:
     """``(status, exit_code, None)`` from the job's own joblog, if it is this
     user's file and names this job; else None.
+
+    PBS's ``Resource Usage on`` footer must name the job; a local-backend
+    log, which has none, must be a local job's and end with the
+    ``Exit Status: N`` line its runner writes.
 
     Not from the statistics snapshot: anyone in the group can replace it,
     so it must not decide how this user's jobs ended.
@@ -221,9 +248,13 @@ def _joblog_outcome(job_id: str, joblog_path: Optional[str]) -> Optional[tuple]:
     finally:
         os.close(fd)
     data = parse_joblog_text(text)
-    if not data or data.get("job_id") != job_id:
-        return None
-    code = data.get("exit_status")
+    if data:
+        # A PBS usage footer must name this job
+        if data.get("job_id") != job_id:
+            return None
+        code = data.get("exit_status")
+    else:
+        code = _local_joblog_exit(job_id, text)
     if not isinstance(code, int):
         return None
     return ("completed" if code == 0 else "failed", code, None)

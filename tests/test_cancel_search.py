@@ -272,3 +272,68 @@ def test_only_the_end_of_a_joblog_is_read(tmp_path, monkeypatch):
     assert parser.parse_joblog_resources(str(joblog))["exit_status"] == 2
     joblog.write_text(early + "x" * 5000 + "\n")
     assert parser.parse_joblog_resources(str(joblog)) is None
+
+
+def _local_runner_log(tmp_path, output: str, code: int):
+    """A job log written as the local backend's runner writes it."""
+    import subprocess
+
+    from qxub.backends.local import _RUNNER
+
+    script = tmp_path / "job.sh"
+    script.write_text(f"printf '%s' {output!r}\nexit {code}\n")
+    joblog = tmp_path / "job.log"
+    with open(joblog, "ab") as log:
+        subprocess.run(
+            ["bash", "-c", _RUNNER, "runner", str(script), str(tmp_path), str(joblog)],
+            stdout=log,
+            stderr=log,
+            check=False,
+        )
+    return joblog
+
+
+def test_joblog_outcome_reads_a_local_backend_log(tmp_path):
+    """Local job logs have no PBS footer, just the runner's last line."""
+    from qxub.resources.tracker import _joblog_outcome
+
+    joblog = _local_runner_log(tmp_path, "hello\n", 2)
+    assert joblog.read_text().rstrip().endswith("Exit Status: 2")
+    assert _joblog_outcome("local-abc", str(joblog)) == ("failed", 2, None)
+    # Without a job ID to check, only a local job's own log is read this way
+    assert _joblog_outcome("1.gadi-pbs", str(joblog)) is None
+
+    link = tmp_path / "link.log"
+    link.symlink_to(joblog)
+    assert _joblog_outcome("local-abc", str(link)) is None
+
+
+def test_joblog_outcome_local_log_needs_the_runners_final_line(tmp_path):
+    """The job's output may print an Exit Status line of its own."""
+    from qxub.resources.tracker import _joblog_outcome
+
+    joblog = tmp_path / "job.log"
+    joblog.write_text("Exit Status: 0\nstill running...\n")
+    assert _joblog_outcome("local-abc", str(joblog)) is None
+
+    joblog = _local_runner_log(tmp_path, "Exit Status: 0\n", 1)
+    assert _joblog_outcome("local-abc", str(joblog)) == ("failed", 1, None)
+
+
+def test_settle_gone_local_job_from_its_joblog(tmp_path):
+    from qxub.resources.tracker import ResourceTracker
+
+    joblog = _local_runner_log(tmp_path, "", 0)
+    tracker = ResourceTracker(db_path=tmp_path / "qxub.db")
+    with sqlite3.connect(tmp_path / "qxub.db") as conn:
+        conn.execute(
+            "INSERT INTO job_resources (job_id, timestamp, status, joblog_path)"
+            " VALUES (?,?,?,?)",
+            ("local-abc", datetime.now().isoformat(), "running", str(joblog)),
+        )
+    assert tracker.settle_gone_jobs(["local-abc"])["from_joblog"] == 1
+    with sqlite3.connect(tmp_path / "qxub.db") as conn:
+        row = conn.execute(
+            "SELECT status, exit_code FROM job_resources WHERE job_id='local-abc'"
+        ).fetchone()
+    assert row == ("completed", 0)
