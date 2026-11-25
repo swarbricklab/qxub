@@ -1,0 +1,18 @@
+# The platform for the OpenPBS test cluster (ci/pbs): its two queues.
+# No default walltime, so qx checks on a job every few seconds.
+platform:
+  name: pbs_test
+  type: pbs_pro
+  host: pbs
+  description: "qxub's one-node OpenPBS test cluster"
+  queues:
+    - name: normal
+      type: standard
+      limits:
+        max_cpus: 4
+        max_memory: "2GB"
+    - name: express
+      type: standard
+      limits:
+        max_cpus: 4
+        max_memory: "2GB"

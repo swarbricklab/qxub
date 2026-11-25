@@ -1,0 +1,34 @@
+name: Cluster tests
+
+# qxub against real schedulers, each a one-node cluster in containers
+# (ci/README.md). Slower than the Tests workflow's fakes, which stay the
+# main suite.
+on: [push, pull_request]
+
+jobs:
+  cluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scheduler: [slurm, pbs]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Start the ${{ matrix.scheduler }} test cluster
+        run: docker compose -f ci/${{ matrix.scheduler }}/compose.yaml up -d --build --wait
+
+      - name: Run the cluster tests
+        run: >
+          docker compose -f ci/${{ matrix.scheduler }}/compose.yaml
+          exec -T -u tester ${{ matrix.scheduler }}
+          /qxub/ci/run-cluster-tests.sh ${{ matrix.scheduler }}
+
+      - name: Scheduler logs
+        if: failure()
+        run: >
+          docker compose -f ci/${{ matrix.scheduler }}/compose.yaml
+          exec -T ${{ matrix.scheduler }} /usr/local/bin/scheduler-logs

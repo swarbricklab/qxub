@@ -197,3 +197,37 @@ def test_resources_show_a_local_job(sandbox):
 
     assert result.returncode == 0, result.stderr
     assert "State: finished" in result.stdout and "Queue: local" in result.stdout
+
+
+# -- how qx learns a PBS job ended ---------------------------------------------
+
+
+def test_pbs_job_end_reads_the_job_log_first(tmp_path, monkeypatch):
+    from qxub.backends import JobEnd, PbsBackend
+
+    asked = []
+    backend = PbsBackend()
+    monkeypatch.setattr(backend, "job_details", lambda ids: asked.append(ids) or {})
+    log = tmp_path / "j.log"
+
+    assert backend.job_end("1.pbs", log) is None, "no log yet: running"
+    log.write_text("output\nExit Status:        -29 (walltime)\n")
+    assert backend.job_end("1.pbs", log) == JobEnd(-29, ENDED_BY_WALLTIME)
+    assert asked == [], "Gadi: the log is enough"
+
+
+def test_pbs_job_end_asks_pbs_when_the_log_has_no_exit_line(tmp_path, monkeypatch):
+    """Plain PBS (OpenPBS, UNSW Katana) writes no Exit Status line."""
+    from qxub.backends import JobEnd, PbsBackend
+
+    log = tmp_path / "j.log"
+    log.write_text("=>> PBS: job killed: walltime 68 exceeded limit 60\n")
+    backend = PbsBackend()
+    details = {"1.pbs": parse_qstat_fx_output(FINISHED.format(code=-29))}
+    monkeypatch.setattr(backend, "job_details", lambda ids: details)
+
+    assert backend.job_end("1.pbs", log) == JobEnd(-29, ENDED_BY_WALLTIME)
+
+    exiting = FINISHED.format(code=0).replace("job_state = F", "job_state = E")
+    details["1.pbs"] = parse_qstat_fx_output(exiting)
+    assert backend.job_end("1.pbs", log) is None, "not finished yet"

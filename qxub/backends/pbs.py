@@ -35,6 +35,7 @@ from ..resources.spec import (
 from .base import (
     ENDED_BY_CANCEL,
     ENDED_BY_WALLTIME,
+    JobEnd,
     JobInfo,
     JobSpec,
     JobState,
@@ -280,6 +281,23 @@ class PbsBackend(SchedulerBackend):
 
     def ended_by(self, exit_status: Optional[int]) -> Optional[str]:
         return _ended_by(exit_status)
+
+    def job_end(self, job_id: str, job_log=None) -> Optional[JobEnd]:
+        """The job log's ``Exit Status:`` line (Gadi's PBS appends it), else
+        ``qstat -fx``, but only once the job log is back without that line.
+
+        PBS copies the job log back when the job ends, so a log with no
+        such line means a PBS that doesn't write it (plain OpenPBS, UNSW
+        Katana). While the job is queued or running there is no log, and
+        PBS isn't asked.
+        """
+        end = super().job_end(job_id, job_log)
+        if end is not None or not job_log or not os.path.exists(str(job_log)):
+            return end
+        info = self.find_info(job_id)
+        if info is None or not info.is_finished or info.exit_status is None:
+            return None  # still exiting, or PBS keeps no job history
+        return JobEnd(info.exit_status, info.ended_by)
 
 
 # -- parsers -------------------------------------------------------------------
