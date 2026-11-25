@@ -1,0 +1,19 @@
+# The platform for the Slurm test cluster (ci/slurm): its two partitions.
+# No default walltime, so qx asks sacct about a job every few seconds.
+platform:
+  name: slurm_test
+  type: slurm
+  host: slurm
+  description: "qxub's one-node Slurm test cluster"
+  queues:
+    - name: cpu
+      type: standard
+      limits:
+        max_cpus: 4
+        max_memory: "2GB"
+    - name: debug
+      type: standard
+      limits:
+        max_cpus: 4
+        max_memory: "2GB"
+        max_walltime: "00:30:00"

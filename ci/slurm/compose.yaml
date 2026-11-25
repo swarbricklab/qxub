@@ -1,0 +1,31 @@
+# The one-node Slurm test cluster and its accounting database. Run from the
+# repository root (ci/README.md):
+#   docker compose -f ci/slurm/compose.yaml up -d --build --wait
+services:
+  db:
+    image: mariadb:10.11
+    environment:
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+      MARIADB_DATABASE: slurm_acct_db
+      MARIADB_USER: slurm
+      MARIADB_PASSWORD: slurm
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      retries: 60
+
+  slurm:
+    # Built here with --build, or by the Cluster tests workflow; published
+    # as ghcr.io/swarbricklab/qxub-test-slurm
+    image: qxub-test-slurm
+    build: .
+    hostname: slurm
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../..:/qxub:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "sinfo -h -o %T | grep -qE '^(idle|mixed|allocated)'"]
+      interval: 2s
+      retries: 120

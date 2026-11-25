@@ -1,0 +1,18 @@
+# The one-node OpenPBS test cluster. Run from the repository root
+# (ci/README.md):
+#   docker compose -f ci/pbs/compose.yaml up -d --build --wait
+services:
+  pbs:
+    # Built here with --build, or by the Cluster tests workflow; published
+    # as ghcr.io/swarbricklab/qxub-test-pbs
+    image: qxub-test-pbs
+    build: .
+    hostname: pbs
+    # PBS's PostgreSQL wants more shared memory than Docker's default
+    shm_size: 256m
+    volumes:
+      - ../..:/qxub:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "/opt/pbs/bin/pbsnodes -a | grep -q 'state = free'"]
+      interval: 3s
+      retries: 100
