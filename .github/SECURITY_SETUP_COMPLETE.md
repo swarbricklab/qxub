@@ -14,11 +14,11 @@ The main branch is now protected with the following rules:
 
 ### Pull Request Requirements
 - **Required approving reviews**: 1
-- **Dismiss stale reviews**: Enabled when new commits are pushed
+- **Dismiss stale reviews**: Disabled
 - **Up-to-date branches**: Required (branches must be current with main)
 
 ### Administrative Controls
-- **Enforce for administrators**: Enabled (admins must follow the same rules)
+- **Enforce for administrators**: Disabled (admins may merge their own PRs)
 - **Allow force pushes**: Disabled
 - **Allow deletions**: Disabled
 

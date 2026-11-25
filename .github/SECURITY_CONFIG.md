@@ -9,8 +9,8 @@ The following branch protection rules should be configured via GitHub repository
 ### Main Branch (`main`)
 - **Require a pull request before merging**: ✅ Enabled
 - **Require approvals**: 1 approval minimum
-- **Dismiss stale PR approvals when new commits are pushed**: ✅ Enabled
-- **Require review from code owners**: ✅ Enabled
+- **Dismiss stale PR approvals when new commits are pushed**: ❌ Disabled
+- **Require review from code owners**: ❌ Disabled (no CODEOWNERS file)
 - **Restrict pushes that create files > 100MB**: ✅ Enabled
 - **Require status checks to pass before merging**: ✅ Enabled
   - Required checks:
@@ -19,7 +19,8 @@ The following branch protection rules should be configured via GitHub repository
 - **Require branches to be up to date before merging**: ✅ Enabled
 - **Require conversation resolution before merging**: ✅ Enabled
 - **Restrict pushes from users who can push to matching branches**: ✅ Enabled
-- **Do not allow bypassing the above settings**: ✅ Enabled
+- **Do not allow bypassing the above settings**: ❌ Disabled (admins may merge
+  their own PRs without a second approval)
 - **Allow force pushes**: ❌ Disabled
 - **Allow deletions**: ❌ Disabled
 
@@ -51,17 +52,21 @@ The following branch protection rules should be configured via GitHub repository
   - Allow actions created by GitHub: ✅ Enabled
   - Allow verified marketplace actions by verified creators: ✅ Enabled
   - Specified actions: Pin to specific SHA hashes
+  - **Require actions to be pinned to a full-length commit SHA**: ✅ Enabled
 - **Fork pull request workflows**: Require approval for all outside contributors
-- **Self-hosted runner group**: Put the Gadi runners in their own runner
-  group, visible only to the qxub repository (and any other repository that
-  needs them), with workflow access restricted to
-  `swarbricklab/qxub/.github/workflows/runner-validation.yml@refs/heads/main`
-  and `swarbricklab/qxub/.github/workflows/runner-connection-test.yml@refs/heads/main`.
-  qxub is public, so the group must allow public repositories, which makes
-  the workflow restriction essential: without it, a pull request can add its
-  own workflow with `runs-on: self-hosted`, and it runs on the runner once a
-  maintainer approves the run. This is an organisation setting; the workflow
-  files alone cannot enforce it.
+- **Self-hosted runner groups** (organisation settings; the workflow files
+  alone cannot enforce them):
+  - `Default`: holds most Gadi runners (`qxub-runner`) and does **not** allow
+    public repositories. Newly registered runners land here.
+  - `gadi-public`: a few runners for public repositories, visible only to
+    qxub, dvc_tools and absconda, and restricted to these workflows:
+    `swarbricklab/qxub/.github/workflows/runner-validation.yml@refs/heads/main`,
+    `swarbricklab/qxub/.github/workflows/runner-connection-test.yml@refs/heads/main`,
+    `swarbricklab/dvc_tools/.github/workflows/deploy.yml@refs/heads/main` and
+    `swarbricklab/absconda/.github/workflows/deploy.yml@refs/heads/main`.
+  Without the workflow restriction, a pull request to a public repository
+  could add its own `runs-on: self-hosted` workflow and run it on the runner
+  once a maintainer approves the run.
 
 ### Self-hosted runner
 The self-hosted runner has standing SSH access to Gadi. Workflows that use it
@@ -132,11 +137,11 @@ All GitHub Actions must be pinned to specific SHA hashes:
 - [ ] Required status checks configured
 - [ ] Dependabot configured and enabled
 - [ ] CodeQL security scanning enabled
-- [ ] Self-hosted runner group limited to the runner workflows on `main`
-- [ ] Fork PR workflows require approval for all outside contributors
+- [x] Self-hosted runner group limited to the runner workflows on `main`
+- [x] Fork PR workflows require approval for all outside contributors
 - [ ] Secret scanning enabled with push protection
 - [ ] All workflows use minimal permissions
-- [ ] All actions pinned to SHA hashes
+- [x] All actions pinned to SHA hashes (enforced by repository setting)
 - [ ] SECURITY.md policy published
 - [ ] Workload Identity Federation configured
 - [ ] SSH keys migrated to GCP Secret Manager
