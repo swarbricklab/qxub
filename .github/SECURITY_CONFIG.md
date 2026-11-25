@@ -52,10 +52,16 @@ The following branch protection rules should be configured via GitHub repository
   - Allow verified marketplace actions by verified creators: ✅ Enabled
   - Specified actions: Pin to specific SHA hashes
 - **Fork pull request workflows**: Require approval for all outside contributors
-- **Self-hosted runner group**: Limit the group that holds the Gadi runner to
-  `runner-validation.yml` and `runner-connection-test.yml` on
-  `refs/heads/main`, and do not allow public repositories. This is an
-  organisation setting; the workflow files alone cannot enforce it.
+- **Self-hosted runner group**: Put the Gadi runners in their own runner
+  group, visible only to the qxub repository (and any other repository that
+  needs them), with workflow access restricted to
+  `swarbricklab/qxub/.github/workflows/runner-validation.yml@refs/heads/main`
+  and `swarbricklab/qxub/.github/workflows/runner-connection-test.yml@refs/heads/main`.
+  qxub is public, so the group must allow public repositories, which makes
+  the workflow restriction essential: without it, a pull request can add its
+  own workflow with `runs-on: self-hosted`, and it runs on the runner once a
+  maintainer approves the run. This is an organisation setting; the workflow
+  files alone cannot enforce it.
 
 ### Self-hosted runner
 The self-hosted runner has standing SSH access to Gadi. Workflows that use it
