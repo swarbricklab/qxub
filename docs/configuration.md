@@ -92,9 +92,14 @@ what it can do:
 
 - A `.qx` directory, or a file in it, that is owned by another user or is
   writable by group or others is ignored with a warning.
-- `platforms`, `platform_search_paths` and `defaults.platform` are ignored in
-  project files: they decide where and how jobs run (ssh host, remote
-  bootstrap commands, platform files). `security` is never read from them.
+- `platforms`, `platform_search_paths`, `defaults.platform` and
+  `default_platform` are ignored in project files: they decide where and how
+  jobs run (ssh host, remote bootstrap commands, platform files). `security`
+  is never read from them.
+- A project file may add new aliases (for example ones shared by a team), but
+  an alias with the same name as one in your system, user or `--config` file
+  is ignored with a warning, so a project can't change what your own alias
+  runs (its command, `pre` or `post`).
 - `${...}` interpolations (for example `${oc.env:VAR}`) in project files are
   ignored with a warning, since they would expand your environment and your
   private settings. Your own user config can still use them.

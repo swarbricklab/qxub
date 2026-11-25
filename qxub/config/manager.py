@@ -33,7 +33,15 @@ from .files import (
 # user lists the project under security.trusted_projects, these keys are
 # dropped from them, because they decide where and how commands run (ssh
 # destination, remote bootstrap commands, platform files).
-PROJECT_RESTRICTED_KEYS = ("platforms", "platform_search_paths", "defaults.platform")
+PROJECT_RESTRICTED_KEYS = (
+    "platforms",
+    "platform_search_paths",
+    "defaults.platform",
+    "default_platform",
+)
+# Likewise an untrusted project may add aliases, but not change one of the
+# same name from the system, user or --config file (its command, pre, post).
+ALIASES_KEY = "aliases"
 # Never taken from a project, trusted or not: a project can't trust itself.
 PROJECT_FORBIDDEN_KEYS = ("security",)
 TRUSTED_PROJECTS_KEY = "security.trusted_projects"
@@ -177,6 +185,17 @@ class ConfigManager:
             for root in self._trusted_project_roots()
         )
 
+    def _own_alias_names(self) -> set:
+        """Alias names defined in the system, user and --config files."""
+        names = set()
+        for layer in (self.system_config, self.user_config, self.override_config):
+            if layer is None or ALIASES_KEY not in layer:
+                continue
+            aliases = OmegaConf.to_container(layer, resolve=False)[ALIASES_KEY]
+            if isinstance(aliases, dict):
+                names.update(str(name) for name in aliases)
+        return names
+
     def _restrict_project_layer(
         self, config: DictConfig, config_path: Path, trusted: bool
     ) -> DictConfig:
@@ -191,6 +210,18 @@ class ConfigManager:
             if isinstance(parent, DictConfig) and leaf in parent:
                 del parent[leaf]
                 removed.append(key)
+        if not trusted and ALIASES_KEY in config:
+            aliases = OmegaConf.to_container(config, resolve=False)[ALIASES_KEY]
+            if not isinstance(aliases, dict):
+                # Not a mapping of new aliases: it could only replace the user's
+                del config[ALIASES_KEY]
+                removed.append(ALIASES_KEY)
+            else:
+                own = self._own_alias_names()
+                for name in aliases:
+                    if str(name) in own:
+                        del config[ALIASES_KEY][name]
+                        removed.append(f"{ALIASES_KEY}.{name}")
         if removed:
             click.echo(
                 f"Warning: Ignoring {', '.join(removed)} in {config_path}: "
