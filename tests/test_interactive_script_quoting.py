@@ -123,8 +123,8 @@ def test_container_prompt_keeps_container_name_inert():
     assert "$(" not in prompt and "`" not in prompt and "\\w" not in prompt
 
 
-def test_record_dir_variables_are_expanded(tmp_path, monkeypatch):
-    monkeypatch.setenv("QXUB_TEST_REC", "/scratch/x")
+def test_record_dir_variables_are_left_for_the_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("QXUB_TEST_REC", "/scratch/x")  # login node's value: unused
     script = interactive_cli._build_interactive_script(
         shell="/bin/bash",
         working_dir="/tmp",
@@ -134,4 +134,31 @@ def test_record_dir_variables_are_expanded(tmp_path, monkeypatch):
         record=True,
         record_dir="$QXUB_TEST_REC/rec",
     )
-    assert "RECORD_DIR=/scratch/x/rec" in script
+    assert 'RECORD_DIR="${QXUB_TEST_REC}"/rec' in script
+
+
+def test_record_dir_expands_only_plain_variables_on_the_compute_node(tmp_path):
+    """``$PBS_JOBFS/rec`` still expands in the session (not on the login
+    node), while command substitution and quotes stay literal."""
+    import subprocess
+
+    from qxub.interactive_cli import _quote_keeping_vars
+
+    marker = tmp_path / "PWNED"
+    cases = {
+        "$PBS_JOBFS/rec": "/jobfs/123/rec",
+        "${PBS_JOBFS}x/$USER_X": "/jobfs/123x/u",
+        f"/a/$(touch {marker})/b": f"/a/$(touch {marker})/b",
+        "/a/`id`/'q'\"d\"/$": "/a/`id`/'q'\"d\"/$",
+        "/plain dir": "/plain dir",
+    }
+    for value, expected in cases.items():
+        out = subprocess.run(
+            ["bash", "-c", f"printf %s {_quote_keeping_vars(value)}"],
+            env={"PBS_JOBFS": "/jobfs/123", "USER_X": "u", "PATH": "/usr/bin:/bin"},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert out == expected, value
+    assert not marker.exists()

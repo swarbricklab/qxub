@@ -195,6 +195,30 @@ def _get_default_tmux_session() -> str | None:
         return None
 
 
+_SHELL_VAR_RE = re.compile(
+    r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def _quote_keeping_vars(value: str) -> str:
+    """``value`` as one shell word in which only ``$NAME``/``${NAME}`` expand.
+
+    Lets a path such as ``$PBS_JOBFS/rec`` expand on the compute node, as it
+    did when the value was pasted in double quotes, while quotes, ``$(...)``,
+    backticks and the rest stay literal.
+    """
+    parts = []
+    pos = 0
+    for match in _SHELL_VAR_RE.finditer(value):
+        if match.start() > pos:
+            parts.append(shlex.quote(value[pos : match.start()]))
+        parts.append('"${%s}"' % (match.group(1) or match.group(2)))
+        pos = match.end()
+    if pos < len(value) or not parts:
+        parts.append(shlex.quote(value[pos:]))
+    return "".join(parts)
+
+
 def _get_default_record_dir() -> str | None:
     """Get default transcript recording directory from config.
 
@@ -380,7 +404,7 @@ def _build_interactive_script(
     if conda_env:
         conda_env = os.path.expanduser(conda_env)
     if record_dir:
-        record_dir = os.path.expanduser(os.path.expandvars(record_dir))
+        record_dir = os.path.expanduser(record_dir)
 
     # Determine context type for display
     if conda_env and modules:
@@ -752,7 +776,7 @@ def _build_interactive_script(
             if record:
                 # Record transcript and timing data
                 # Use specified directory or working directory
-                rec_dir = q(record_dir) if record_dir else '"$PWD"'
+                rec_dir = _quote_keeping_vars(record_dir) if record_dir else '"$PWD"'
                 lines.extend(
                     [
                         "# Generate transcript filename with timestamp",

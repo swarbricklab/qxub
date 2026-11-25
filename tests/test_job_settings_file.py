@@ -107,7 +107,7 @@ def test_qsub_v_values_round_trip_or_are_refused():
 
 
 def test_qsub_v_refuses_what_it_cannot_carry():
-    for value in ("a'b\"c", "a\\b", "a\nb"):
+    for value in ("a'b\"c", "/o'brien", 'say "hi"', "a\\b", "a\nb"):
         with pytest.raises(SubmitError, match="job variable cwd"):
             qsub_argv(JobSpec(script="s", name="n", env={"cwd": value}))
     with pytest.raises(SubmitError, match="not a variable name"):
