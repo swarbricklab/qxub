@@ -6,6 +6,7 @@ into the snapshot; ``qxub resources`` reports read the snapshot.
 
 import shutil
 import sqlite3
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -306,3 +307,189 @@ def test_resources_reports_read_the_snapshot(tmp_path, monkeypatch):
     export = tmp_path / "out.csv"
     CliRunner().invoke(resources, ["export", str(export)])
     assert export.read_text().count("gadi-pbs") == 2
+
+
+# -- the old DB may come from anyone who could write it --------------------------
+
+
+def test_readable_db_without_job_table_is_not_rebuilt(tmp_path, monkeypatch):
+    """Security: file content alone must not choose the sqlite3 CLI path."""
+    source = tmp_path / "other.db"
+    with sqlite3.connect(source) as conn:
+        conn.execute("CREATE TABLE something(x)")
+    monkeypatch.setattr(
+        rec, "_sqlite3_recover", lambda *a: pytest.fail("ran sqlite3 .recover")
+    )
+
+    result = rec.recover(source, tmp_path / "stats" / "qxub-stats.db", now=NOW)
+
+    assert result.added == 0 and "no job_resources table" in result.errors[0]
+
+
+def test_garbage_file_is_not_rebuilt(tmp_path, monkeypatch):
+    source = tmp_path / "old.db"
+    source.write_bytes(b"not a database at all" * 100)
+    monkeypatch.setattr(
+        rec, "_sqlite3_recover", lambda *a: pytest.fail("ran sqlite3 .recover")
+    )
+
+    result = rec.recover(source, tmp_path / "stats" / "qxub-stats.db", now=NOW)
+
+    assert result.added == 0 and result.errors
+
+
+RECOVERED = """\
+.dbconfig defensive off
+BEGIN;
+PRAGMA writable_schema = on;
+PRAGMA encoding = 'UTF-8';
+CREATE TABLE job_resources(job_id TEXT PRIMARY KEY, timestamp TEXT, status TEXT);
+INSERT OR IGNORE INTO 'job_resources'(_rowid_, 'job_id', 'timestamp', 'status') \
+VALUES (1, '1.gadi-pbs', replace('2026-06-01T10:00:00\\n','\\n', char(10)), 'completed');
+CREATE INDEX i ON job_resources(status);
+CREATE VIEW v AS SELECT 1;
+INSERT INTO sqlite_schema(type,name,tbl_name,rootpage,sql) VALUES('view','w','w',0,'x');
+PRAGMA writable_schema = off;
+COMMIT;
+"""
+
+
+def test_recover_output_loads_tables_and_rows(tmp_path):
+    rebuilt = tmp_path / "rebuilt.db"
+    rec._load_recovered(RECOVERED, rebuilt)
+
+    columns, rows = rec._read_table(rebuilt)
+    assert columns == ["job_id", "timestamp", "status"]
+    assert rows == [("1.gadi-pbs", "2026-06-01T10:00:00\n", "completed")]
+    with sqlite3.connect(rebuilt) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+    assert "v" not in names and "w" not in names
+
+
+@pytest.mark.parametrize(
+    "injected",
+    [
+        ".shell touch {out}",
+        ".once {out}",
+        ".load {out}",
+        "ATTACH '{out}' AS a;",
+        "CREATE TABLE t(x); ATTACH '{out}' AS a;",
+        "VACUUM INTO '{out}';",
+        "SELECT load_extension('{out}');",
+        "PRAGMA temp_store_directory = '{out}';",
+        "DELETE FROM job_resources;",
+    ],
+)
+def test_crafted_recover_output_fails_closed(tmp_path, injected):
+    """Security: the old DB's schema text is replayed by .recover."""
+    out = tmp_path / "outside"
+    script = RECOVERED.replace(
+        "CREATE INDEX", injected.format(out=out) + "\nCREATE INDEX"
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected .recover output"):
+        rec._load_recovered(script, tmp_path / "rebuilt.db")
+
+    assert not out.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["rebuilt.db"]
+
+
+def test_recover_with_crafted_recover_output_fails_closed(tmp_path, monkeypatch):
+    source = big_old_db(tmp_path / "old.db")
+    corrupt(source)
+    out = tmp_path / "outside"
+    crafted = RECOVERED.replace("CREATE INDEX", f".shell touch {out}\nCREATE INDEX")
+    monkeypatch.setattr(rec, "sqlite3_cli", lambda: "sqlite3")
+    monkeypatch.setattr(
+        rec.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=crafted, stderr=""),
+    )
+    snapshot = tmp_path / "stats" / "qxub-stats.db"
+
+    result = rec.recover(source, snapshot, now=NOW)
+
+    assert result.added == 0 and "unexpected .recover output" in result.errors[0]
+    assert not out.exists() and not snapshot.exists()
+
+
+def test_source_others_can_write_is_reported(tmp_path, monkeypatch):
+    from qxub.db_cli import db_cli
+
+    team = tmp_path / "team"
+    team.mkdir(mode=0o755)
+    team.chmod(0o755)
+    source = old_db(team / "old.db", [job("1.gadi-pbs")])
+    source.chmod(0o644)
+    assert rec.source_problem(source) is None
+    source.chmod(0o664)
+    assert "writable by other users" in rec.source_problem(source)
+    source.chmod(0o644)
+    team.chmod(0o775)
+    assert "can replace it" in rec.source_problem(source)
+
+    monkeypatch.setenv("QXUB_STATS_DB", str(tmp_path / "stats" / "qxub-stats.db"))
+    out = CliRunner().invoke(db_cli, ["recover", str(source)])
+    assert "Warning:" in out.output and "untrusted" in out.output
+
+
+AUTOINCREMENT_RECOVERED = """\
+.dbconfig defensive off
+BEGIN;
+PRAGMA writable_schema = on;
+PRAGMA foreign_keys = off;
+PRAGMA encoding = 'UTF-8';
+CREATE TABLE sqlite_sequence(name,seq);
+CREATE TABLE job_resources(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT);
+INSERT OR IGNORE INTO 'job_resources'('id', 'job_id') VALUES (7, '1.gadi-pbs');
+DELETE FROM sqlite_sequence;
+INSERT OR IGNORE INTO 'sqlite_sequence'(_rowid_, 'name', 'seq') \
+VALUES (1, 'job_resources', 7);
+PRAGMA writable_schema = off;
+COMMIT;
+"""
+
+
+def test_recover_output_of_an_autoincrement_table_loads(tmp_path):
+    """What sqlite3 .recover writes for a DB with an AUTOINCREMENT table."""
+    rebuilt = tmp_path / "rebuilt.db"
+    rec._load_recovered(AUTOINCREMENT_RECOVERED, rebuilt)
+
+    columns, rows = rec._read_table(rebuilt)
+    assert columns == ["id", "job_id"] and rows == [(7, "1.gadi-pbs")]
+
+
+@pytest.mark.parametrize(
+    "injected",
+    ["DELETE FROM sqlite_sequence WHERE 1;", "DELETE FROM sqlite_sequence; SELECT 1;"],
+)
+def test_only_the_exact_sequence_reset_is_skipped(tmp_path, injected):
+    script = AUTOINCREMENT_RECOVERED.replace("DELETE FROM sqlite_sequence;", injected)
+    with pytest.raises(RuntimeError, match="unexpected .recover output"):
+        rec._load_recovered(script, tmp_path / "rebuilt.db")
+
+
+def test_several_statements_fail_closed_on_older_pythons(tmp_path, monkeypatch):
+    """Python 3.10/3.11 raise sqlite3.Warning (not a sqlite3.Error) for
+    more than one statement in one execute(): still a clean failure."""
+    connect = sqlite3.connect
+
+    class OldConnection:
+        def __init__(self, *args, **kwargs):
+            self._conn = connect(*args, **kwargs)
+
+        def execute(self, sql, *args):
+            if sql.count(";") > 1:
+                raise sqlite3.Warning("You can only execute one statement at a time.")
+            return self._conn.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(rec.sqlite3, "connect", OldConnection)
+    script = RECOVERED.replace(
+        "CREATE INDEX", "CREATE TABLE t(x); CREATE TABLE u(y);\nCREATE INDEX"
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected .recover output"):
+        rec._load_recovered(script, tmp_path / "rebuilt.db")

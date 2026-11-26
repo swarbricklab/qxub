@@ -8,14 +8,20 @@ then, one process per round folds finished runs into ``qxub-stats.db``:
    ``mkdir`` is atomic across Lustre clients even under ``localflock``. A
    lease older than ``LEASE_STALE_SECONDS`` is broken by renaming it away;
    only one rename wins.
-2. It copies the published snapshot to a private file, adds the new runs and
+2. It copies the published snapshot to a private file (in a new ``0700``
+   temporary directory, never in the shared directory, and only if the
+   snapshot is a regular file, not a link), adds the new runs and
    their resource usage (from the joblog, or one batched query of the scheduler), and
    checks ``PRAGMA integrity_check``.
-3. It publishes the copy with ``rename``. The published file is never
-   written in place, so readers (``open_snapshot``, ``immutable=1``) never
+3. It publishes the copy: written to a new file in the shared directory
+   through the descriptor that created it, then ``rename``d over the
+   snapshot. The published file is never written in place, so readers (``open_snapshot``, ``immutable=1``) never
    see a journal and can't roll one back from another node.
-4. It deletes run files that the published snapshot holds, once they are
-   older than ``GRACE_DAYS``. Unfinished runs are never deleted.
+4. It marks the run files it published (``consolidated_at``), and deletes
+   run files marked more than ``GRACE_DAYS`` ago that the snapshot holds.
+   Unfinished runs are never deleted. The snapshot can be replaced by
+   anyone in the group, so its rows alone never skip or delete a run file:
+   only the mark this user wrote in their own run file does.
 
 Each user consolidates their own run files into the shared snapshot. A
 round that doesn't get the lease skips; a round that dies leaves its run
@@ -35,6 +41,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -51,6 +58,9 @@ STATS_DB_NAME = "qxub-stats.db"
 # write access to it, which the config directory beside it shouldn't grant.
 STATS_DIR_NAME = "stats"
 SNAPSHOT_VERSION = 1
+# The published snapshot's mode: the group reads it, only its publisher
+# writes it (others replace it by rename). Never copied from the old one.
+SNAPSHOT_MODE = 0o640
 
 # A round that holds the lease longer than this is presumed dead.
 LEASE_STALE_SECONDS = 3 * 3600
@@ -67,7 +77,12 @@ ABANDON_DAYS = 30
 BATCH_SIZE = 2000
 
 ATTEMPT_MARKER = ".consolidate.attempted"
+# Written into a run file once a round of this user's has published it.
+CONSOLIDATED_AT = "consolidated_at"
+CONSOLIDATED_AS = "consolidated_as"
 LAST_LOG = ".consolidate.last.log"
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 # -- paths -----------------------------------------------------------------------
@@ -162,10 +177,19 @@ class Lease:
         self.error: Optional[OSError] = None
 
     def _owner(self, directory: Path) -> Optional[str]:
+        # Others can write the shared directory: never follow a link here.
         try:
-            return (directory / "owner").read_text(encoding="utf-8")
+            fd = os.open(directory / "owner", os.O_RDONLY | _NOFOLLOW | os.O_NONBLOCK)
         except OSError:
             return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            return os.read(fd, 4096).decode("utf-8", "replace")
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
 
     def holder(self) -> Optional[Dict[str, str]]:
         """Who holds the lease, and since when; None if nobody does."""
@@ -199,12 +223,18 @@ class Lease:
                 return False
             self.held = True
             try:
-                (self.path / "owner").write_text(
-                    f"token={self.token}\nhost={socket.gethostname()}\n"
-                    f"pid={os.getpid()}\nuser={os.environ.get('USER', '')}\n"
-                    f"started={datetime.now().isoformat(timespec='seconds')}\n",
-                    encoding="utf-8",
+                # A new file only: O_EXCL never follows a link put in its place.
+                fd = os.open(
+                    self.path / "owner",
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW,
+                    0o644,
                 )
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(
+                        f"token={self.token}\nhost={socket.gethostname()}\n"
+                        f"pid={os.getpid()}\nuser={os.environ.get('USER', '')}\n"
+                        f"started={datetime.now().isoformat(timespec='seconds')}\n"
+                    )
             except OSError:
                 pass
             return True
@@ -340,9 +370,9 @@ def query_jobs(job_ids: Iterable[str]) -> Dict[str, Any]:
 
 
 def _create_schema(conn: sqlite3.Connection) -> None:
-    from ..resources.tracker import (
+    from ..resources.tracker import (  # pylint: disable=import-outside-toplevel
         create_job_resources_schema,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     create_job_resources_schema(conn)
     conn.execute(
@@ -412,9 +442,9 @@ def _joblog_data(record: Dict[str, str], job_id: Optional[str]):
     path = record.get("joblog")
     if not path or not job_id or not os.path.exists(path):
         return None
-    from ..resources.parser import (
+    from ..resources.parser import (  # pylint: disable=import-outside-toplevel
         parse_joblog_resources,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     data = parse_joblog_resources(path)
     if data and data.get("job_id") == job_id:
@@ -457,16 +487,27 @@ def consolidate(
     result = Result(snapshot=snapshot)
     _touch(runs_dir / ATTEMPT_MARKER)
     consolidated: Dict[str, str] = {}
+    # Run files added this round, to mark once they are published, and
+    # run files the snapshot already held, to mark without re-adding.
+    added: Dict[Path, str] = {}
+    adopted: Dict[Path, str] = {}
 
     def add(conn) -> bool:
         done = {
             r[0]: r[1]
-            for r in conn.execute(
-                "SELECT run_id, consolidated_at FROM consolidated_runs"
-            )
+            for r in conn.execute("SELECT run_id, job_id FROM consolidated_runs")
         }
         changed = _add_runs(
-            conn, runs_dir, done, now, lookup, batch_size, result, dry_run
+            conn,
+            runs_dir,
+            done,
+            now,
+            lookup,
+            batch_size,
+            result,
+            dry_run,
+            added,
+            adopted,
         )
         consolidated.update(
             (r[0], r[1])
@@ -476,7 +517,15 @@ def consolidate(
         )
         return changed
 
-    if _round(snapshot, now, result, add, dry_run) and not dry_run:
+    def mark() -> None:
+        # Still under the lease, so an overlapping round can't add these
+        # runs again between the publish and the mark.
+        stamp = now.isoformat(timespec="seconds")
+        marks = {**adopted, **(added if result.published else {})}
+        for path, status in marks.items():
+            runs.update(path, {CONSOLIDATED_AT: stamp, CONSOLIDATED_AS: status})
+
+    if _round(snapshot, now, result, add, dry_run, mark) and not dry_run:
         try:
             result.removed = _remove_consolidated(
                 runs_dir, consolidated, now - timedelta(days=grace_days)
@@ -486,12 +535,15 @@ def consolidate(
     return result
 
 
-def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
+def _round(
+    snapshot: Path, now: datetime, result, add, dry_run: bool, done=None
+) -> bool:
     """Take the lease, apply ``add(conn)`` to a private copy, publish it.
 
     ``add`` returns True if it changed anything; only then is a copy
-    published. Records a skip or an error on ``result``; returns True if the
-    round finished (published or unchanged).
+    published. ``done()``, if given, runs once the round has finished
+    (published or unchanged), before the lease is released. Records a skip
+    or an error on ``result``; returns True if the round finished.
     """
     problem = writable_problem(snapshot)
     if problem:
@@ -513,11 +565,14 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
         )
         return False
 
-    private = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
+    # Work where only this user can see or rename anything: the shared
+    # directory is writable by the whole group and has no sticky bit.
+    workdir = None
     try:
         _remove_old_private_copies(snapshot)
-        if snapshot.exists():
-            shutil.copyfile(snapshot, private)
+        workdir = Path(tempfile.mkdtemp(prefix="qxub-consolidate-"))
+        private = workdir / STATS_DB_NAME
+        _copy_snapshot(snapshot, private)
         conn = sqlite3.connect(private, isolation_level=None)
         try:
             conn.execute("PRAGMA journal_mode=MEMORY")
@@ -543,28 +598,72 @@ def _round(snapshot: Path, now: datetime, result, add, dry_run: bool) -> bool:
                 raise OSError(f"lost the lease {lease.path}; not publishing")
             _publish(private, snapshot)
             result.published = True
+        if done is not None and not dry_run:
+            done()
         return True
     except (OSError, sqlite3.Error) as exc:
         result.errors.append(str(exc))
         logger.warning("Publishing %s failed: %s", snapshot, exc)
         return False
     finally:
-        try:
-            private.unlink()
-        except OSError:
-            pass
+        if workdir is not None:
+            shutil.rmtree(workdir, ignore_errors=True)
         lease.release()
 
 
-def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) -> bool:
-    """Add finished runs to the private copy. True if anything was added."""
+def _copy_snapshot(snapshot: Path, private: Path) -> None:
+    """Copy the published snapshot to ``private``, if there is one.
+
+    Others can replace the snapshot, so it is opened without following a
+    link and read only if that open file is a regular file: never the file
+    a link points to, nor a FIFO or device.
+    """
+    try:
+        fd = os.open(snapshot, os.O_RDONLY | _NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        if os.path.islink(snapshot):
+            raise OSError(f"{snapshot} is a symbolic link; not reading it") from exc
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{snapshot} is not a regular file; not reading it")
+        out = os.open(private, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
+        with os.fdopen(fd, "rb", closefd=False) as src, os.fdopen(out, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    finally:
+        os.close(fd)
+
+
+def _add_runs(
+    conn, runs_dir, done, now, lookup, batch_size, result, dry_run, added, adopted
+) -> bool:
+    """Add finished runs to the private copy. True if anything was added.
+
+    ``done`` maps the snapshot's consolidated run IDs to their job IDs.
+    Records in ``added`` the run files it added (path -> status). A run is
+    skipped as already published only if the snapshot holds it *and* its
+    own file carries this user's mark: anyone in the group can put rows in
+    the snapshot.
+
+    A run published before run files were marked (by an older qxub) is not
+    added again if its own file says it finished and the snapshot holds its
+    job: re-adding it now, after its joblog may be gone and the scheduler
+    has forgotten it, would lose its usage. It goes in ``adopted``, to be
+    marked. Such a run is past running, so a planted row can at most keep
+    its usage out of the statistics, as replacing the snapshot could anyway.
+    """
     pending = []
     for path in _run_files(runs_dir):
         run_id = path.name[: -len(runs.SUFFIX)]
-        if run_id in done:
-            continue
         record = runs.read_run(path)
         if record is None:
+            continue
+        if run_id in done and record.get(CONSOLIDATED_AT):
+            continue
+        if run_id in done and _held_finished(conn, done[run_id], record):
+            adopted[path] = "finished"
             continue
         pending.append((run_id, path, record))
         if len(pending) >= batch_size:
@@ -633,12 +732,29 @@ def _add_runs(conn, runs_dir, done, now, lookup, batch_size, result, dry_run) ->
             "INSERT OR REPLACE INTO consolidated_runs VALUES (?, ?, ?, ?, ?)",
             (run_id, job_id, record.get("user"), status, stamp),
         )
+        added[path] = "abandoned" if status == "abandoned" else "finished"
         if status == "abandoned":
             result.abandoned += 1
         else:
             result.added += 1
         changed = True
     return changed
+
+
+def _held_finished(conn, held_job_id, record) -> bool:
+    """True if the run file says it finished and the snapshot already has a
+    ``job_resources`` row for the same job as the run file names."""
+    if record.get("state") != "finished":
+        return False
+    job_id = record.get("native_job_id") or None
+    if job_id is None or held_job_id != job_id:
+        return False
+    return (
+        conn.execute(
+            "SELECT 1 FROM job_resources WHERE job_id = ?", (job_id,)
+        ).fetchone()
+        is not None
+    )
 
 
 def _ended_by(job_id, record, joblog, info) -> Optional[str]:
@@ -692,8 +808,11 @@ def _insert_job(conn, job_id, record, status, code, usage, stamp) -> None:
     }
     columns = ", ".join(row)
     marks = ", ".join("?" * len(row))
+    # A job added again (its usage now unknown) keeps the usage it had.
+    keep = ", ".join(f"{c} = COALESCE(excluded.{c}, {c})" for c in row if c != "job_id")
     conn.execute(
-        f"INSERT OR REPLACE INTO job_resources ({columns}) VALUES ({marks})",
+        f"INSERT INTO job_resources ({columns}) VALUES ({marks})"
+        f" ON CONFLICT(job_id) DO UPDATE SET {keep}",
         list(row.values()),
     )
 
@@ -712,28 +831,103 @@ def _settle_run_file(path: Path, code: int, stamp: str) -> None:
 
 
 def _publish(private: Path, snapshot: Path) -> None:
+    """Put the finished ``private`` copy in place of ``snapshot``.
+
+    The copy is written to a new file in the shared directory, created
+    exclusively (so never through a link), and given ``SNAPSHOT_MODE`` and
+    synced through the descriptor that created it; then renamed over the
+    snapshot. The mode is qxub's own, never the old snapshot's: anyone in
+    the group may own that. If the staged name no longer refers to the
+    file this process created, nothing is published.
+    """
+    staged = snapshot.with_name(f".{snapshot.name}.{uuid.uuid4().hex}.tmp")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o600)
     try:
-        if snapshot.exists():
-            shutil.copymode(snapshot, private)
-        else:
-            os.chmod(private, private.stat().st_mode | stat.S_IRGRP)
+        mine = os.fstat(fd)
     except OSError:
-        pass
-    with open(private, "rb") as fh:
-        os.fsync(fh.fileno())
-    os.replace(private, snapshot)
+        os.close(fd)
+        raise
+    renamed = False
+    try:
+        with open(private, "rb") as src, os.fdopen(fd, "wb", closefd=False) as dst:
+            shutil.copyfileobj(src, dst)
+        _give_to_dir_group(fd, mine, snapshot.parent)
+        os.fchmod(fd, SNAPSHOT_MODE)
+        os.fsync(fd)
+        if not _same_file(staged, mine):
+            raise OSError(f"{staged} was replaced by someone else; not publishing")
+        os.replace(staged, snapshot)
+        renamed = True
+    finally:
+        os.close(fd)
+        if not renamed and _same_file(staged, mine):
+            try:
+                staged.unlink()
+            except OSError:
+                pass
+
+
+# Whether _give_to_dir_group has warned that it can't set the group.
+_GROUP_WARNED = False
+
+
+def _give_to_dir_group(fd: int, mine: os.stat_result, directory: Path) -> None:
+    """Give the staged snapshot ``fd`` the group of ``directory``.
+
+    ``SNAPSHOT_MODE`` lets the group read it, which is only the team's group
+    if the directory is setgid; without that the file has the user's own
+    group. If the user isn't in the directory's group (``EPERM``), the file
+    keeps its group and a warning is logged once.
+    """
+    global _GROUP_WARNED  # pylint: disable=global-statement
+    gid = os.stat(directory).st_gid
+    if mine.st_gid == gid:
+        return
+    try:
+        os.fchown(fd, -1, gid)
+    except PermissionError as exc:
+        if not _GROUP_WARNED:
+            _GROUP_WARNED = True
+            logger.warning(
+                "Cannot give the statistics snapshot the group of %s (gid %d): "
+                "%s; others in that group may not be able to read it",
+                directory,
+                gid,
+                exc,
+            )
+
+
+def _same_file(path: Path, known: os.stat_result) -> bool:
+    """True if ``path`` itself (not a link's target) is the file ``known``."""
+    try:
+        there = os.lstat(path)
+    except OSError:
+        return False
+    return (there.st_dev, there.st_ino) == (known.st_dev, known.st_ino)
 
 
 def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -> int:
-    """Remove this user's run files that the snapshot has held since ``cutoff``.
+    """Remove this user's run files consolidated before ``cutoff``.
+
+    Only a run file that this user's own round marked as published before
+    ``cutoff``, that says it finished (or was given up on), and that the
+    snapshot still holds. The snapshot alone is never enough: anyone in
+    the group can replace it.
 
     Walks the run files that exist, not the snapshot, so the cost stays
     proportional to what is on disk.
     """
     removed = 0
     for path in _run_files(runs_dir):
-        at = _parse_time(consolidated.get(path.name[: -len(runs.SUFFIX)]))
+        if path.name[: -len(runs.SUFFIX)] not in consolidated:
+            continue
+        record = runs.read_run(path) or {}
+        at = _parse_time(record.get(CONSOLIDATED_AT))
         if not at or at > cutoff:
+            continue
+        if record.get("state") != "finished" and (
+            record.get(CONSOLIDATED_AS) != "abandoned"
+        ):
             continue
         try:
             path.unlink()
@@ -747,11 +941,11 @@ def _remove_consolidated(runs_dir: Path, consolidated: Dict[str, str], cutoff) -
 
 
 def _remove_old_private_copies(snapshot: Path) -> None:
-    """Private copies left by rounds that died (only ours can be removed)."""
+    """Staged copies left by publishes that died (only ours can be removed)."""
     cutoff = time.time() - LEASE_STALE_SECONDS
     for path in snapshot.parent.glob(f".{snapshot.name}.*.tmp"):
         try:
-            if path.stat().st_mtime < cutoff:
+            if path.lstat().st_mtime < cutoff:
                 path.unlink()
         except OSError:
             pass

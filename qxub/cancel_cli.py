@@ -57,8 +57,8 @@ def _still_queued_or_running(
     stored gets the (possibly truncated) name from that listing.
 
     Unfinished rows that the scheduler no longer lists, and that are older
-    than :data:`STALE_AFTER`, are finished: from the statistics snapshot if
-    it knows how the job ended, else as ``unknown``. No run file said how
+    than :data:`STALE_AFTER`, are finished: from the job's own joblog if
+    it says how the job ended, else as ``unknown``. No run file said how
     they ended, and PBS has forgotten them. A dry run only reports them.
 
     Returns ``None`` (after saying why) if the scheduler can't be asked.
@@ -105,7 +105,7 @@ def _still_queued_or_running(
             click.echo(
                 f"ℹ️  Finished {sum(counts.values())} old job(s) that were still"
                 " 'submitted' or 'running' in the database but no longer queued"
-                f" or running: {counts['from_snapshot']} from the stats snapshot,"
+                f" or running: {counts['from_joblog']} from their joblog,"
                 f" {counts['unknown']} as unknown"
             )
     return candidates

@@ -47,8 +47,9 @@ def test_cancel_all_cancels_only_this_platforms_jobs_unless_asked(sandbox):
     also kill your cluster jobs; other backends' jobs are opt-in."""
     local_id = _local_job(sandbox)
     sandbox.use_gadi_platform()
-    sandbox.env["PROJECT"] = "a56"
-    pbs = sandbox.run("exec", "--terse", "--", "true")
+    # -P rather than $PROJECT: $PROJECT would put the status dir under
+    # /scratch/a56, outside the sandbox (and unwritable on CI runners)
+    pbs = sandbox.run("exec", "--terse", "-P", "a56", "--", "true")
     pbs_id = pbs.stdout.strip()
     assert pbs.returncode == 0 and pbs_id in sandbox.live_jobs(), pbs.stderr
 

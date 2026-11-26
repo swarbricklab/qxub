@@ -9,19 +9,18 @@ The following branch protection rules should be configured via GitHub repository
 ### Main Branch (`main`)
 - **Require a pull request before merging**: ✅ Enabled
 - **Require approvals**: 1 approval minimum
-- **Dismiss stale PR approvals when new commits are pushed**: ✅ Enabled
-- **Require review from code owners**: ✅ Enabled
+- **Dismiss stale PR approvals when new commits are pushed**: ❌ Disabled
+- **Require review from code owners**: ❌ Disabled (no CODEOWNERS file)
 - **Restrict pushes that create files > 100MB**: ✅ Enabled
 - **Require status checks to pass before merging**: ✅ Enabled
   - Required checks:
     - `format-check` (Code Formatting)
     - `pylint` (Pylint)
-    - `analyze` (CodeQL)
-    - `test-remote-execution-secure` (if available)
 - **Require branches to be up to date before merging**: ✅ Enabled
-- **Require conversation resolution before merging**: ✅ Enabled
+- **Require conversation resolution before merging**: ❌ Disabled
 - **Restrict pushes from users who can push to matching branches**: ✅ Enabled
-- **Do not allow bypassing the above settings**: ✅ Enabled
+- **Do not allow bypassing the above settings**: ❌ Disabled (admins may merge
+  their own PRs without a second approval)
 - **Allow force pushes**: ❌ Disabled
 - **Allow deletions**: ❌ Disabled
 
@@ -31,7 +30,6 @@ The following branch protection rules should be configured via GitHub repository
   - Required checks:
     - `format-check` (Code Formatting)
     - `pylint` (Pylint)
-    - `analyze` (CodeQL)
 
 ## Repository Security Settings
 
@@ -43,7 +41,7 @@ The following branch protection rules should be configured via GitHub repository
 - **Dependabot version updates**: ✅ Enabled (configured via `.github/dependabot.yml`)
 
 ### Code Security and Analysis
-- **Code scanning**: ✅ Enabled (CodeQL)
+- **Code scanning**: Not configured (there is no CodeQL workflow)
 - **Secret scanning**: ✅ Enabled
 - **Secret scanning push protection**: ✅ Enabled
 - **Token scanning**: ✅ Enabled
@@ -54,10 +52,34 @@ The following branch protection rules should be configured via GitHub repository
   - Allow actions created by GitHub: ✅ Enabled
   - Allow verified marketplace actions by verified creators: ✅ Enabled
   - Specified actions: Pin to specific SHA hashes
-- **Fork pull request workflows**: Require approval for first-time contributors
-- **Fork pull request workflows in private repositories**: Require approval for all outside contributors
+  - **Require actions to be pinned to a full-length commit SHA**: ✅ Enabled
+- **Fork pull request workflows**: Require approval for all outside contributors
+- **Self-hosted runner groups** (organisation settings; the workflow files
+  alone cannot enforce them):
+  - `Default`: holds most Gadi runners (`qxub-runner`) and does **not** allow
+    public repositories. Newly registered runners land here.
+  - `gadi-public`: a few runners for public repositories, visible only to
+    qxub, dvc_tools and absconda, and restricted to these workflows:
+    `swarbricklab/qxub/.github/workflows/runner-validation.yml@refs/heads/main`,
+    `swarbricklab/qxub/.github/workflows/runner-connection-test.yml@refs/heads/main`,
+    `swarbricklab/dvc_tools/.github/workflows/deploy.yml@refs/heads/main` and
+    `swarbricklab/absconda/.github/workflows/deploy.yml@refs/heads/main`.
+  Without the workflow restriction, a pull request to a public repository
+  could add its own `runs-on: self-hosted` workflow and run it on the runner
+  once a maintainer approves the run.
+
+### Self-hosted runner
+The self-hosted runner has standing SSH access to Gadi. Workflows that use it
+(`runs-on: self-hosted`) must run only on `push` to `main` or
+`workflow_dispatch`, never on `pull_request` or `pull_request_target`,
+because a pull request supplies its own copy of the workflow file.
 
 ## Secrets Management
+
+No current workflow uses repository secrets other than `GITHUB_TOKEN`, or
+Workload Identity Federation. The self-hosted runner reaches Gadi with SSH
+keys configured on the runner host. The entries below describe an earlier
+design and are kept for reference.
 
 ### Repository Secrets (Legacy - Migrate to GCP Secret Manager)
 - `GADI_SSH_PRIVATE_KEY`: SSH private key for Gadi access
@@ -81,18 +103,17 @@ The following branch protection rules should be configured via GitHub repository
 ### Required Status Checks
 1. **Code Formatting** (`format-check`): Ensures consistent code style
 2. **Pylint** (`pylint`): Static code analysis for Python
-3. **CodeQL** (`analyze`): Security vulnerability scanning
-4. **Remote Execution Tests** (`test-remote-execution-secure`): Integration testing
 
 ### Security Alerts
 - **Dependabot alerts**: Monitor for vulnerable dependencies
-- **Code scanning alerts**: Monitor for security vulnerabilities
+- **Code scanning alerts**: Not available until code scanning is enabled
 - **Secret scanning alerts**: Monitor for exposed secrets
 
 ## Workflow Security
 
 ### Required Permissions
-All workflows must specify minimal required permissions:
+All workflows must declare an explicit `permissions:` block with the minimum
+they need:
 ```yaml
 permissions:
   contents: read  # Default minimum
@@ -116,9 +137,11 @@ All GitHub Actions must be pinned to specific SHA hashes:
 - [ ] Required status checks configured
 - [ ] Dependabot configured and enabled
 - [ ] CodeQL security scanning enabled
+- [x] Self-hosted runner group limited to the runner workflows on `main`
+- [x] Fork PR workflows require approval for all outside contributors
 - [ ] Secret scanning enabled with push protection
 - [ ] All workflows use minimal permissions
-- [ ] All actions pinned to SHA hashes
+- [x] All actions pinned to SHA hashes (enforced by repository setting)
 - [ ] SECURITY.md policy published
 - [ ] Workload Identity Federation configured
 - [ ] SSH keys migrated to GCP Secret Manager

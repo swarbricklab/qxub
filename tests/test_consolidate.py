@@ -5,6 +5,7 @@ See ``docs/dev/sqlite-robustness.md`` and ``qxub/queue/consolidate.py``.
 
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
 import textwrap
@@ -557,3 +558,325 @@ def test_qxub_db_consolidate_and_status(sandbox, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Jobs:       1 (0 with resource usage)" in result.stdout
     assert "Run files:  1" in result.stdout
+
+
+# -- the shared directory is writable by others ------------------------------------------
+
+
+def test_symlinked_snapshot_is_not_followed(area, tmp_path):
+    """Security: another group member replaces the snapshot with a link to
+    a file only this user can read; its bytes must not reach the shared
+    directory."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    secret = tmp_path / "id_rsa"
+    secret.write_text("PRIVATE KEY\n")
+    secret.chmod(0o600)
+    snapshot.parent.mkdir()
+    snapshot.symlink_to(secret)
+    seen = []
+
+    def look_while_the_round_runs(job_ids):
+        for path in snapshot.parent.iterdir():
+            if path.is_file() and not path.is_symlink():
+                seen.append(path.read_bytes())
+        return {}
+
+    result = run(area, lookup=look_while_the_round_runs)
+
+    assert not result.published and "symbolic link" in result.errors[0]
+    assert snapshot.is_symlink() and secret.read_text() == "PRIVATE KEY\n"
+    assert not any(b"PRIVATE KEY" in data for data in seen)
+    assert sorted(p.name for p in snapshot.parent.iterdir()) == ["qxub-stats.db"]
+
+
+def test_fifo_snapshot_is_rejected(area):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    snapshot.parent.mkdir()
+    os.mkfifo(snapshot)
+
+    result = run(area, lookup=lambda ids: {})
+
+    assert not result.published and "not a regular file" in result.errors[0]
+
+
+def test_working_copy_is_not_in_the_shared_directory(area):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    run(area, lookup=lambda ids: {})
+    finished(runs_dir, "qx-b", "2.gadi-pbs", ago=timedelta(days=3))
+    during = []
+
+    def look(job_ids):
+        during.extend(p.name for p in snapshot.parent.iterdir())
+        return {}
+
+    run(area, lookup=look)
+
+    assert sorted(during) == [".qxub-stats.db.lease", "qxub-stats.db"]
+    assert [r["job_id"] for r in rows(snapshot)] == ["1.gadi-pbs", "2.gadi-pbs"]
+
+
+def test_lease_owner_file_is_not_written_through_a_link(tmp_path):
+    victim = tmp_path / "victim"
+    victim.write_text("keep\n")
+    lease = tmp_path / ".lease"
+
+    real_mkdir = Path.mkdir
+
+    def mkdir_and_plant(self, *args, **kwargs):
+        real_mkdir(self, *args, **kwargs)
+        if self == lease:
+            (lease / "owner").symlink_to(victim)
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(Path, "mkdir", mkdir_and_plant):
+        held = cons.Lease(lease)
+        assert held.acquire()
+
+    assert victim.read_text() == "keep\n"
+    assert not held.still_held()
+
+
+def test_published_mode_is_fixed_not_copied_from_the_old_snapshot(area):
+    """Security: anyone in the group can own the snapshot and set its mode."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    run(area, lookup=lambda ids: {})
+    snapshot.chmod(0o6777)
+    finished(runs_dir, "qx-b", "2.gadi-pbs", ago=timedelta(days=3))
+
+    assert run(area, lookup=lambda ids: {}).published
+
+    assert snapshot.stat().st_mode & 0o7777 == cons.SNAPSHOT_MODE == 0o640
+
+
+def test_staged_file_swapped_for_a_link_fails_closed(area, tmp_path, monkeypatch):
+    """Security: a group member renames a link onto the staged name before
+    the mode change and rename; no other file's mode may change."""
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    victim = tmp_path / "victim.env"
+    victim.write_text("export SECRET=1\n")
+    victim.chmod(0o600)
+    real_fsync = os.fsync
+
+    def fsync_then_swap(fd):
+        real_fsync(fd)
+        for path in snapshot.parent.glob(".qxub-stats.db.*.tmp"):
+            aside = path.with_name("stolen")
+            os.rename(path, aside)
+            path.symlink_to(victim)
+
+    monkeypatch.setattr(cons.os, "fsync", fsync_then_swap)
+
+    result = run(area, lookup=lambda ids: {})
+
+    assert not result.published and "replaced by someone else" in result.errors[0]
+    assert victim.stat().st_mode & 0o7777 == 0o600
+    assert not snapshot.exists()
+
+
+def plant_rows(snapshot, *run_ids, at="2000-01-01T00:00:00"):
+    """Another group member publishes a snapshot naming these runs."""
+    snapshot.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(snapshot)
+    cons._create_schema(conn)
+    conn.executemany(
+        "INSERT OR REPLACE INTO consolidated_runs VALUES (?, NULL, 'mallory', 'completed', ?)",
+        [(r, at) for r in run_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_snapshot_rows_do_not_delete_or_skip_unfinished_runs(area):
+    """Security: rows in the shared snapshot are not this user's say-so."""
+    runs_dir, snapshot = area
+    path = write_run(runs_dir, "qx-a", state="running", native_job_id="1.gadi-pbs")
+    settings = path.with_suffix(".env")
+    settings.write_text("export cmd_b64=x\n")
+    plant_rows(snapshot, "qx-a")
+
+    result = run(area, lookup=lambda ids: {}, now=NOW + timedelta(days=20))
+
+    assert result.removed == 0 and path.exists() and settings.exists()
+    assert result.in_progress == 1
+
+    # Once it finishes, it is consolidated as usual.
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    result = run(area, lookup=lambda ids: {})
+    assert result.added == 1 and result.published
+    assert [r["job_id"] for r in rows(snapshot)] == ["1.gadi-pbs"]
+    assert path.exists(), "kept for the grace period after this round"
+
+
+def test_planted_row_for_a_finished_run_waits_for_its_own_grace(area):
+    runs_dir, snapshot = area
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=30))
+    plant_rows(snapshot, "qx-a")
+
+    first = run(area, lookup=lambda ids: {})
+    assert first.added == 1, "added by this user, whatever the snapshot says"
+    assert first.removed == 0 and path.exists()
+    assert runs.read_run(path)[cons.CONSOLIDATED_AT] == NOW.isoformat()
+
+    later = run(area, now=NOW + timedelta(days=cons.GRACE_DAYS + 1))
+    assert later.removed == 1 and not path.exists()
+
+
+def test_published_runs_are_marked_in_their_run_file(area):
+    runs_dir, snapshot = area
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+
+    run(area, lookup=lambda ids: {})
+
+    record = runs.read_run(path)
+    assert record[cons.CONSOLIDATED_AT] == NOW.isoformat()
+    assert record[cons.CONSOLIDATED_AS] == "finished"
+
+
+def unmark(path):
+    """A run file as an older qxub left it after publishing it."""
+    record = {
+        k: v
+        for k, v in runs.read_run(path).items()
+        if k not in (cons.CONSOLIDATED_AT, cons.CONSOLIDATED_AS)
+    }
+    path.write_text(runs.format_fields(record))
+
+
+def test_run_published_before_marks_keeps_its_usage(area, tmp_path):
+    """Upgrading: a run an older qxub published, whose joblog is gone and
+    which the scheduler has forgotten, is marked, not added again empty."""
+    runs_dir, snapshot = area
+    joblog = tmp_path / "job.log"
+    joblog.write_text(JOBLOG.format(when=NOW, job_id="1.gadi-pbs", code=0))
+    path = finished(runs_dir, "qx-a", "1.gadi-pbs", joblog=joblog)
+    assert run(area).added == 1
+    unmark(path)
+    joblog.unlink()
+
+    later = NOW + timedelta(days=1)
+    result = run(area, lookup=lambda ids: {}, now=later)
+
+    assert result.added == 0 and result.removed == 0, result.summary()
+    (job,) = rows(snapshot)
+    assert job["mem_used_mb"] == 2048
+    assert runs.read_run(path)[cons.CONSOLIDATED_AT] == later.isoformat()
+    # ... and goes once its own grace period is over.
+    gone = run(area, now=later + timedelta(days=cons.GRACE_DAYS + 1))
+    assert gone.removed == 1 and not path.exists()
+
+
+def test_unfinished_run_with_planted_rows_is_not_adopted(area):
+    """Security: a planted job row doesn't make an unfinished run done."""
+    runs_dir, snapshot = area
+    path = write_run(runs_dir, "qx-a", state="running", native_job_id="1.gadi-pbs")
+    plant_rows(snapshot, "qx-a")
+    conn = sqlite3.connect(snapshot)
+    conn.execute("UPDATE consolidated_runs SET job_id = '1.gadi-pbs'")
+    conn.execute(
+        "INSERT INTO job_resources (job_id, timestamp, status) VALUES"
+        " ('1.gadi-pbs', '2000-01-01', 'completed')"
+    )
+    conn.commit()
+    conn.close()
+
+    result = run(area, lookup=lambda ids: {}, now=NOW + timedelta(days=20))
+
+    assert result.in_progress == 1 and result.removed == 0 and path.exists()
+    assert cons.CONSOLIDATED_AT not in runs.read_run(path)
+
+
+def test_adding_a_job_again_keeps_known_usage(area):
+    conn = sqlite3.connect(":memory:")
+    cons._create_schema(conn)
+    record = runs.read_run(finished(area[0], "qx-a", "1.gadi-pbs"))
+    cons._insert_job(
+        conn, "1.gadi-pbs", record, "completed", 0, {"mem_used_mb": 2048}, "t1"
+    )
+    cons._insert_job(
+        conn, "1.gadi-pbs", record, "completed", 0, {"mem_used_mb": None}, "t2"
+    )
+    assert conn.execute(
+        "SELECT mem_used_mb, last_status_update FROM job_resources"
+    ).fetchall() == [(2048, "t2")]
+
+
+def test_runs_are_marked_before_the_lease_is_released(area, monkeypatch):
+    runs_dir, snapshot = area
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    held = []
+    real_update = runs.update
+
+    def update(path, fields):
+        if cons.CONSOLIDATED_AT in fields:
+            held.append(cons.lease_path(snapshot).exists())
+        return real_update(path, fields)
+
+    monkeypatch.setattr(runs, "update", update)
+    run(area, lookup=lambda ids: {})
+    assert held == [True]
+
+
+def test_published_snapshot_gets_the_directory_group(area, monkeypatch):
+    """Without a setgid directory the snapshot would have the user's own
+    group, which SNAPSHOT_MODE's group-read then doesn't reach the team."""
+    runs_dir, snapshot = area
+    snapshot.parent.mkdir(exist_ok=True)
+    dir_gid = snapshot.parent.stat().st_gid
+    other_gid = dir_gid + 1
+    real_fstat = os.fstat
+    calls = []
+
+    def fstat_other_group(fd):
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            st = os.stat_result(st[:5] + (other_gid,) + st[6:])
+        return st
+
+    monkeypatch.setattr(cons.os, "fstat", fstat_other_group)
+    monkeypatch.setattr(cons.os, "fchown", lambda fd, u, g: calls.append((u, g)))
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    assert run(area, lookup=lambda ids: {}).published
+    assert calls == [(-1, dir_gid)]
+
+
+def test_snapshot_group_it_cannot_set_is_warned_about_once(area, monkeypatch, caplog):
+    runs_dir, snapshot = area
+    real_fstat = os.fstat
+
+    def fstat_other_group(fd):
+        st = real_fstat(fd)
+        if stat.S_ISREG(st.st_mode):
+            st = os.stat_result(st[:5] + (st.st_gid + 1,) + st[6:])
+        return st
+
+    def fchown_eperm(fd, uid, gid):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(cons.os, "fstat", fstat_other_group)
+    monkeypatch.setattr(cons.os, "fchown", fchown_eperm)
+    monkeypatch.setattr(cons, "_GROUP_WARNED", False)
+    for i in range(2):
+        finished(runs_dir, f"qx-{i}", f"{i}.gadi-pbs", ago=timedelta(days=3))
+        assert run(area, lookup=lambda ids: {}).published
+    warnings = [r for r in caplog.records if "group of" in r.getMessage()]
+    assert len(warnings) == 1
+    assert snapshot.stat().st_mode & 0o777 == cons.SNAPSHOT_MODE
+
+
+def test_snapshot_group_is_set_for_real_to_one_of_the_users_groups(area):
+    runs_dir, snapshot = area
+    groups = [g for g in os.getgroups() if g != os.getegid()]
+    if not groups:
+        pytest.skip("the user is in only one group")
+    snapshot.parent.mkdir(exist_ok=True)
+    os.chown(snapshot.parent, -1, groups[0])
+    snapshot.parent.chmod(0o755)  # not setgid: new files get the user's group
+    finished(runs_dir, "qx-a", "1.gadi-pbs", ago=timedelta(days=3))
+    assert run(area, lookup=lambda ids: {}).published
+    assert snapshot.stat().st_gid == groups[0]

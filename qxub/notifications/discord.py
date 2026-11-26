@@ -9,12 +9,11 @@ Configuration:
         webhook_url: "https://discord.com/api/webhooks/..."
 """
 
-import json
 import logging
 import os
 from typing import Any, Dict, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+from .webhook import NotificationError, check_webhook_url, post_json
 
 logger = logging.getLogger(__name__)
 
@@ -47,26 +46,16 @@ class DiscordNotifier:
             Exception: If sending fails.
         """
         if not self.webhook_url:
-            raise ValueError("Discord webhook_url not configured")
+            raise NotificationError("Discord webhook_url not configured")
 
-        payload = self._build_message(context)
-
-        data = json.dumps(payload).encode("utf-8")
-        request = Request(
+        check_webhook_url(self.webhook_url, "notifications.discord.webhook_url")
+        # Discord returns 204 No Content on success
+        post_json(
             self.webhook_url,
-            data=data,
-            headers={"Content-Type": "application/json"},
+            self._build_message(context),
+            "Discord webhook",
+            ok_statuses=(200, 204),
         )
-
-        try:
-            with urlopen(request, timeout=30) as response:
-                # Discord returns 204 No Content on success
-                if response.status not in (200, 204):
-                    raise Exception(f"Discord webhook returned {response.status}")
-        except HTTPError as e:
-            raise Exception(f"Discord webhook failed: {e.code} {e.reason}")
-        except URLError as e:
-            raise Exception(f"Discord webhook connection failed: {e.reason}")
 
     def _build_message(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Build Discord message payload using embeds."""

@@ -1,5 +1,9 @@
 # Repository Security Configuration Complete
 
+> Note: parts of this record were out of date. CodeQL, Workload Identity
+> Federation and the `test-remote-execution-secure` check are not in place.
+> See `SECURITY_CONFIG.md` for the current requirements.
+
 ## ✅ Branch Protection Rules Configured
 
 The main branch is now protected with the following rules:
@@ -7,16 +11,14 @@ The main branch is now protected with the following rules:
 ### Required Status Checks
 - **format-check** - Code formatting validation
 - **pylint** - Static code analysis
-- **analyze** - CodeQL security analysis
-- **test-remote-execution-secure** - Secure remote execution tests
 
 ### Pull Request Requirements
 - **Required approving reviews**: 1
-- **Dismiss stale reviews**: Enabled when new commits are pushed
+- **Dismiss stale reviews**: Disabled
 - **Up-to-date branches**: Required (branches must be current with main)
 
 ### Administrative Controls
-- **Enforce for administrators**: Enabled (admins must follow the same rules)
+- **Enforce for administrators**: Disabled (admins may merge their own PRs)
 - **Allow force pushes**: Disabled
 - **Allow deletions**: Disabled
 
@@ -28,17 +30,18 @@ The main branch is now protected with the following rules:
 - **Delete branch on merge**: Enabled for cleaner repository management
 
 ### Security Scanning
-- **CodeQL analysis**: Configured via `.github/workflows/codeql.yml`
+- **CodeQL analysis**: Not configured
 - **Dependabot**: Configured via `.github/dependabot.yml`
 - **Security policy**: Available via `SECURITY.md`
 
 ## ✅ Workflow Security Hardening
 
-All GitHub Actions workflows have been hardened with:
-- **Pinned action versions**: Using specific SHA hashes instead of version tags
-- **Minimal permissions**: Each workflow only has required permissions
-- **Secure authentication**: Workload Identity Federation for GCP access
-- **Input validation**: Proper handling of user inputs and environment variables
+All GitHub Actions workflows have:
+- **Pinned action versions**: Every `uses:` names a full commit SHA, with the version in a comment
+- **Explicit permissions**: Every workflow or job declares a `permissions:` block; only the release
+  publish job can write, and it runs only GitHub's `download-artifact` action and the `gh` CLI
+- **No self-hosted jobs on pull requests**: Jobs on the self-hosted runner (which can SSH to Gadi)
+  run only on push to `main` or manual dispatch
 
 ## 🔄 Next Steps
 

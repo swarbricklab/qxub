@@ -65,17 +65,39 @@ def _current_user() -> str:
     return os.environ.get("USER") or getpass.getuser()
 
 
-def qsub_var(value: Any) -> str:
+# A job variable's name, as qsub -v and bash accept it.
+QSUB_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def qsub_var(value: Any, name: str = "") -> str:
     """A value for one ``qsub -v`` item.
 
-    ``qsub -v`` splits its list on commas, so a value containing one is
-    wrapped in quotes that reach PBS (``bind='/a,/b'``).
+    ``qsub -v`` splits its list on commas, so a value containing a comma is
+    wrapped in single quotes (``bind='/a,/b'``). How qsub treats a quote
+    inside a value is not something qxub relies on: a value with a quote,
+    a backslash, a newline or another control character raises
+    :class:`SubmitError` rather than possibly reaching the job as something
+    else, such as extra variables.
     """
     value = str(value)
-    if "," not in value:
-        return value
-    quote = '"' if "'" in value else "'"
-    return f"{quote}{value}{quote}"
+    label = f"job variable {name}" if name else "a job variable"
+    if any(c in value for c in "'\"\\") or any(
+        ord(c) < 32 or ord(c) == 127 for c in value
+    ):
+        raise SubmitError(
+            f"cannot pass {label} to qsub -v: its value has a quote, a "
+            "backslash or a control character, which qsub -v can't carry safely"
+        )
+    if "," in value:
+        return f"'{value}'"
+    return value
+
+
+def qsub_var_item(name: str, value: Any) -> str:
+    """One ``NAME=value`` item of a ``qsub -v`` list (see :func:`qsub_var`)."""
+    if not QSUB_VAR_NAME_RE.match(str(name)):
+        raise SubmitError(f"cannot pass {name!r} to qsub -v: not a variable name")
+    return f"{name}={qsub_var(value, name)}"
 
 
 # PBS ``-l`` names for the neutral ResourceSpec fields, in the order qxub
@@ -158,9 +180,9 @@ def qsub_argv(spec: JobSpec) -> List[str]:
     """The ``qsub`` command line for ``spec``."""
     argv = ["qsub"]
     if spec.env_file:
-        argv += ["-v", f"QXUB_JOB_FILE={qsub_var(spec.env_file)}"]
+        argv += ["-v", qsub_var_item("QXUB_JOB_FILE", spec.env_file)]
     elif spec.env:
-        argv += ["-v", ",".join(f"{k}={qsub_var(v)}" for k, v in spec.env.items())]
+        argv += ["-v", ",".join(qsub_var_item(k, v) for k, v in spec.env.items())]
     argv += ["-N", spec.name]
     if spec.queue:
         argv += ["-q", spec.queue]
@@ -183,6 +205,7 @@ class PbsBackend(SchedulerBackend):
 
     name = "pbs"
     job_id_variable = "PBS_JOBID"
+    exposed_variables_via = "qsub -v"
 
     def available(self) -> bool:
         return shutil.which("qstat") is not None

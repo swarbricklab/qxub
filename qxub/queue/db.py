@@ -22,6 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 import os
 import sqlite3
+import stat
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
@@ -64,8 +65,34 @@ def get_db_path() -> Path:
         return Path(env_override)
 
     config_dir = Path.home() / ".config" / "qxub"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "qxub.db"
+    # pylint: disable-next=import-outside-toplevel
+    from ..config.files import ensure_private_config_dir
+
+    ensure_private_config_dir(config_dir)
+    db_path = config_dir / "qxub.db"
+    if str(db_path) not in _PRIVATE_CHECKED:
+        _PRIVATE_CHECKED.add(str(db_path))
+        for path in (db_path, db_path.with_name(db_path.name + "-journal")):
+            _make_owner_only(path)
+    return db_path
+
+
+# Per-user DBs already checked for group/other permissions this process.
+_PRIVATE_CHECKED: set = set()
+
+
+def _make_owner_only(path: Path) -> None:
+    """Remove group/other permissions from ``path`` if it is ours.
+
+    The per-user DB holds full command lines and working directories; older
+    qxub created it with the umask's mode.
+    """
+    try:
+        st = os.lstat(path)
+        if stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid() and st.st_mode & 0o077:
+            os.chmod(path, stat.S_IMODE(st.st_mode) & 0o700)
+    except OSError:
+        pass
 
 
 def legacy_shared_db_path() -> Optional[Path]:

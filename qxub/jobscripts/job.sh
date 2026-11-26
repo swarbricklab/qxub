@@ -169,11 +169,15 @@ qxub_record_step() {
 qxub_notify() {
     if [ "$qxub_notify" = "true" ]; then
         echo "📬 Queueing notification job..."
-        qxub exec --internet --terse --default -- qxub notify send \
+        # qxub exec joins its command into one string that the notification
+        # job evals, so quote each argument: a path is data, never code.
+        local notify_cmd
+        notify_cmd=$(printf '%q ' qxub notify send \
             --job-id "${QXUB_JOB_ID:-unknown}" \
             --exit-code "$1" \
             --job-name "${QXUB_JOB_NAME:-${PBS_JOBNAME:-unknown}}" \
-            --output-dir "${qxub_notify_outdir:-$PWD}" \
+            --output-dir "${qxub_notify_outdir:-$PWD}")
+        qxub exec --internet --terse --default -- "$notify_cmd" \
             2>/dev/null || echo "⚠️  Failed to queue notification (non-fatal)"
     fi
 }
@@ -316,7 +320,8 @@ if [ -n "$user_vars" ]; then
     IFS=';' read -ra VARS <<< "$user_vars"
     for var_def in "${VARS[@]}"; do
         if [ -n "$var_def" ]; then
-            echo "   export $var_def"
+            # The name only: values may be secrets, and the log is shared
+            echo "   export ${var_def%%=*}"
             export "$var_def"
         fi
     done

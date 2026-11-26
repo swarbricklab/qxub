@@ -229,6 +229,18 @@ def calculate_efficiency(used: int, requested: int) -> float:
     return round(efficiency, 1)
 
 
+# The usage footer is at the end of a joblog: only this much of the end is read.
+JOBLOG_TAIL_BYTES = 4 * 1024 * 1024
+
+
+def read_joblog_tail(f, size: Optional[int] = None) -> str:
+    """The last :data:`JOBLOG_TAIL_BYTES` of the open binary file ``f``."""
+    if size is None:
+        size = f.seek(0, 2)
+    f.seek(max(0, size - JOBLOG_TAIL_BYTES))
+    return f.read(JOBLOG_TAIL_BYTES).decode("utf-8", errors="replace")
+
+
 def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
     """
     Parse resource usage information from a PBS joblog file.
@@ -273,18 +285,28 @@ def parse_joblog_resources(joblog_path: str) -> Optional[Dict[str, Any]]:
         }
     """
     try:
-        with open(joblog_path, "r") as f:
-            content = f.read()
+        with open(joblog_path, "rb") as f:
+            content = read_joblog_tail(f)
+    except Exception:
+        return None
+    return parse_joblog_text(content)
 
-        # Look for the Resource Usage section - it's at the end of the file
+
+def parse_joblog_text(content: str) -> Optional[Dict[str, Any]]:
+    """:func:`parse_joblog_resources` for joblog text already read.
+
+    Uses the last usage block: the scheduler writes it after the job's own
+    output, which may contain text that looks like one.
+    """
+    try:
         # Pattern to match the resource usage block - more flexible regex
         resource_section_pattern = r"Resource Usage on.*?:\s*\n(.*?)={10,}"
-        match = re.search(resource_section_pattern, content, re.DOTALL)
+        matches = list(re.finditer(resource_section_pattern, content, re.DOTALL))
 
-        if not match:
+        if not matches:
             return None
 
-        resource_text = match.group(1)
+        resource_text = matches[-1].group(1)
 
         # Parse individual fields using regex patterns
         result = {}

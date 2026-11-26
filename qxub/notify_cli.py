@@ -84,7 +84,12 @@ def test_notification(channel):
         qxub notify test all
     """
     from .config import manager as config_mod
-    from .notifications import send_all_notifications, send_discord, send_slack
+    from .notifications import (
+        safe_error,
+        send_all_notifications,
+        send_discord,
+        send_slack,
+    )
 
     config_manager = config_mod.config_manager
 
@@ -106,7 +111,7 @@ def test_notification(channel):
                 channels_sent.append("slack")
                 click.echo("✅ Slack test notification sent")
             except Exception as e:
-                click.echo(f"❌ Slack failed: {e}", err=True)
+                click.echo(f"❌ Slack failed: {safe_error(e)}", err=True)
         else:
             click.echo("⚠️  Slack not configured (set notifications.slack.webhook_url)")
 
@@ -118,7 +123,7 @@ def test_notification(channel):
                 channels_sent.append("discord")
                 click.echo("✅ Discord test notification sent")
             except Exception as e:
-                click.echo(f"❌ Discord failed: {e}", err=True)
+                click.echo(f"❌ Discord failed: {safe_error(e)}", err=True)
         else:
             click.echo(
                 "⚠️  Discord not configured (set notifications.discord.webhook_url)"

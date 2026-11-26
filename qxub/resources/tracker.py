@@ -9,8 +9,10 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+import os
 import re
 import sqlite3
+import stat
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -187,36 +189,75 @@ def create_job_resources_schema(conn) -> None:
     )
 
 
-def _snapshot_outcomes(job_ids: Sequence[str]) -> Dict[str, tuple]:
-    """``{job_id: (status, exit_code, completed_at)}`` for finished jobs in
-    the statistics snapshot. Empty if there is no snapshot or it can't be read.
+# The last line the local backend's runner appends to a job log.
+_LOCAL_EXIT_LINE_RE = re.compile(r"Exit Status: (-?\d+)")
+
+
+def _local_joblog_exit(job_id: str, text: str) -> Optional[int]:
+    """The exit status a local-backend job log ends with, if ``job_id`` is
+    a local job's.
+
+    That log has no job ID to check; the path comes from this user's own
+    DB row for the job. Only its final line counts: the job's own output,
+    earlier in the same file, may contain an ``Exit Status:`` line.
     """
-    from ..queue.consolidate import (  # pylint: disable=import-outside-toplevel
-        open_snapshot,
+    from ..backends.local import (  # pylint: disable=import-outside-toplevel
+        JOB_ID_PREFIX,
     )
 
+    if not job_id.startswith(JOB_ID_PREFIX):
+        return None
+    lines = text.rstrip().splitlines()
+    found = _LOCAL_EXIT_LINE_RE.fullmatch(lines[-1].strip()) if lines else None
+    return int(found.group(1)) if found else None
+
+
+def _joblog_outcome(job_id: str, joblog_path: Optional[str]) -> Optional[tuple]:
+    """``(status, exit_code, None)`` from the job's own joblog, if it is this
+    user's file and names this job; else None.
+
+    PBS's ``Resource Usage on`` footer must name the job; a local-backend
+    log, which has none, must be a local job's and end with the
+    ``Exit Status: N`` line its runner writes.
+
+    Not from the statistics snapshot: anyone in the group can replace it,
+    so it must not decide how this user's jobs ended.
+    """
+    if not joblog_path:
+        return None
+    from .parser import (  # pylint: disable=import-outside-toplevel
+        parse_joblog_text,
+        read_joblog_tail,
+    )
+
+    # Checked and read through one descriptor: the joblog's directory may
+    # let others swap the name for a link or another file in between.
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     try:
-        conn = open_snapshot()
-    except (OSError, sqlite3.Error):
-        return {}
-    found: Dict[str, tuple] = {}
+        fd = os.open(joblog_path, flags | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return None
     try:
-        ids = list(job_ids)
-        for i in range(0, len(ids), 500):
-            chunk = ids[i : i + 500]
-            rows = conn.execute(
-                "SELECT job_id, status, exit_code, completed_at FROM job_resources"
-                f" WHERE job_id IN ({','.join('?' * len(chunk))})"
-                " AND status IN ('completed', 'failed', 'cancelled')",
-                chunk,
-            )
-            for job_id, status, code, finished in rows:
-                found[job_id] = (status, code, finished)
-    except sqlite3.Error as exc:
-        logger.debug("Reading the snapshot failed: %s", exc)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+            return None
+        with os.fdopen(fd, "rb", closefd=False) as f:
+            text = read_joblog_tail(f, st.st_size)
+    except OSError:
+        return None
     finally:
-        conn.close()
-    return found
+        os.close(fd)
+    data = parse_joblog_text(text)
+    if data:
+        # A PBS usage footer must name this job
+        if data.get("job_id") != job_id:
+            return None
+        code = data.get("exit_status")
+    else:
+        code = _local_joblog_exit(job_id, text)
+    if not isinstance(code, int):
+        return None
+    return ("completed" if code == 0 else "failed", code, None)
 
 
 class DatabaseError(Exception):
@@ -968,22 +1009,28 @@ class ResourceTracker:
         These are rows left ``submitted`` or ``running`` with no run file to
         say how they ended: jobs from before run files, jobs whose last update
         was lost, or jobs whose run file consolidation has already removed
-        (``consolidate.GRACE_DAYS``). If the statistics snapshot knows how the
-        job ended, the row takes its status, exit code and end time.
-        Otherwise it becomes ``unknown``. Only unfinished rows change.
+        (``consolidate.GRACE_DAYS``). If the job's own joblog (recorded at
+        submission, owned by this user) says how it ended, the row takes
+        that status and exit code. Otherwise it becomes ``unknown``. The
+        group-writable statistics snapshot is never consulted. Only
+        unfinished rows change.
 
-        Returns counts: ``{"from_snapshot": n, "unknown": m}``.
+        Returns counts: ``{"from_joblog": n, "unknown": m}``.
         """
-        counts = {"from_snapshot": 0, "unknown": 0}
+        counts = {"from_joblog": 0, "unknown": 0}
         if not job_ids:
             return counts
-        ended = _snapshot_outcomes(job_ids)
         now = datetime.now().isoformat()
         unfinished = "('initiated', 'dispatched', 'submitted', 'running')"
         try:
             with self._connect() as conn:
                 for job_id in job_ids:
-                    status, code, finished = ended.get(job_id, ("unknown", None, None))
+                    row = conn.execute(
+                        "SELECT joblog_path FROM job_resources WHERE job_id=?",
+                        (job_id,),
+                    ).fetchone()
+                    ended = _joblog_outcome(job_id, row[0] if row else None)
+                    status, code, finished = ended or ("unknown", None, None)
                     params = (status, code, finished, now, job_id)
                     cur = conn.execute(
                         "UPDATE job_resources SET status=?,"
@@ -1002,11 +1049,11 @@ class ResourceTracker:
                         params,
                     )
                     if cur.rowcount:
-                        key = "unknown" if status == "unknown" else "from_snapshot"
+                        key = "unknown" if status == "unknown" else "from_joblog"
                         counts[key] += 1
         except Exception as exc:  # pylint: disable=broad-except
             logger.debug("settle_gone_jobs failed: %s", exc)
-            return {"from_snapshot": 0, "unknown": 0}
+            return {"from_joblog": 0, "unknown": 0}
         return counts
 
     def get_status_summary(self) -> Dict[str, int]:

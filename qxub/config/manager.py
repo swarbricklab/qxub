@@ -18,8 +18,101 @@ from typing import Any, Dict, List, Optional
 import click
 from omegaconf import DictConfig, OmegaConf
 
+from .files import (
+    file_trust_problem,
+    open_trusted_dir,
+    open_trusted_file,
+    write_private_file,
+    xdg_config_dirs,
+)
+
 # pylint: disable=broad-exception-caught,no-else-return,too-many-return-statements
 # pylint: disable=no-else-continue,duplicate-code
+
+# A project's .qx files come with the directory the user happens to be in: a
+# repository they cloned, or a shared area someone else can write. Unless the
+# user lists the project under security.trusted_projects, these keys are
+# dropped from them, because they decide where and how commands run (ssh
+# destination, remote bootstrap commands, platform files) or who may see
+# a job's settings.
+PROJECT_RESTRICTED_KEYS = (
+    "platforms",
+    "platform_search_paths",
+    "defaults.platform",
+    "default_platform",
+    "defaults.allow_qsub_v_settings",
+)
+# Likewise an untrusted project may add aliases, but not change one of the
+# same name from the system, user or --config file (its command, pre, post).
+ALIASES_KEY = "aliases"
+# Never taken from a project, trusted or not: a project can't trust itself.
+PROJECT_FORBIDDEN_KEYS = ("security",)
+TRUSTED_PROJECTS_KEY = "security.trusted_projects"
+# Notification credentials and endpoints come only from the user's own
+# config (or the system config), never from a project's files.
+PROJECT_SECRET_KEYS = ("notifications",)
+# Keys whose values are credentials; shown masked by `qxub config get/list`
+SECRET_KEY_NAMES = frozenset(
+    {"bot_token", "webhook_url", "token", "password", "secret", "api_key"}
+)
+MASKED = "********"
+
+
+def _interpolated_paths(value: Any, path: str = "") -> List[str]:
+    """Dotted paths of values in a plain container that use ``${...}``."""
+    if isinstance(value, dict):
+        found = []
+        for key, item in value.items():
+            found += _interpolated_paths(item, f"{path}.{key}" if path else str(key))
+        return found
+    if isinstance(value, list):
+        return [path] if any(_interpolated_paths(item, "-") for item in value) else []
+    if isinstance(value, str) and "${" in value:
+        return [path]
+    return []
+
+
+def _drop_interpolations(value: Any) -> Any:
+    """``value`` without any entry that uses ``${...}``."""
+    if isinstance(value, dict):
+        return {
+            key: _drop_interpolations(item)
+            for key, item in value.items()
+            if not _interpolated_paths(item, "-") or isinstance(item, dict)
+        }
+    return value
+
+
+def mask_secrets(value: Any) -> Any:
+    """A copy of a plain container with credential values masked."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                MASKED
+                if str(key).rsplit(".", 1)[-1] in SECRET_KEY_NAMES
+                and item not in (None, "")
+                and not isinstance(item, (dict, list))
+                else mask_secrets(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [mask_secrets(item) for item in value]
+    return value
+
+
+# Modes for the .qx directory and files qxub creates, whatever the umask:
+# group- or world-writable project config is ignored as untrusted.
+PROJECT_DIR_MODE = 0o755
+PROJECT_FILE_MODE = 0o644
+
+
+def _save_project_file(conf: Any, path: Path) -> None:
+    """Save project config ``conf`` to ``path``; a new file is made 0644."""
+    existed = path.exists()
+    OmegaConf.save(conf, path)
+    if not existed:
+        os.chmod(path, PROJECT_FILE_MODE)
 
 
 class ConfigManager:
@@ -37,10 +130,8 @@ class ConfigManager:
         self._load_configs()
 
     def _get_xdg_config_dirs(self) -> List[Path]:
-        """Get XDG config directories in precedence order."""
-        xdg_config_dirs = os.environ.get("XDG_CONFIG_DIRS", "/etc/xdg")
-        dirs = [Path(d) / "qxub" for d in xdg_config_dirs.split(":")]
-        return dirs
+        """Get XDG config directories in precedence order (absolute only)."""
+        return [d / "qxub" for d in xdg_config_dirs()]
 
     def _get_user_config_dir(self) -> Path:
         """Get user config directory following XDG spec."""
@@ -83,23 +174,183 @@ class ConfigManager:
                 return qx_dir
         return None
 
+    def _trusted_project_roots(self) -> List[Path]:
+        """Projects the user trusts, from the system, user and --config files."""
+        roots = []
+        for layer in (self.system_config, self.user_config, self.override_config):
+            if layer is None:
+                continue
+            try:
+                value = OmegaConf.select(layer, TRUSTED_PROJECTS_KEY, default=None)
+                if OmegaConf.is_config(value):
+                    value = OmegaConf.to_container(value, resolve=True)
+            except Exception as e:
+                click.echo(f"Warning: Bad {TRUSTED_PROJECTS_KEY}: {e}", err=True)
+                continue
+            if isinstance(value, str):
+                value = [value]
+            for entry in value or []:
+                if entry:
+                    roots.append(Path(os.path.expanduser(str(entry))).resolve())
+        return roots
+
+    def _is_trusted_project(self, project_root: Path) -> bool:
+        """Whether the user listed ``project_root`` (or a parent) as trusted."""
+        project_root = project_root.resolve()
+        return any(
+            root == project_root or root in project_root.parents
+            for root in self._trusted_project_roots()
+        )
+
+    def _own_alias_names(self) -> set:
+        """Alias names defined in the system, user and --config files."""
+        names = set()
+        for layer in (self.system_config, self.user_config, self.override_config):
+            if layer is None or ALIASES_KEY not in layer:
+                continue
+            aliases = OmegaConf.to_container(layer, resolve=False)[ALIASES_KEY]
+            if isinstance(aliases, dict):
+                names.update(str(name) for name in aliases)
+        return names
+
+    def _restrict_project_layer(
+        self, config: DictConfig, config_path: Path, trusted: bool
+    ) -> DictConfig:
+        """Drop the keys a project's config may not set (see module top)."""
+        keys = PROJECT_FORBIDDEN_KEYS
+        if not trusted:
+            keys = keys + PROJECT_RESTRICTED_KEYS
+        removed = []
+        for key in keys:
+            parent_key, _, leaf = key.rpartition(".")
+            parent = OmegaConf.select(config, parent_key) if parent_key else config
+            if isinstance(parent, DictConfig) and leaf in parent:
+                del parent[leaf]
+                removed.append(key)
+        if not trusted and ALIASES_KEY in config:
+            aliases = OmegaConf.to_container(config, resolve=False)[ALIASES_KEY]
+            if not isinstance(aliases, dict):
+                # Not a mapping of new aliases: it could only replace the user's
+                del config[ALIASES_KEY]
+                removed.append(ALIASES_KEY)
+            else:
+                own = self._own_alias_names()
+                for name in aliases:
+                    if str(name) in own:
+                        del config[ALIASES_KEY][name]
+                        removed.append(f"{ALIASES_KEY}.{name}")
+        if removed:
+            click.echo(
+                f"Warning: Ignoring {', '.join(removed)} in {config_path}: "
+                "project config can't choose where or how jobs run. If you "
+                "trust this project, add its directory to "
+                f"{TRUSTED_PROJECTS_KEY} in your user config.",
+                err=True,
+            )
+
+        secrets = [key for key in PROJECT_SECRET_KEYS if key in config]
+        for key in secrets:
+            del config[key]
+        if secrets:
+            click.echo(
+                f"Warning: Ignoring {', '.join(secrets)} in {config_path}: "
+                "set notification settings in your user config.",
+                err=True,
+            )
+
+        # ${...} would be resolved against the user's environment and their
+        # private config (oc.env, references to notifications.*), so an
+        # untrusted project's values are taken as plain data or not at all.
+        if not trusted:
+            plain = OmegaConf.to_container(config, resolve=False)
+            interpolated = _interpolated_paths(plain)
+            if interpolated:
+                click.echo(
+                    f"Warning: Ignoring {', '.join(interpolated)} in "
+                    f"{config_path}: ${{...}} interpolation is only allowed "
+                    "in your own config or a trusted project's. If you trust "
+                    f"this project, add its directory to {TRUSTED_PROJECTS_KEY} "
+                    "in your user config.",
+                    err=True,
+                )
+                config = OmegaConf.create(_drop_interpolations(plain))
+        return config
+
     def _load_project_configs(
         self,
     ) -> tuple[Optional[DictConfig], Optional[DictConfig], Optional[DictConfig]]:
-        """Load project, local, and test configurations."""
+        """Load project, local, and test configurations.
+
+        A .qx directory or file that someone other than the user (or root)
+        owns or can write, or that is a symlink, is ignored, unless the user
+        trusts the project.
+        """
         project_dir = self._get_project_config_dir()
         if not project_dir:
             return None, None, None
 
+        trusted = self._is_trusted_project(project_dir.parent)
         config_files = ["project.yaml", "local.yaml", "test.yaml"]
+        if trusted:
+            configs = [
+                self._load_config_file(project_dir / name, name)
+                for name in config_files
+            ]
+        else:
+            configs = self._load_untrusted_project_files(project_dir, config_files)
+            if configs is None:
+                return None, None, None
+
+        return tuple(
+            (
+                self._restrict_project_layer(config, project_dir / name, trusted)
+                if config is not None
+                else None
+            )
+            for config, name in zip(configs, config_files)
+        )
+
+    def _load_untrusted_project_files(
+        self, project_dir: Path, names: List[str]
+    ) -> Optional[List[Optional[DictConfig]]]:
+        """Load ``names`` from ``project_dir`` if neither can be changed by others.
+
+        The directory and each file are opened without following symlinks,
+        checked through the open descriptors and read from them, so nothing
+        can be swapped in between the check and the read. None if the
+        directory itself is not to be trusted.
+        """
+        dir_fd, problem = open_trusted_dir(project_dir)
+        if problem:
+            click.echo(
+                f"Warning: Ignoring project config in {project_dir}: "
+                f"{problem}. If you trust this project, add its directory "
+                f"to {TRUSTED_PROJECTS_KEY} in your user config.",
+                err=True,
+            )
+            return None
         configs = []
-
-        for config_file in config_files:
-            config_path = project_dir / config_file
-            config = self._load_config_file(config_path, config_file)
-            configs.append(config)
-
-        return tuple(configs)
+        try:
+            for name in names:
+                config_path = project_dir / name
+                config = None
+                f, problem = open_trusted_file(dir_fd, name, config_path)
+                if problem:
+                    click.echo(f"Warning: Ignoring {config_path}: {problem}", err=True)
+                elif f is not None:
+                    with f:
+                        try:
+                            config = OmegaConf.load(f)
+                        except Exception as e:
+                            click.echo(
+                                f"Warning: Failed to load {name} config "
+                                f"{config_path}: {e}",
+                                err=True,
+                            )
+                configs.append(config)
+        finally:
+            os.close(dir_fd)
+        return configs
 
     def _load_config_file(
         self, config_path: Path, config_name: str
@@ -144,6 +395,15 @@ class ConfigManager:
         for config_dir in self._get_xdg_config_dirs():
             config_file = config_dir / "config.yaml"
             if config_file.exists():
+                # Anyone who can change a shared file could steer every
+                # user's jobs, so a writable one is not used.
+                problem = file_trust_problem(config_file, require_owner=False)
+                if problem:
+                    click.echo(
+                        f"Warning: Ignoring system config {config_file}: {problem}",
+                        err=True,
+                    )
+                    continue
                 try:
                     return OmegaConf.load(config_file)
                 except Exception as e:  # pylint: disable=broad-exception-caught
@@ -169,10 +429,11 @@ class ConfigManager:
         """Load and merge all configuration files."""
         self.system_config = self._load_system_config()
         self.user_config = self._load_user_config()
+        # Before the project files, which it can mark as trusted
+        self.override_config = self._load_override_config()
         self.project_config, self.local_config, self.test_config = (
             self._load_project_configs()
         )
-        self.override_config = self._load_override_config()
 
         # Merge configurations in precedence order:
         # system < user < project < local < test < override
@@ -343,9 +604,6 @@ class ConfigManager:
         """Set a configuration value in user config file."""
         user_config_file = self._get_user_config_dir() / "config.yaml"
 
-        # Create directory if it doesn't exist
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
-
         # Load existing user config or create new
         if user_config_file.exists():
             user_config = OmegaConf.load(user_config_file)
@@ -362,10 +620,20 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(user_config, user_config_file)
+        self.save_user_config(user_config)
 
         # Reload configs to pick up changes
         self.reload_configs()
+
+    def save_user_config(self, user_config: DictConfig) -> Path:
+        """Write the user config file, readable by the user only.
+
+        It can hold notification tokens and webhook URLs. Interpolations
+        such as ``${oc.env:TOKEN}`` are kept as written, not resolved.
+        """
+        user_config_file = self._get_user_config_dir() / "config.yaml"
+        write_private_file(user_config_file, OmegaConf.to_yaml(user_config))
+        return user_config_file
 
     def set_system_config_value(self, key_path: str, value: Any):
         """Set a configuration value in system config file."""
@@ -426,7 +694,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(project_config, project_config_file)
+        _save_project_file(project_config, project_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -457,7 +725,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(local_config, local_config_file)
+        _save_project_file(local_config, local_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -488,7 +756,7 @@ class ConfigManager:
         current[keys[-1]] = value
 
         # Save the config
-        OmegaConf.save(test_config, test_config_file)
+        _save_project_file(test_config, test_config_file)
 
         # Reload configs to pick up changes
         self.reload_configs()
@@ -507,26 +775,29 @@ class ConfigManager:
         if qx_dir.exists():
             return False  # Already initialized
 
-        # Create .qx directory
+        # Create .qx directory. 0755 whatever the umask: a group-writable
+        # .qx would be ignored as untrusted.
         qx_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(qx_dir, PROJECT_DIR_MODE)
 
         # Create default project.yaml (git-tracked, team-shared settings)
         project_config_file = qx_dir / "project.yaml"
         project_defaults = {
             "qxub": {"defaults": {"walltime": "1:00:00", "queue": "auto"}}
         }
-        OmegaConf.save(project_defaults, project_config_file)
+        _save_project_file(OmegaConf.create(project_defaults), project_config_file)
 
         # Create default test.yaml (git-tracked, CI/testing settings)
         test_config_file = qx_dir / "test.yaml"
         test_defaults = {
             "qxub": {"defaults": {"walltime": "0:10:00", "queue": "copyq"}}
         }
-        OmegaConf.save(test_defaults, test_config_file)
+        _save_project_file(OmegaConf.create(test_defaults), test_config_file)
 
         # Create .gitignore for local.yaml (git-ignored, user-specific settings)
         gitignore_file = qx_dir / ".gitignore"
         gitignore_file.write_text("local.yaml\n")
+        os.chmod(gitignore_file, PROJECT_FILE_MODE)
 
         return True
 
@@ -538,9 +809,6 @@ class ConfigManager:
             raise click.ClickException(
                 f"User config file already exists: {user_config_file}"
             )
-
-        # Create directory
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create template config. Site-specific values (project, storage
         # volumes, bind paths) are left for the user to fill in; the platform
@@ -604,22 +872,16 @@ class ConfigManager:
         }
 
         config = OmegaConf.create(template)
-        OmegaConf.save(config, user_config_file)
-        return user_config_file
+        return self.save_user_config(config)
 
     def save_alias(self, alias_name: str, alias_definition: Dict[str, Any]):
         """Save an alias to the user configuration."""
         user_config_file = self._get_user_config_dir() / "config.yaml"
 
-        # Ensure user config directory exists
-        user_config_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Load existing user config or create new
+        # Load existing user config or create new. A file that can't be
+        # read is left alone rather than replaced by one holding the alias.
         if user_config_file.exists():
-            try:
-                user_config = OmegaConf.load(user_config_file)
-            except Exception:
-                user_config = OmegaConf.create({})
+            user_config = OmegaConf.load(user_config_file)
         else:
             user_config = OmegaConf.create({})
 
@@ -630,9 +892,8 @@ class ConfigManager:
         # Add the new alias
         user_config.aliases[alias_name] = alias_definition
 
-        # Save back to file
-        with open(user_config_file, "w", encoding="utf-8") as f:
-            OmegaConf.save(user_config, f, resolve=True)
+        # Save back to file, leaving the user's other values unresolved
+        self.save_user_config(user_config)
 
         # Reload configs to pick up the new alias
         self._load_configs()

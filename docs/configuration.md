@@ -85,6 +85,38 @@ qxub config set --test qxub.defaults.queue "copyq"
 
 Use `qxub config list --show-origin` to see where each setting comes from.
 
+### Trusting Project Config
+
+Project config comes with whatever directory you run qxub in, so qxub limits
+what it can do:
+
+- A `.qx` directory, or a file in it, that is owned by another user, is
+  writable by group or others, or is a symbolic link is ignored with a
+  warning.
+- `platforms`, `platform_search_paths`, `defaults.platform`,
+  `default_platform` and `defaults.allow_qsub_v_settings` are ignored in
+  project files: they decide where and how jobs run (ssh host, remote
+  bootstrap commands, platform files) or who may see a job's settings.
+  `security` is never read from them.
+- A project file may add new aliases (for example ones shared by a team), but
+  an alias with the same name as one in your system, user or `--config` file
+  is ignored with a warning, so a project can't change what your own alias
+  runs (its command, `pre` or `post`).
+- `${...}` interpolations (for example `${oc.env:VAR}`) in project files are
+  ignored with a warning, since they would expand your environment and your
+  private settings. Your own user config can still use them.
+- `notifications` is never read from project files; keep webhook URLs and
+  tokens in your user config, which qxub writes readable by you only.
+  `qxub config get` and `qxub config list` mask them unless given
+  `--show-secrets`.
+
+To let a project you trust set these, list its directory (or a parent) in your
+user config:
+
+```bash
+qxub config set security.trusted_projects "[/g/data/a56/projects/myproject]"
+```
+
 ## Defaults
 
 Set defaults for any PBS option:

@@ -22,6 +22,7 @@ job database comes from :func:`connect`, which:
 """
 
 import logging
+import os
 import random
 import sqlite3
 import threading
@@ -138,6 +139,7 @@ def connect(db_path, timeout: float = BUSY_TIMEOUT_SECONDS) -> RetryingConnectio
     """Open the job database with the settings above; the schema is ready."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    _create_owner_only(db_path)
     conn = _open(db_path, timeout)
     try:
         ensure_schema(conn, db_path)
@@ -145,6 +147,23 @@ def connect(db_path, timeout: float = BUSY_TIMEOUT_SECONDS) -> RetryingConnectio
         conn.close()
         raise
     return conn
+
+
+def _create_owner_only(db_path: Path) -> None:
+    """Create a new database file ``0600`` whatever the umask.
+
+    It holds full command lines and working directories. SQLite gives the
+    journal the database file's mode, so that is owner-only too. An existing
+    file is left as it is (see ``db.get_db_path`` for the per-user one).
+    """
+    if db_path.exists():
+        return
+    try:
+        os.close(os.open(db_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    except FileExistsError:
+        pass  # another process created it first
+    except OSError as exc:
+        logger.debug("Could not pre-create %s: %s", db_path, exc)
 
 
 def _open(db_path: Path, timeout: float) -> RetryingConnection:

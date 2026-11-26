@@ -8,9 +8,12 @@ snapshot with the same lease and publish steps as a consolidation round
 
 1. The old DB is copied to a private temporary directory and opened with
    ``immutable=1``, so nothing here can write it or roll back a journal.
-2. If SQLite can't read it all ("database disk image is malformed"), the
+2. If SQLite can't read it all ("database disk image is malformed"), and it
+   is a damaged job DB (not a readable DB without ``job_resources``), the
    ``sqlite3`` command's ``.recover`` rebuilds what it can into a new file,
-   and the rows come from that.
+   and the rows come from that. Its output is loaded by Python's sqlite3,
+   which allows only table and index creation and inserts, never the
+   ``sqlite3`` shell: the old DB could be written by the whole team.
 3. Rows the corruption garbled are left out (``malformed``): a job ID that
    isn't a PBS ID, a time that isn't ISO, or text in a numeric column.
 4. A job still marked submitted or running but with an exit code lost its
@@ -27,6 +30,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -156,7 +160,11 @@ def read_jobs(source: Path, workdir: Path) -> Tuple[List[str], List[tuple], str]
     try:
         columns, rows = _read_table(copy)
         return columns, rows, "read directly"
+    except NoJobsTable:
+        raise  # a readable DB of something else: nothing to rebuild
     except sqlite3.DatabaseError as exc:
+        if not _looks_like_job_db(copy):
+            raise
         logger.info("Reading %s failed (%s); trying sqlite3 .recover", source, exc)
         first_error = exc
     rebuilt = workdir / "recovered.db"
@@ -165,16 +173,55 @@ def read_jobs(source: Path, workdir: Path) -> Tuple[List[str], List[tuple], str]
     return columns, rows, "rebuilt with sqlite3 .recover"
 
 
+class NoJobsTable(sqlite3.DatabaseError):
+    """The file reads as SQLite but has no ``job_resources`` table."""
+
+
 def _read_table(path: Path) -> Tuple[List[str], List[tuple]]:
     conn = sqlite3.connect(f"{path.resolve().as_uri()}?immutable=1", uri=True)
     try:
         columns = [r[1] for r in conn.execute("PRAGMA table_info(job_resources)")]
         if not columns:
-            raise sqlite3.DatabaseError("no job_resources table")
+            raise NoJobsTable("no job_resources table")
         rows = conn.execute("SELECT * FROM job_resources").fetchall()
         return columns, rows
     finally:
         conn.close()
+
+
+def _looks_like_job_db(path: Path) -> bool:
+    """A damaged SQLite file that once held ``job_resources``: only that is
+    worth handing to ``sqlite3 .recover``."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+    return data.startswith(b"SQLite format 3\x00") and b"job_resources" in data
+
+
+def source_problem(source: Path) -> Optional[str]:
+    """Why ``source``'s contents may have been chosen by someone else:
+    owned by another user, or writable (or replaceable) by others."""
+    try:
+        st = os.stat(source)
+        parent = os.stat(Path(source).parent)
+    except OSError:
+        return None
+    reasons = []
+    if st.st_uid != os.getuid():
+        reasons.append("is owned by another user")
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        reasons.append("is writable by other users")
+    if parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH) and not (
+        parent.st_mode & stat.S_ISVTX
+    ):
+        reasons.append("is in a directory where other users can replace it")
+    if not reasons:
+        return None
+    return (
+        f"{source} {' and '.join(reasons)}: its contents may not be what qxub"
+        " wrote. It is read as untrusted data."
+    )
 
 
 def sqlite3_cli() -> Optional[str]:
@@ -208,18 +255,124 @@ def _sqlite3_recover(copy: Path, rebuilt: Path, first_error: Exception) -> None:
             f"{first_error}; sqlite3 .recover failed: "
             f"{(dump.stderr or '').strip() or 'no output'}"
         )
-    load = subprocess.run(
-        [exe, str(rebuilt)],
-        input=dump.stdout,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if load.returncode != 0 and not rebuilt.exists():
+    try:
+        _load_recovered(dump.stdout, rebuilt)
+    except sqlite3.Error as exc:
         raise RuntimeError(
-            f"{first_error}; loading the .recover output failed: "
-            f"{load.stderr.strip()}"
-        )
+            f"{first_error}; loading the .recover output failed: {exc}"
+        ) from exc
+
+
+# What the .recover output may do when it is loaded. The source DB, and so
+# this script (it repeats the source's schema text), may come from anyone
+# who could write the old team DB: it is run statement by statement through
+# Python's sqlite3 (no shell dot-commands, no extension loading), and an
+# authorizer allows only creating tables and indexes and inserting rows in
+# the rebuilt file.
+_RECOVER_DOT_LINES = (".dbconfig defensive off",)
+_RECOVER_PRAGMAS = {
+    "writable_schema",
+    "foreign_keys",
+    "encoding",
+    "page_size",
+    "auto_vacuum",
+    "user_version",
+    "application_id",
+}
+_RECOVER_FUNCTIONS = {"replace", "char", "unistr", "unhex"}
+_RECOVER_STATEMENTS = ("BEGIN", "COMMIT", "END", "PRAGMA", "CREATE", "INSERT")
+# .recover clears AUTOINCREMENT counters before re-inserting them. SQLite
+# keeps its own sqlite_sequence here (inserts into sqlite_* are skipped),
+# so this one exact statement is skipped, never run.
+_SEQUENCE_RESET = "DELETE FROM sqlite_sequence;"
+_SCHEMA_INSERT = re.compile(
+    r"INSERT\s+(OR\s+\w+\s+)?INTO\s+[\"'`\[]?(main\s*\.\s*)?sqlite_", re.I
+)
+
+
+def _load_recovered(script: str, rebuilt: Path) -> None:
+    """Load ``sqlite3 .recover`` output into ``rebuilt``, safely.
+
+    Plain data and table/index statements run; anything else in the script
+    stops the load (``RuntimeError``). As the ``sqlite3`` shell did,
+    statements SQLite rejects (rows that no longer fit, say) are skipped.
+    """
+    abort: List[str] = []
+
+    def authorize(action, arg1, arg2, db_name, _trigger):
+        if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH):
+            abort.append(f"ATTACH/DETACH {arg1!r}")
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_PRAGMA:
+            if (arg1 or "").lower() in _RECOVER_PRAGMAS:
+                return sqlite3.SQLITE_IGNORE
+            abort.append(f"PRAGMA {arg1}")
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_FUNCTION:
+            if (arg2 or "").lower() in _RECOVER_FUNCTIONS:
+                return sqlite3.SQLITE_OK
+            abort.append(f"function {arg2}()")
+            return sqlite3.SQLITE_DENY
+        if db_name not in (None, "main"):
+            return sqlite3.SQLITE_DENY
+        if action == sqlite3.SQLITE_TRANSACTION:
+            return sqlite3.SQLITE_OK
+        if action in (
+            sqlite3.SQLITE_CREATE_TABLE,
+            sqlite3.SQLITE_CREATE_INDEX,
+            sqlite3.SQLITE_REINDEX,
+            sqlite3.SQLITE_READ,
+        ):
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_INSERT:
+            # sqlite_master too: SQLite recording a CREATE. A direct insert
+            # into it is skipped below and fails (writable_schema is ignored).
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_UPDATE and arg1 in (
+            "sqlite_master",
+            "sqlite_schema",
+        ):
+            return sqlite3.SQLITE_OK  # SQLite recording a CREATE
+        return sqlite3.SQLITE_DENY  # views, triggers, deletes...: skipped
+
+    conn = sqlite3.connect(rebuilt, isolation_level=None)
+    try:
+        conn.set_authorizer(authorize)
+        statement = ""
+        for line in script.splitlines(keepends=True):
+            if not statement.strip() and line.lstrip().startswith("."):
+                if line.strip() in _RECOVER_DOT_LINES:
+                    continue
+                raise RuntimeError(f"unexpected .recover output: {line.strip()!r}")
+            statement += line
+            if not sqlite3.complete_statement(statement):
+                continue
+            text, statement = statement.strip(), ""
+            if text == _SEQUENCE_RESET:
+                continue
+            if not text.upper().startswith(_RECOVER_STATEMENTS):
+                raise RuntimeError(f"unexpected .recover output: {text[:80]!r}")
+            if _SCHEMA_INSERT.match(text):
+                continue  # views, triggers: not needed to read job rows
+            try:
+                conn.execute(text)
+            except (sqlite3.ProgrammingError, sqlite3.Warning) as exc:
+                # More than one statement where .recover writes one
+                # (sqlite3.Warning before Python 3.12, not a sqlite3.Error).
+                raise RuntimeError(
+                    f"unexpected .recover output: {text[:80]!r}: {exc}"
+                ) from exc
+            except sqlite3.Error as exc:
+                if not abort:
+                    logger.debug("Skipped while loading .recover output: %s", exc)
+            if abort:
+                raise RuntimeError(
+                    f"unexpected .recover output: {text[:80]!r} ({abort[0]})"
+                )
+        if conn.in_transaction:
+            conn.execute("COMMIT")
+    finally:
+        conn.close()
 
 
 def _snapshot_columns(conn) -> Dict[str, str]:

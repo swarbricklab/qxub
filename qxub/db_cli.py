@@ -59,12 +59,16 @@ def recover(source, dry_run):
     """
     from .queue.db import legacy_shared_db_path
     from .queue.recover import recover as run_recover
+    from .queue.recover import source_problem
 
     source = source or legacy_shared_db_path()
     if source is None:
         raise click.UsageError(
             "No SOURCE given and shared_db.path isn't set; name the old DB file."
         )
+    problem = source_problem(source)
+    if problem:
+        click.echo(f"Warning: {problem}", err=True)
     result = run_recover(source, dry_run=dry_run)
     if dry_run and not result.skipped:
         click.echo("Dry run: nothing was published.")
